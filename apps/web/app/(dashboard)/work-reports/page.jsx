@@ -1,12 +1,9 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { api } from '../../../lib/api';
+import { api, assetUrl } from '../../../lib/api';
 import { authStorage } from '../../../lib/auth';
 import { Permission, hasPermission } from '../../../lib/permissions';
-
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://100.10.10.10:4000/api';
-const API_ORIGIN = API_URL.replace(/\/api\/?$/, '');
 
 const statusLabelMap = {
   SUBMITTED: 'بانتظار الاعتماد',
@@ -36,17 +33,7 @@ const defaultForm = {
 };
 
 const resolveUploadUrl = (value) => {
-  const url = String(value || '').trim();
-  if (!url) {
-    return '';
-  }
-  if (url.startsWith('http://') || url.startsWith('https://')) {
-    return url;
-  }
-  if (url.startsWith('/uploads/')) {
-    return `${API_ORIGIN}${url}`;
-  }
-  return url;
+  return assetUrl(String(value || '').trim());
 };
 
 const formatDate = (value) => {

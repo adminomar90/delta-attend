@@ -2,7 +2,7 @@
 
 import { authStorage } from './auth';
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://100.10.10.10:4000/api';
+export const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api';
 const API_BASE = API_URL.replace(/\/api\/?$/, '');
 
 export function assetUrl(path) {
@@ -76,6 +76,18 @@ export const api = {
     return this.request(path, {
       method: 'DELETE',
     });
+  },
+
+  async downloadBlob(path) {
+    const token = authStorage.getToken();
+    const response = await fetch(`${API_URL}${path}`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    });
+    if (!response.ok) {
+      const payload = await response.json().catch(() => ({ message: 'فشل التصدير' }));
+      throw new Error(payload.message || 'فشل التصدير');
+    }
+    return response.blob();
   },
 };
 

@@ -3,8 +3,6 @@
 import { useEffect, useState } from 'react';
 import { api } from '../../../lib/api';
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://100.10.10.10:4000/api';
-
 export default function ReportsPage() {
   const [summary, setSummary] = useState(null);
   const [executive, setExecutive] = useState(null);
@@ -34,19 +32,7 @@ export default function ReportsPage() {
     setError('');
 
     try {
-      const token = window.localStorage.getItem('delta_plus_token');
-      const response = await fetch(`${API_URL}/reports/${type}`, {
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
-      });
-
-      if (!response.ok) {
-        const payload = await response.json().catch(() => ({ message: 'فشل التصدير' }));
-        throw new Error(payload.message || 'فشل التصدير');
-      }
-
-      const blob = await response.blob();
+      const blob = await api.downloadBlob(`/reports/${type}`);
       const url = window.URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = url;

@@ -29,7 +29,7 @@ export const env = {
   mongoUri: process.env.MONGO_URI,
   jwtSecret: process.env.JWT_SECRET,
   jwtExpiresIn: process.env.JWT_EXPIRES_IN || '1d',
-  frontendOrigin: process.env.FRONTEND_ORIGIN || 'http://100.10.10.10:3000',
+  frontendOrigin: process.env.FRONTEND_ORIGIN || 'http://localhost:3000',
   adminSetupSecret: process.env.ADMIN_SETUP_SECRET || 'SETUP_SECRET_KEY_CHANGE_ME',
   maxAuthFailures: Number(process.env.MAX_AUTH_FAILURES || 5),
   lockMinutes: Number(process.env.AUTH_LOCK_MINUTES || 15),
