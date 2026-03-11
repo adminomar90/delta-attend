@@ -12,7 +12,7 @@ const createSuperAdmin = async () => {
 
     const superAdmin = {
       fullName: 'Super Admin',
-      email: 'admin@deltaplus.local',
+      email: 'admin@delta.com',
       role: Roles.GENERAL_MANAGER,
       passwordHash: await bcrypt.hash('Admin@123', 10),
       pointsTotal: 0,
@@ -32,7 +32,7 @@ const createSuperAdmin = async () => {
     const user = await UserModel.create(superAdmin);
     console.log('✓ Super Admin created successfully!');
     console.log('\n📋 Login Credentials:');
-    console.log('   Email: admin@deltaplus.local');
+    console.log('   Email: admin@delta.com');
     console.log('   Password: Admin@123');
     console.log('   Role: GENERAL_MANAGER (All Permissions)');
     console.log('\n');
