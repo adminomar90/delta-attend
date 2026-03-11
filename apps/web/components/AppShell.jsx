@@ -5,6 +5,7 @@ import { usePathname, useRouter } from 'next/navigation';
 import Sidebar from './Sidebar';
 import HeaderBar from './HeaderBar';
 import PointsToast from './PointsToast';
+import InAppNotifToast from './InAppNotifToast';
 import { authStorage } from '../lib/auth';
 import { Permission, hasAnyPermission } from '../lib/permissions';
 
@@ -138,6 +139,7 @@ export default function AppShell({ children }) {
         {children}
       </main>
       <PointsToast />
+      <InAppNotifToast />
     </div>
   );
 }

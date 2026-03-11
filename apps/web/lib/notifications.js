@@ -93,6 +93,21 @@ export function NotificationProvider({ children }) {
       });
   }, [addLog, updateDebug]);
 
+  /* ── In-app toast fallback ── */
+  const [inAppToast, setInAppToast] = useState(null);
+  const toastTimerRef = useRef(null);
+
+  const showInAppToast = useCallback((title, body) => {
+    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    setInAppToast({ title, body, time: Date.now() });
+    toastTimerRef.current = setTimeout(() => setInAppToast(null), 6000);
+  }, []);
+
+  const dismissToast = useCallback(() => {
+    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    setInAppToast(null);
+  }, []);
+
   /* ── Request permission ── */
   const requestPermission = useCallback(async () => {
     if (typeof window === 'undefined' || !('Notification' in window)) {
@@ -104,6 +119,14 @@ export function NotificationProvider({ children }) {
       const result = await Notification.requestPermission();
       setBrowserPermission(result);
       addLog(result === 'granted' ? 'ok' : 'warn', `نتيجة طلب الإذن: ${result}`);
+
+      // If granted, send a welcome notification to confirm it works
+      if (result === 'granted') {
+        setTimeout(() => {
+          fireNotification('تم تفعيل الإشعارات ✓', 'ستصلك الإشعارات الآن بنجاح', { tag: 'perm-granted' });
+        }, 500);
+      }
+
       return result;
     } catch (err) {
       addLog('error', `خطأ في طلب الإذن: ${err.message}`);
@@ -111,14 +134,36 @@ export function NotificationProvider({ children }) {
     }
   }, [addLog]);
 
-  /* ── Show notification — uses SW on mobile, constructor on desktop ── */
-  const showBrowserNotification = useCallback((title, body, options = {}) => {
-    if (typeof window === 'undefined' || !('Notification' in window)) {
-      addLog('warn', 'تخطي الإشعار — API غير مدعوم');
+  /* ── Fire notification — auto-requests permission if default ── */
+  const fireNotification = useCallback(async (title, body, options = {}) => {
+    if (typeof window === 'undefined') return;
+
+    // Always show in-app toast as fallback
+    showInAppToast(title, body);
+
+    if (!('Notification' in window)) {
+      addLog('warn', 'لا يدعم المتصفح الإشعارات — يظهر إشعار داخلي فقط');
       return;
     }
-    if (Notification.permission !== 'granted') {
-      addLog('warn', `تخطي الإشعار — الإذن: ${Notification.permission}`);
+
+    // Re-read permission from the browser (not React state which may be stale)
+    let perm = Notification.permission;
+
+    // Auto-request if default
+    if (perm === 'default') {
+      addLog('info', 'الإذن default — جارٍ الطلب تلقائياً...');
+      try {
+        perm = await Notification.requestPermission();
+        setBrowserPermission(perm);
+        addLog(perm === 'granted' ? 'ok' : 'warn', `نتيجة الطلب التلقائي: ${perm}`);
+      } catch (err) {
+        addLog('error', `فشل الطلب التلقائي: ${err.message}`);
+        return;
+      }
+    }
+
+    if (perm !== 'granted') {
+      addLog('warn', `الإذن ${perm} — يظهر إشعار داخلي فقط`);
       return;
     }
 
@@ -145,7 +190,7 @@ export function NotificationProvider({ children }) {
     } else {
       fallbackNotification(title, notifOptions);
     }
-  }, [addLog]);
+  }, [addLog, showInAppToast]);
 
   const fallbackNotification = useCallback((title, options) => {
     try {
@@ -195,7 +240,7 @@ export function NotificationProvider({ children }) {
         updateDebug({ lastEvent: ts() });
         addLog('info', `حدث SSE: إشعار جديد (غير مقروءة: ${newCount})`);
 
-        showBrowserNotification(
+        fireNotification(
           payload.notification?.titleAr || 'إشعار جديد',
           payload.notification?.messageAr || '',
         );
@@ -228,26 +273,23 @@ export function NotificationProvider({ children }) {
       updateDebug({ sseState: 'disconnected' });
       addLog('info', 'SSE مغلق');
     };
-  }, [refresh, showBrowserNotification, addLog, updateDebug]);
+  }, [refresh, fireNotification, addLog, updateDebug]);
 
   /* ── Manual test: local browser notification (no backend) ── */
-  const testLocalNotification = useCallback(() => {
+  const testLocalNotification = useCallback(async () => {
     addLog('info', '▶ فحص إشعار محلي (بدون سيرفر)...');
 
-    if (!('Notification' in window)) {
+    if (typeof window !== 'undefined' && !('Notification' in window)) {
       addLog('error', '✗ Notification API غير مدعوم');
+      showInAppToast('فحص محلي', 'المتصفح لا يدعم الإشعارات — يظهر إشعار داخلي فقط');
       return { success: false, reason: 'UNSUPPORTED' };
     }
-    if (Notification.permission !== 'granted') {
-      addLog('error', `✗ الإذن غير مفعّل: ${Notification.permission}`);
-      return { success: false, reason: 'PERMISSION_' + Notification.permission.toUpperCase() };
-    }
 
-    showBrowserNotification('فحص محلي ✓', 'هذا إشعار تجريبي محلي — يعمل بدون الخادم', {
+    await fireNotification('فحص محلي ✓', 'هذا إشعار تجريبي محلي — يعمل بدون الخادم', {
       tag: 'local-test',
     });
     return { success: true };
-  }, [addLog, showBrowserNotification]);
+  }, [addLog, fireNotification, showInAppToast]);
 
   /* ── Manual test: backend test notification ── */
   const testBackendNotification = useCallback(async () => {
@@ -328,11 +370,13 @@ export function NotificationProvider({ children }) {
         requestPermission,
         refresh,
         debug,
+        inAppToast,
+        dismissToast,
         testLocalNotification,
         testBackendNotification,
         testSSE,
         runFullDiagnostic,
-        showBrowserNotification,
+        fireNotification,
       }}
     >
       {children}
