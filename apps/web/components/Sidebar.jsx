@@ -5,6 +5,23 @@ import { authStorage } from '../lib/auth';
 import { Permission, hasAnyPermission } from '../lib/permissions';
 import { useNotifications } from '../lib/notifications';
 
+const menuIcons = {
+  '/dashboard': '📊',
+  '/attendance': '⏱️',
+  '/tasks': '📋',
+  '/materials': '🏗️',
+  '/approvals': '✅',
+  '/work-reports': '📝',
+  '/projects': '📁',
+  '/employees': '👥',
+  '/goals': '🎯',
+  '/notifications': '🔔',
+  '/leaderboard': '🏆',
+  '/points-admin': '⚙️',
+  '/reports': '📈',
+  '/audit-log': '🔍',
+};
+
 const menu = [
   { href: '/dashboard', label: 'لوحة التحكم' },
   { href: '/attendance', label: 'الحضور والانصراف' },
@@ -49,7 +66,7 @@ const menu = [
   { href: '/audit-log', label: 'سجل التدقيق', anyPermissions: [Permission.VIEW_AUDIT_LOGS] },
 ];
 
-export default function Sidebar() {
+export default function Sidebar({ mobileOpen, onClose }) {
   const pathname = usePathname();
   const router = useRouter();
   const currentUser = authStorage.getUser();
@@ -61,45 +78,59 @@ export default function Sidebar() {
     return hasAnyPermission(currentUser, item.anyPermissions);
   });
 
+  const navigate = (href) => {
+    router.push(href);
+    if (onClose) onClose();
+  };
+
   const logout = () => {
     authStorage.logout();
     router.push('/login');
   };
 
   return (
-    <aside className="sidebar card">
-      <div className="brand">
-        <div className="logo">
-          <img className="brand-logo-img" src="/brand/delta-plus-logo.png" alt="Delta Plus" />
-        </div>
-        <div>
-          <h2>Delta Plus</h2>
-          <p>Iraq | Internal Platform</p>
-        </div>
-      </div>
+    <>
+      {/* Mobile overlay backdrop */}
+      {mobileOpen && <div className="sidebar-overlay" onClick={onClose} />}
 
-      <nav>
-        {visibleMenu.map((item) => {
-          const active = pathname === item.href;
-          return (
-            <button
-              key={item.href}
-              className={`menu-item ${active ? 'active' : ''}`}
-              onClick={() => router.push(item.href)}
-            >
-              {item.label}
-              {item.href === '/notifications' && unreadCount > 0 ? (
-                <span className="sidebar-notif-badge">{unreadCount > 99 ? '99+' : unreadCount}</span>
-              ) : null}
-            </button>
-          );
-        })}
-      </nav>
+      <aside className={`sidebar card ${mobileOpen ? 'sidebar-open' : ''}`}>
+        {/* Mobile close button */}
+        <button className="sidebar-close-btn" onClick={onClose} aria-label="إغلاق">✕</button>
 
-      <button className="btn btn-soft logout" onClick={logout}>
-        تسجيل الخروج
-      </button>
-    </aside>
+        <div className="brand">
+          <div className="logo">
+            <img className="brand-logo-img" src="/brand/delta-plus-logo.png" alt="Delta Plus" />
+          </div>
+          <div>
+            <h2>Delta Plus</h2>
+            <p>Iraq | Internal Platform</p>
+          </div>
+        </div>
+
+        <nav>
+          {visibleMenu.map((item) => {
+            const active = pathname === item.href;
+            return (
+              <button
+                key={item.href}
+                className={`menu-item ${active ? 'active' : ''}`}
+                onClick={() => navigate(item.href)}
+              >
+                <span className="menu-item-icon">{menuIcons[item.href] || '📄'}</span>
+                <span className="menu-item-label">{item.label}</span>
+                {item.href === '/notifications' && unreadCount > 0 ? (
+                  <span className="sidebar-notif-badge">{unreadCount > 99 ? '99+' : unreadCount}</span>
+                ) : null}
+              </button>
+            );
+          })}
+        </nav>
+
+        <button className="btn btn-soft logout" onClick={logout}>
+          تسجيل الخروج
+        </button>
+      </aside>
+    </>
   );
 }
 

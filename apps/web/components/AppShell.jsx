@@ -90,6 +90,7 @@ export default function AppShell({ children }) {
   const router = useRouter();
   const [user, setUser] = useState(null);
   const [isChecking, setIsChecking] = useState(true);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
 
   useEffect(() => {
     const token = authStorage.getToken();
@@ -110,8 +111,13 @@ export default function AppShell({ children }) {
     setIsChecking(false);
   }, [pathname, router]);
 
+  // Close sidebar on route change
+  useEffect(() => {
+    setSidebarOpen(false);
+  }, [pathname]);
+
   if (isChecking) {
-    return null; // Don't render anything while checking auth
+    return null;
   }
 
   const page = titleByPath[pathname] || {
@@ -121,9 +127,14 @@ export default function AppShell({ children }) {
 
   return (
     <div className="shell container">
-      <Sidebar />
+      <Sidebar mobileOpen={sidebarOpen} onClose={() => setSidebarOpen(false)} />
       <main className="main-area">
-        <HeaderBar title={page.title} subtitle={page.subtitle} user={user} />
+        <HeaderBar
+          title={page.title}
+          subtitle={page.subtitle}
+          user={user}
+          onMenuToggle={() => setSidebarOpen(true)}
+        />
         {children}
       </main>
       <PointsToast />

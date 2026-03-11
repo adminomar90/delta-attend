@@ -4,7 +4,7 @@ import { useRouter } from 'next/navigation';
 import { assetUrl } from '../lib/api';
 import { useNotifications } from '../lib/notifications';
 
-export default function HeaderBar({ title, subtitle, user }) {
+export default function HeaderBar({ title, subtitle, user, onMenuToggle }) {
   const router = useRouter();
   const { unreadCount } = useNotifications();
 
@@ -18,19 +18,25 @@ export default function HeaderBar({ title, subtitle, user }) {
 
   return (
     <header className="header card">
-      <div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <img
-            src="/brand/delta-plus-logo.png"
-            alt="Delta Plus"
-            style={{ width: 32, height: 32, objectFit: 'contain', filter: 'brightness(0) invert(1)' }}
-          />
-          <h1>{title}</h1>
+      <div className="header-right">
+        <button className="hamburger-btn" onClick={onMenuToggle} aria-label="القائمة">
+          <span /><span /><span />
+        </button>
+        <div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <img
+              className="header-logo"
+              src="/brand/delta-plus-logo.png"
+              alt="Delta Plus"
+              style={{ width: 32, height: 32, objectFit: 'contain', filter: 'brightness(0) invert(1)' }}
+            />
+            <h1>{title}</h1>
+          </div>
+          <p className="header-subtitle">{subtitle}</p>
         </div>
-        <p>{subtitle}</p>
       </div>
 
-      <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+      <div className="header-left">
         <button
           className="notif-bell-btn"
           onClick={() => router.push('/notifications')}
@@ -46,7 +52,7 @@ export default function HeaderBar({ title, subtitle, user }) {
           ) : (
             <span className="user-chip-avatar user-chip-avatar-fallback">{initials}</span>
           )}
-          <div>
+          <div className="user-chip-info">
             <span>{user?.fullName || 'مستخدم النظام'}</span>
             <small>{user?.jobTitle || user?.role || 'ROLE'}</small>
           </div>
