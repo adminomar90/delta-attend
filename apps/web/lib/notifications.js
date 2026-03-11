@@ -97,10 +97,6 @@ export function NotificationProvider({ children }) {
         swRegRef.current = reg;
         updateDebug({ swState: 'ready', swScope: reg.scope });
         addLog('ok', `Service Worker جاهز — scope: ${reg.scope}`);
-        // Auto-subscribe to push if permission already granted
-        if (Notification.permission === 'granted') {
-          subscribeToPush(reg);
-        }
       })
       .catch((err) => {
         updateDebug({ swState: 'failed', lastError: err.message });
@@ -111,17 +107,29 @@ export function NotificationProvider({ children }) {
   /* ── Subscribe to Web Push ── */
   const subscribeToPush = useCallback(async (reg) => {
     const swReg = reg || swRegRef.current;
-    if (!swReg) return;
+    if (!swReg) {
+      addLog('warn', 'Service Worker غير جاهز — تخطي اشتراك Push');
+      return;
+    }
     const token = authStorage.getToken();
-    if (!token) return;
+    if (!token) {
+      addLog('warn', 'لا يوجد توكن — تخطي اشتراك Push');
+      return;
+    }
 
     try {
-      // Get VAPID public key from the server
-      const { publicKey } = await api.get('/notifications/vapid-public-key');
-      if (!publicKey) {
-        addLog('warn', 'VAPID public key غير متوفر — WebPush معطّل');
+      // Get VAPID public key from the server (use fetch directly for this public endpoint)
+      const vapidRes = await fetch(`${API_URL}/notifications/vapid-public-key`);
+      if (!vapidRes.ok) {
+        addLog('error', `فشل جلب VAPID key — HTTP ${vapidRes.status}`);
         return;
       }
+      const { publicKey } = await vapidRes.json();
+      if (!publicKey) {
+        addLog('warn', 'VAPID public key غير متوفر — WebPush معطّل (تأكد من إعداد VAPID_PUBLIC_KEY في الخادم)');
+        return;
+      }
+      addLog('info', `VAPID public key تم جلبه بنجاح (${publicKey.substring(0, 15)}...)`);
 
       const applicationServerKey = urlBase64ToUint8Array(publicKey);
 
@@ -292,6 +300,10 @@ export function NotificationProvider({ children }) {
     es.addEventListener('connected', () => {
       updateDebug({ sseState: 'connected' });
       addLog('ok', 'SSE متصل بنجاح ✓');
+      // Auto-subscribe to Web Push when connected (user is authenticated)
+      if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
+        subscribeToPush();
+      }
     });
 
     es.addEventListener('notification', (e) => {
@@ -335,7 +347,7 @@ export function NotificationProvider({ children }) {
       updateDebug({ sseState: 'disconnected' });
       addLog('info', 'SSE مغلق');
     };
-  }, [refresh, fireNotification, addLog, updateDebug]);
+  }, [refresh, fireNotification, subscribeToPush, addLog, updateDebug]);
 
   /* ── Manual test: local browser notification (no backend) ── */
   const testLocalNotification = useCallback(async () => {
