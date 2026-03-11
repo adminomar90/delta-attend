@@ -1,5 +1,10 @@
 ﻿import AppShell from '../../components/AppShell';
+import { NotificationProvider } from '../../lib/notifications';
 
 export default function DashboardLayout({ children }) {
-  return <AppShell>{children}</AppShell>;
+  return (
+    <NotificationProvider>
+      <AppShell>{children}</AppShell>
+    </NotificationProvider>
+  );
 }

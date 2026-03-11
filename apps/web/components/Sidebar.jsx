@@ -3,6 +3,7 @@
 import { usePathname, useRouter } from 'next/navigation';
 import { authStorage } from '../lib/auth';
 import { Permission, hasAnyPermission } from '../lib/permissions';
+import { useNotifications } from '../lib/notifications';
 
 const menu = [
   { href: '/dashboard', label: 'لوحة التحكم' },
@@ -52,6 +53,7 @@ export default function Sidebar() {
   const pathname = usePathname();
   const router = useRouter();
   const currentUser = authStorage.getUser();
+  const { unreadCount } = useNotifications();
   const visibleMenu = menu.filter((item) => {
     if (!item.anyPermissions?.length) {
       return true;
@@ -86,6 +88,9 @@ export default function Sidebar() {
               onClick={() => router.push(item.href)}
             >
               {item.label}
+              {item.href === '/notifications' && unreadCount > 0 ? (
+                <span className="sidebar-notif-badge">{unreadCount > 99 ? '99+' : unreadCount}</span>
+              ) : null}
             </button>
           );
         })}

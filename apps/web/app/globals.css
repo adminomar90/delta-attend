@@ -589,4 +589,113 @@ textarea {
   }
 }
 
+/* ── Notification System ── */
 
+.notif-bell-btn {
+  position: relative;
+  background: none;
+  border: none;
+  font-size: 22px;
+  cursor: pointer;
+  padding: 6px;
+  line-height: 1;
+  border-radius: 8px;
+  transition: background 0.2s;
+}
+
+.notif-bell-btn:hover {
+  background: var(--surface-soft);
+}
+
+.notif-bell-badge {
+  position: absolute;
+  top: 0;
+  right: -2px;
+  min-width: 18px;
+  height: 18px;
+  line-height: 18px;
+  padding: 0 5px;
+  font-size: 11px;
+  font-weight: 700;
+  text-align: center;
+  color: #fff;
+  background: #e74c3c;
+  border-radius: 99px;
+  animation: notif-pulse 2s ease-in-out infinite;
+}
+
+@keyframes notif-pulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.15); }
+}
+
+.sidebar-notif-badge {
+  margin-right: auto;
+  margin-left: 0;
+  min-width: 20px;
+  height: 20px;
+  line-height: 20px;
+  padding: 0 6px;
+  font-size: 11px;
+  font-weight: 700;
+  text-align: center;
+  color: #fff;
+  background: #e74c3c;
+  border-radius: 99px;
+}
+
+.notif-perm-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 16px;
+  border-radius: 10px;
+  font-size: 14px;
+}
+
+.notif-perm-granted {
+  background: rgba(46, 204, 113, 0.12);
+  color: #2ecc71;
+  border: 1px solid rgba(46, 204, 113, 0.25);
+}
+
+.notif-perm-denied {
+  background: rgba(231, 76, 60, 0.12);
+  color: var(--danger);
+  border: 1px solid rgba(231, 76, 60, 0.25);
+}
+
+.notif-perm-default {
+  background: rgba(196, 215, 67, 0.1);
+  color: var(--accent);
+  border: 1px solid rgba(196, 215, 67, 0.2);
+}
+
+.notif-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 14px 16px;
+  border-radius: 10px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  transition: border-color 0.2s;
+}
+
+.notif-card.unread {
+  border-color: var(--accent);
+  background: var(--surface-soft);
+}
+
+.notif-card-icon {
+  font-size: 22px;
+  flex-shrink: 0;
+  padding-top: 2px;
+}
+
+.btn-sm {
+  font-size: 12px;
+  padding: 4px 10px;
+  white-space: nowrap;
+}

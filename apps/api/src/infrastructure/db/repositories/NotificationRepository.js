@@ -9,6 +9,10 @@ export class NotificationRepository {
     return NotificationModel.find({ user: userId }).sort({ createdAt: -1 }).limit(limit);
   }
 
+  async unreadCount(userId) {
+    return NotificationModel.countDocuments({ user: userId, readAt: null });
+  }
+
   async markAsRead(notificationId, userId) {
     return NotificationModel.findOneAndUpdate(
       {
@@ -23,6 +27,13 @@ export class NotificationRepository {
       {
         new: true,
       },
+    );
+  }
+
+  async markAllAsRead(userId) {
+    return NotificationModel.updateMany(
+      { user: userId, readAt: null },
+      { $set: { readAt: new Date() } },
     );
   }
 }

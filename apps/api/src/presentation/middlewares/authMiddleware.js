@@ -6,12 +6,17 @@ const userRepository = new UserRepository();
 
 export const requireAuth = async (req, res, next) => {
   const authHeader = req.headers.authorization;
+  let token;
 
-  if (!authHeader?.startsWith('Bearer ')) {
-    return next(new AppError('Authentication required', 401));
+  if (authHeader?.startsWith('Bearer ')) {
+    token = authHeader.replace('Bearer ', '').trim();
+  } else if (req.query.token) {
+    token = req.query.token;
   }
 
-  const token = authHeader.replace('Bearer ', '').trim();
+  if (!token) {
+    return next(new AppError('Authentication required', 401));
+  }
 
   try {
     const payload = authTokenService.verify(token);
