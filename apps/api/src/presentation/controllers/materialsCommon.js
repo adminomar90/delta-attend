@@ -425,4 +425,4 @@ export const defaultReportPeriod = (query = {}) => {
   };
 };
 
-export const appDetailsUrl = (path) => `${env.frontendOrigin.replace(/\/$/, '')}${path}`;
+export const appDetailsUrl = (path) => `${env.frontendOrigin[0].replace(/\/$/, '')}${path}`;

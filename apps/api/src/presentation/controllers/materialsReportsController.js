@@ -300,7 +300,7 @@ export const materialsReportWhatsappLink = asyncHandler(async (req, res) => {
     `عدد التصفيات: ${reportData.reconciliationRows.length}`,
     `حركات المادة: ${reportData.movementRows.length}`,
     `المشاريع المشمولة: ${reportData.projectSummaryRows.length}`,
-    `رابط النظام: ${env.frontendOrigin.replace(/\/$/, '')}/materials`,
+    `رابط النظام: ${env.frontendOrigin[0].replace(/\/$/, '')}/materials`,
   ].join('\n');
 
   const recipientPhone = await resolveRecipientPhone({
