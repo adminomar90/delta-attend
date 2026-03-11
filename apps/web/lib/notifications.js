@@ -19,6 +19,17 @@ function ts() {
   return new Date().toLocaleTimeString('en-US', { hour12: false, fractionalSecondDigits: 3 });
 }
 
+function urlBase64ToUint8Array(base64String) {
+  const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
+  const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+  const rawData = atob(base64);
+  const outputArray = new Uint8Array(rawData.length);
+  for (let i = 0; i < rawData.length; ++i) {
+    outputArray[i] = rawData.charCodeAt(i);
+  }
+  return outputArray;
+}
+
 export function NotificationProvider({ children }) {
   const [unreadCount, setUnreadCount] = useState(0);
   const [browserPermission, setBrowserPermission] = useState('default');
@@ -86,12 +97,58 @@ export function NotificationProvider({ children }) {
         swRegRef.current = reg;
         updateDebug({ swState: 'ready', swScope: reg.scope });
         addLog('ok', `Service Worker جاهز — scope: ${reg.scope}`);
+        // Auto-subscribe to push if permission already granted
+        if (Notification.permission === 'granted') {
+          subscribeToPush(reg);
+        }
       })
       .catch((err) => {
         updateDebug({ swState: 'failed', lastError: err.message });
         addLog('error', `فشل تسجيل Service Worker: ${err.message}`);
       });
   }, [addLog, updateDebug]);
+
+  /* ── Subscribe to Web Push ── */
+  const subscribeToPush = useCallback(async (reg) => {
+    const swReg = reg || swRegRef.current;
+    if (!swReg) return;
+    const token = authStorage.getToken();
+    if (!token) return;
+
+    try {
+      // Get VAPID public key from the server
+      const { publicKey } = await api.get('/notifications/vapid-public-key');
+      if (!publicKey) {
+        addLog('warn', 'VAPID public key غير متوفر — WebPush معطّل');
+        return;
+      }
+
+      const applicationServerKey = urlBase64ToUint8Array(publicKey);
+
+      // Check existing subscription
+      let subscription = await swReg.pushManager.getSubscription();
+
+      if (!subscription) {
+        subscription = await swReg.pushManager.subscribe({
+          userVisibleOnly: true,
+          applicationServerKey,
+        });
+        addLog('ok', 'تم الاشتراك في Web Push بنجاح ✓');
+      } else {
+        addLog('info', 'اشتراك Web Push موجود مسبقاً');
+      }
+
+      // Send subscription to backend
+      const subJson = subscription.toJSON();
+      await api.post('/notifications/push-subscribe', {
+        endpoint: subJson.endpoint,
+        keys: subJson.keys,
+      });
+      addLog('ok', 'تم تسجيل الاشتراك في الخادم ✓');
+    } catch (err) {
+      addLog('error', `فشل اشتراك Web Push: ${err.message}`);
+    }
+  }, [addLog]);
 
   /* ── In-app toast fallback ── */
   const [inAppToast, setInAppToast] = useState(null);
@@ -122,8 +179,10 @@ export function NotificationProvider({ children }) {
 
       // If granted, send a welcome notification to confirm it works
       if (result === 'granted') {
+        // Subscribe to Web Push
+        subscribeToPush();
         setTimeout(() => {
-          fireNotification('تم تفعيل الإشعارات ✓', 'ستصلك الإشعارات الآن بنجاح', { tag: 'perm-granted' });
+          fireNotification('تم تفعيل الإشعارات ✓', 'ستصلك الإشعارات الآن بنجاح حتى عند إغلاق الصفحة', { tag: 'perm-granted' });
         }, 500);
       }
 
@@ -156,6 +215,9 @@ export function NotificationProvider({ children }) {
         perm = await Notification.requestPermission();
         setBrowserPermission(perm);
         addLog(perm === 'granted' ? 'ok' : 'warn', `نتيجة الطلب التلقائي: ${perm}`);
+        if (perm === 'granted') {
+          subscribeToPush();
+        }
       } catch (err) {
         addLog('error', `فشل الطلب التلقائي: ${err.message}`);
         return;

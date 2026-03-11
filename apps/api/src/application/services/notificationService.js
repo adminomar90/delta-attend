@@ -1,7 +1,15 @@
 import { NotificationRepository } from '../../infrastructure/db/repositories/NotificationRepository.js';
 import { emailService } from './emailService.js';
+import webpush from 'web-push';
+import { env } from '../../config/env.js';
+import PushSubscription from '../../infrastructure/db/models/PushSubscriptionModel.js';
 
 const notificationRepository = new NotificationRepository();
+
+/* ── Configure web-push with VAPID keys ── */
+if (env.vapidPublicKey && env.vapidPrivateKey) {
+  webpush.setVapidDetails(env.vapidEmail, env.vapidPublicKey, env.vapidPrivateKey);
+}
 
 /* ── SSE event bus ── */
 const sseClients = new Map(); // userId -> Set<res>
@@ -24,6 +32,43 @@ function pushToUser(userId, event, data) {
   }
 }
 
+async function sendWebPush(userId, notification) {
+  if (!env.vapidPublicKey || !env.vapidPrivateKey) return;
+  try {
+    const subscriptions = await PushSubscription.find({ user: userId });
+    const pushPayload = JSON.stringify({
+      title: notification.titleAr,
+      body: notification.messageAr,
+      icon: '/brand/delta-plus-logo.png',
+      badge: '/brand/delta-plus-logo.png',
+      dir: 'rtl',
+      tag: `delta-${notification._id}`,
+      data: {
+        notificationId: notification._id,
+        type: notification.type,
+        metadata: notification.metadata,
+      },
+    });
+
+    const results = await Promise.allSettled(
+      subscriptions.map((sub) =>
+        webpush.sendNotification(
+          { endpoint: sub.endpoint, keys: { p256dh: sub.keys.p256dh, auth: sub.keys.auth } },
+          pushPayload,
+        ).catch(async (err) => {
+          // Remove expired/invalid subscriptions (410 Gone or 404 Not Found)
+          if (err.statusCode === 410 || err.statusCode === 404) {
+            await PushSubscription.deleteOne({ _id: sub._id });
+          }
+          throw err;
+        }),
+      ),
+    );
+  } catch (err) {
+    console.error('[WebPush] Error sending push:', err.message);
+  }
+}
+
 async function createAndPush(payload) {
   const notification = await notificationRepository.create(payload);
   const count = await notificationRepository.unreadCount(payload.user);
@@ -31,6 +76,8 @@ async function createAndPush(payload) {
     notification: notification.toObject(),
     unreadCount: count,
   });
+  // Send Web Push to all registered devices (non-blocking)
+  sendWebPush(payload.user, notification);
   return notification;
 }
 

@@ -51,5 +51,8 @@ export const env = {
   whatsappCloudApiToken: process.env.WHATSAPP_CLOUD_API_TOKEN || '',
   whatsappCloudPhoneNumberId: process.env.WHATSAPP_CLOUD_PHONE_NUMBER_ID || '',
   attendanceDebug: toBoolean(process.env.ATTENDANCE_DEBUG, false),
+  vapidPublicKey: process.env.VAPID_PUBLIC_KEY || '',
+  vapidPrivateKey: process.env.VAPID_PRIVATE_KEY || '',
+  vapidEmail: process.env.VAPID_EMAIL || 'mailto:admin@deltaplus-iq.com',
 };
 

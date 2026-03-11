@@ -1,6 +1,8 @@
 ﻿import { NotificationRepository } from '../../infrastructure/db/repositories/NotificationRepository.js';
 import { AppError, asyncHandler } from '../../shared/errors.js';
 import { addSseClient, notificationService } from '../../application/services/notificationService.js';
+import PushSubscription from '../../infrastructure/db/models/PushSubscriptionModel.js';
+import { env } from '../../config/env.js';
 
 const notificationRepository = new NotificationRepository();
 
@@ -56,3 +58,34 @@ export const sseStream = (req, res) => {
 
   req.on('close', () => clearInterval(keepAlive));
 };
+
+/* ── VAPID public key (no auth needed) ── */
+export const getVapidPublicKey = (req, res) => {
+  res.json({ publicKey: env.vapidPublicKey });
+};
+
+/* ── Push subscription management ── */
+export const subscribePush = asyncHandler(async (req, res) => {
+  const { endpoint, keys } = req.body;
+  if (!endpoint || !keys?.p256dh || !keys?.auth) {
+    throw new AppError('بيانات الاشتراك غير مكتملة', 400);
+  }
+
+  await PushSubscription.findOneAndUpdate(
+    { user: req.user.id, endpoint },
+    { user: req.user.id, endpoint, keys, userAgent: req.headers['user-agent'] || '' },
+    { upsert: true, new: true },
+  );
+
+  res.json({ success: true, message: 'تم تسجيل الاشتراك بنجاح' });
+});
+
+export const unsubscribePush = asyncHandler(async (req, res) => {
+  const { endpoint } = req.body;
+  if (!endpoint) {
+    throw new AppError('endpoint مطلوب', 400);
+  }
+
+  await PushSubscription.deleteOne({ user: req.user.id, endpoint });
+  res.json({ success: true, message: 'تم إلغاء الاشتراك' });
+});

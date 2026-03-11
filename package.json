@@ -18,5 +18,8 @@
     "seed": "npm --workspace apps/api run seed",
     "backup": "npm --workspace apps/api run backup",
     "test:api": "npm --workspace apps/api run test"
+  },
+  "dependencies": {
+    "web-push": "^3.6.7"
   }
 }
