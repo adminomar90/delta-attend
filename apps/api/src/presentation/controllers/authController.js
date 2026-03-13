@@ -363,6 +363,7 @@ export const verifyOtp = asyncHandler(async (req, res) => {
 
   await userRepository.clearOtp(user._id);
   const token = issueAccessToken(user);
+  await userRepository.updateLastLogin(user._id);
 
   res.json({
     token,

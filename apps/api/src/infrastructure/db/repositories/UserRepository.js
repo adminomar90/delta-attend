@@ -126,6 +126,14 @@ export class UserRepository {
     );
   }
 
+  async updateLastLogin(userId) {
+    return UserModel.findByIdAndUpdate(
+      userId,
+      { $set: { lastLoginAt: new Date() } },
+      { new: true },
+    );
+  }
+
   async lockUser(userId, until) {
     return UserModel.findByIdAndUpdate(
       userId,
