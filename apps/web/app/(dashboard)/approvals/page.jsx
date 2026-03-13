@@ -1,9 +1,14 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { api } from '../../../lib/api';
 import { authStorage } from '../../../lib/auth';
 import { Permission, hasAnyPermission, hasPermission } from '../../../lib/permissions';
+import {
+  calculateWorkReportDistribution,
+  formatWorkReportPoints,
+} from '../../../lib/workReportPoints';
 
 const roleLabelMap = {
   GENERAL_MANAGER: 'مدير عام',
@@ -50,6 +55,7 @@ const formatDateTime = (value) => {
 };
 
 export default function ApprovalsPage() {
+  const router = useRouter();
   const currentUser = authStorage.getUser();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -86,6 +92,10 @@ export default function ApprovalsPage() {
     return hasPermission(currentUser, Permission.REVIEW_MATERIAL_REQUESTS);
   }, [currentUser?.role, currentUser?.customPermissions, currentUser?.permissions]);
 
+  const canViewApprovalHistory = useMemo(() => {
+    return hasPermission(currentUser, Permission.VIEW_APPROVAL_HISTORY);
+  }, [currentUser?.role, currentUser?.customPermissions, currentUser?.permissions]);
+
   const load = async () => {
     setLoading(true);
     setError('');
@@ -93,12 +103,12 @@ export default function ApprovalsPage() {
 
     try {
       const [tasksRes, projectsRes, reportsRes, attendanceRes, materialRequestsRes, materialReconRes] = await Promise.all([
-        api.get('/tasks?status=SUBMITTED').catch(() => ({ tasks: [] })),
-        api.get('/projects?status=PENDING_APPROVAL').catch(() => ({ projects: [] })),
-        api.get('/work-reports?status=SUBMITTED').catch(() => ({ reports: [] })),
-        api.get('/attendance/approvals/pending').catch(() => ({ items: [] })),
-        api.get('/materials/approvals/requests/pending').catch(() => ({ requests: [] })),
-        api.get('/materials/approvals/reconciliations/pending').catch(() => ({ reconciliations: [] })),
+        api.get('/tasks?status=SUBMITTED').catch((e) => { console.warn('tasks fetch failed', e.message); return { tasks: [] }; }),
+        api.get('/projects?status=PENDING_APPROVAL').catch((e) => { console.warn('projects fetch failed', e.message); return { projects: [] }; }),
+        api.get('/work-reports?status=SUBMITTED').catch((e) => { console.warn('work-reports fetch failed', e.message); return { reports: [] }; }),
+        api.get('/attendance/approvals/pending').catch((e) => { console.warn('attendance fetch failed', e.message); return { items: [] }; }),
+        api.get('/materials/approvals/requests/pending').catch((e) => { console.warn('material-requests fetch failed', e.message); return { requests: [] }; }),
+        api.get('/materials/approvals/reconciliations/pending').catch((e) => { console.warn('material-reconciliations fetch failed', e.message); return { reconciliations: [] }; }),
       ]);
 
       setTasks(tasksRes.tasks || []);
@@ -116,6 +126,7 @@ export default function ApprovalsPage() {
 
   useEffect(() => {
     if (!canAccess) {
+      console.warn('Approvals: canAccess=false, role=', currentUser?.role, 'perms=', canApproveTasks, canApproveProjects, canApproveMaterials);
       return;
     }
     load();
@@ -150,8 +161,8 @@ export default function ApprovalsPage() {
         note: input.note || '',
         points: input.points === '' ? undefined : Number(input.points),
       });
-      setInfo(`تم اعتماد المهمة: ${task.title}`);
-      await load();
+      setTasks((prev) => prev.filter((t) => t._id !== task._id));
+      setInfo(`تم اعتماد المهمة: ${task.title} — تم نقلها إلى سجل الاعتمادات.`);
     } catch (err) {
       setError(err.message || 'فشل اعتماد المهمة');
     }
@@ -170,8 +181,8 @@ export default function ApprovalsPage() {
         status: 'REJECTED',
         rejectionReason: input.rejectionReason,
       });
+      setTasks((prev) => prev.filter((t) => t._id !== task._id));
       setInfo(`تم رفض المهمة: ${task.title}`);
-      await load();
     } catch (err) {
       setError(err.message || 'فشل رفض المهمة');
     }
@@ -204,8 +215,8 @@ export default function ApprovalsPage() {
         comment: input.comment || '',
         points: input.points === '' ? 0 : Number(input.points),
       });
-      setInfo(`تم اعتماد مرحلة من المشروع: ${project.name}`);
-      await load();
+      setProjects((prev) => prev.filter((p) => p._id !== project._id));
+      setInfo(`تم اعتماد مرحلة من المشروع: ${project.name} — تم نقلها إلى سجل الاعتمادات.`);
     } catch (err) {
       setError(err.message || 'فشل اعتماد المشروع');
     }
@@ -223,8 +234,8 @@ export default function ApprovalsPage() {
       await api.patch(`/projects/${project._id}/reject`, {
         reason: input.reason,
       });
+      setProjects((prev) => prev.filter((p) => p._id !== project._id));
       setInfo(`تم رفض المشروع: ${project.name}`);
-      await load();
     } catch (err) {
       setError(err.message || 'فشل رفض المشروع');
     }
@@ -257,7 +268,7 @@ export default function ApprovalsPage() {
 
     const input = getWorkReportInput(report._id);
     if (input.points === '') {
-      setError('يرجى إدخال نقاط تقرير العمل');
+      setError('يرجى إدخال إجمالي نقاط تقرير العمل');
       return;
     }
     setError('');
@@ -267,8 +278,8 @@ export default function ApprovalsPage() {
         points: Number(input.points),
         managerComment: input.managerComment || '',
       });
-      setInfo(`تم اعتماد تقرير العمل للموظف: ${report.employeeName}`);
-      await load();
+      setWorkReports((prev) => prev.filter((r) => r._id !== report._id));
+      setInfo(`تم اعتماد تقرير العمل للموظف: ${report.employeeName} — تم نقله إلى سجل الاعتمادات والتقارير المنجزة.`);
     } catch (err) {
       setError(err.message || 'فشل اعتماد تقرير العمل');
     }
@@ -293,8 +304,8 @@ export default function ApprovalsPage() {
         reason: input.reason,
         managerComment: input.managerComment || '',
       });
+      setWorkReports((prev) => prev.filter((r) => r._id !== report._id));
       setInfo(`تم رفض تقرير العمل للموظف: ${report.employeeName}`);
-      await load();
     } catch (err) {
       setError(err.message || 'فشل رفض تقرير العمل');
     }
@@ -327,8 +338,8 @@ export default function ApprovalsPage() {
         points: input.points === '' ? 0 : Number(input.points),
         approvalNote: input.approvalNote || '',
       });
-      setInfo(`تم اعتماد حضور/انصراف الموظف: ${item.employeeName}`);
-      await load();
+      setAttendanceItems((prev) => prev.filter((a) => a.id !== item.id));
+      setInfo(`تم اعتماد حضور/انصراف الموظف: ${item.employeeName} — تم نقله إلى سجل الاعتمادات.`);
     } catch (err) {
       setError(err.message || 'فشل اعتماد الحضور والانصراف');
     }
@@ -347,8 +358,8 @@ export default function ApprovalsPage() {
         reason: input.reason,
         approvalNote: input.approvalNote || '',
       });
+      setAttendanceItems((prev) => prev.filter((a) => a.id !== item.id));
       setInfo(`تم رفض حضور/انصراف الموظف: ${item.employeeName}`);
-      await load();
     } catch (err) {
       setError(err.message || 'فشل رفض الحضور والانصراف');
     }
@@ -381,8 +392,8 @@ export default function ApprovalsPage() {
         action: 'APPROVE_FULL',
         notes: input.notes || '',
       });
-      setInfo(`تم اعتماد طلب المواد: ${request.requestNo}`);
-      await load();
+      setMaterialRequests((prev) => prev.filter((r) => r._id !== request._id));
+      setInfo(`تم اعتماد طلب المواد: ${request.requestNo} — تم نقله إلى سجل الاعتمادات.`);
     } catch (err) {
       setError(err.message || 'فشل اعتماد طلب المواد');
     }
@@ -402,8 +413,8 @@ export default function ApprovalsPage() {
         action: 'REJECT',
         notes: input.notes,
       });
+      setMaterialRequests((prev) => prev.filter((r) => r._id !== request._id));
       setInfo(`تم رفض طلب المواد: ${request.requestNo}`);
-      await load();
     } catch (err) {
       setError(err.message || 'فشل رفض طلب المواد');
     }
@@ -419,8 +430,8 @@ export default function ApprovalsPage() {
         points: input.points === '' ? 0 : Number(input.points),
         reviewNotes: input.notes || '',
       });
-      setInfo(`تم اعتماد تصفية المواد: ${reconciliation.reconcileNo}`);
-      await load();
+      setMaterialReconciliations((prev) => prev.filter((r) => r._id !== reconciliation._id));
+      setInfo(`تم اعتماد تصفية المواد: ${reconciliation.reconcileNo} — تم نقله إلى سجل الاعتمادات.`);
     } catch (err) {
       setError(err.message || 'فشل اعتماد تصفية المواد');
     }
@@ -440,8 +451,8 @@ export default function ApprovalsPage() {
         action: 'REJECT',
         reviewNotes: input.notes,
       });
+      setMaterialReconciliations((prev) => prev.filter((r) => r._id !== reconciliation._id));
       setInfo(`تم رفض تصفية المواد: ${reconciliation.reconcileNo}`);
-      await load();
     } catch (err) {
       setError(err.message || 'فشل رفض تصفية المواد');
     }
@@ -459,6 +470,22 @@ export default function ApprovalsPage() {
     <>
       {error ? <section className="card section" style={{ color: 'var(--danger)' }}>{error}</section> : null}
       {info ? <section className="card section" style={{ color: '#9bc8ff' }}>{info}</section> : null}
+
+      {canViewApprovalHistory ? (
+        <section className="card section" style={{ marginBottom: 16 }}>
+          <div className="section-header">
+            <div>
+              <h2 style={{ margin: 0 }}>سجل الاعتمادات</h2>
+              <p style={{ margin: '6px 0 0', color: 'var(--text-soft)' }}>
+                السجلات المعتمدة بالكامل أصبحت تظهر في الأرشيف بدل قائمة الاعتمادات الحالية.
+              </p>
+            </div>
+            <button type="button" className="btn btn-soft" onClick={() => router.push('/approval-history')}>
+              فتح السجل
+            </button>
+          </div>
+        </section>
+      ) : null}
 
       <section className="grid-4" style={{ marginBottom: 16 }}>
         <article className="card section">
@@ -660,7 +687,7 @@ export default function ApprovalsPage() {
               <th>المشروع</th>
               <th>الإنجاز</th>
               <th>الحالة</th>
-              <th>نقاط</th>
+              <th>إجمالي النقاط</th>
               <th>تعليق المدير</th>
               <th>سبب الرفض</th>
               <th>إجراءات</th>
@@ -671,11 +698,27 @@ export default function ApprovalsPage() {
               const input = getWorkReportInput(report._id);
               const ownerId = String(report.user?._id || report.user?.id || report.user || '');
               const isOwnReport = ownerId && ownerId === String(currentUser?.id || '');
+              const participantNames = (report.participants || [])
+                .map((participant) => participant.fullName || participant.user?.fullName || '')
+                .filter(Boolean);
+              const participantCount = Number(report.participantCount || participantNames.length || 0);
+              const previewDistribution = calculateWorkReportDistribution(
+                input.points === '' ? 0 : Number(input.points),
+                participantCount,
+              );
               return (
                 <tr key={report._id}>
                   <td>
                     <strong>{report.employeeName || report.user?.fullName || '-'}</strong>
                     <div style={{ fontSize: 12, color: 'var(--text-soft)' }}>الرمز: {report.employeeCode || '-'}</div>
+                    <div style={{ fontSize: 12, color: 'var(--text-soft)', marginTop: 4 }}>
+                      الكادر المشارك: {participantCount || 0}
+                    </div>
+                    {participantNames.length ? (
+                      <div style={{ fontSize: 12, color: 'var(--text-soft)', marginTop: 4 }}>
+                        {participantNames.join('، ')}
+                      </div>
+                    ) : null}
                   </td>
                   <td>{report.project?.name || report.projectName || '-'}</td>
                   <td>{report.progressPercent || 0}%</td>
@@ -691,6 +734,12 @@ export default function ApprovalsPage() {
                       style={{ width: 100 }}
                       disabled={!canApproveTasks}
                     />
+                    <div style={{ fontSize: 12, color: 'var(--text-soft)', marginTop: 4 }}>
+                      الكاتب: {formatWorkReportPoints(previewDistribution.reporterPoints)}
+                      {participantCount
+                        ? ` | لكل مشارك: ${formatWorkReportPoints(previewDistribution.participantPoints)}`
+                        : ' | لا يوجد كادر مشارك'}
+                    </div>
                   </td>
                   <td>
                     <input
@@ -715,7 +764,9 @@ export default function ApprovalsPage() {
                         <button type="button" className="btn btn-soft" onClick={() => rejectWorkReport(report)}>رفض</button>
                       </div>
                     ) : isOwnReport ? (
-                      <span style={{ color: 'var(--text-soft)', fontSize: 12 }}>تقريرك الشخصي</span>
+                      <span style={{ color: 'var(--warning)', fontSize: 12 }}>لا يمكن اعتماد تقريرك الشخصي</span>
+                    ) : !canApproveTasks ? (
+                      <span style={{ color: 'var(--text-soft)', fontSize: 12 }}>لا تملك صلاحية الاعتماد</span>
                     ) : '-'}
                   </td>
                 </tr>

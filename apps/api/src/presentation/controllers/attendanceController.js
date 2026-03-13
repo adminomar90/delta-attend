@@ -3,6 +3,10 @@ import { env } from '../../config/env.js';
 import { auditService } from '../../application/services/auditService.js';
 import { whatsappService } from '../../application/services/whatsappService.js';
 import { notificationService } from '../../application/services/notificationService.js';
+import {
+  NotificationWatchPermission,
+  resolveNotificationAudience,
+} from '../../application/services/notificationAudienceService.js';
 import { levelService } from '../../application/services/levelService.js';
 import { badgeService } from '../../application/services/badgeService.js';
 import { UserRepository } from '../../infrastructure/db/repositories/UserRepository.js';
@@ -160,6 +164,29 @@ const serializeAttendance = (record) => ({
   approvedAt: record.approvedAt || null,
 });
 
+const isToday = (date) => {
+  if (!date) return false;
+  const d = new Date(date);
+  const now = new Date();
+  return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth() && d.getDate() === now.getDate();
+};
+
+const resolveAttendanceStatus = ({ openRecord, todayRecords = [], lastLoginAt = null }) => {
+  if (openRecord) {
+    return 'OPEN';
+  }
+
+  if (todayRecords.length) {
+    return 'CHECKED_OUT';
+  }
+
+  if (isToday(lastLoginAt)) {
+    return 'LOGGED_IN';
+  }
+
+  return 'ABSENT';
+};
+
 const resolveScopedUserIds = async (req, requestedUserId = '') => {
   const managedUserIds = await resolveManagedUserIds({
     userRepository,
@@ -253,11 +280,16 @@ const normalizeAwardedPoints = (value) => {
 };
 
 export const attendanceMeta = asyncHandler(async (req, res) => {
-  const todayRecords = await attendanceRepository.findTodayForUser(req.user.id);
-  const openRecord = todayRecords.find((item) => item.status === 'OPEN') || null;
+  const [todayRecords, persistedOpenRecord, currentUserDoc] = await Promise.all([
+    attendanceRepository.findTodayForUser(req.user.id),
+    attendanceRepository.findOpenByUser(req.user.id),
+    userRepository.findById(req.user.id),
+  ]);
+  const openRecord = persistedOpenRecord || todayRecords.find((item) => item.status === 'OPEN') || null;
   const todayWorkedMinutes = todayRecords
     .filter((item) => item.status === 'CLOSED')
     .reduce((sum, item) => sum + Number(item.durationMinutes || 0), 0);
+  const lastLoginAt = currentUserDoc?.lastLoginAt || null;
 
   attendanceDebugLog('meta:loaded', {
     userId: String(req.user.id),
@@ -283,6 +315,12 @@ export const attendanceMeta = asyncHandler(async (req, res) => {
     todayWorkedHours: toHours(todayWorkedMinutes),
     todayRecords: todayRecords.map((item) => serializeAttendance(item)),
     openRecord: openRecord ? serializeAttendance(openRecord) : null,
+    lastLoginAt,
+    currentStatus: resolveAttendanceStatus({
+      openRecord,
+      todayRecords,
+      lastLoginAt,
+    }),
   });
 });
 
@@ -390,6 +428,22 @@ export const checkIn = asyncHandler(async (req, res) => {
       whatsappDelivery: whatsapp.delivery,
     },
     req,
+  });
+
+  const attendanceRecipients = await resolveNotificationAudience({
+    userRepository,
+    actorId: user._id,
+    watchPermission: NotificationWatchPermission.ATTENDANCE,
+  });
+  await notificationService.notifyAttendanceActivity(attendanceRecipients, {
+    employeeName: user.fullName,
+    operationLabel: 'تسجيل الحضور',
+    occurredAt: now,
+    metadata: {
+      attendanceId: String(record._id),
+      employeeId: String(user._id),
+      action: 'CHECK_IN',
+    },
   });
 
   const responsePayload = {
@@ -500,6 +554,23 @@ export const checkOut = asyncHandler(async (req, res) => {
       whatsappDelivery: whatsapp.delivery,
     },
     req,
+  });
+
+  const checkoutRecipients = await resolveNotificationAudience({
+    userRepository,
+    actorId: checkOutUser?._id || req.user.id,
+    watchPermission: NotificationWatchPermission.ATTENDANCE,
+  });
+  await notificationService.notifyAttendanceActivity(checkoutRecipients, {
+    employeeName: open.employeeName,
+    operationLabel: 'تسجيل الانصراف',
+    occurredAt: checkoutAt,
+    metadata: {
+      attendanceId: String(open._id),
+      employeeId: String(req.user.id),
+      action: 'CHECK_OUT',
+      durationMinutes,
+    },
   });
 
   const responsePayload = {
@@ -734,7 +805,7 @@ export const attendanceAdminOverview = asyncHandler(async (req, res) => {
   const { from, to, label } = resolveSingleDayRange(req.query);
   const scopedUserIds = await resolveScopedUserIds(req, req.query.userId || '');
 
-  const [users, sessions, aggregates] = await Promise.all([
+  const [users, sessions, aggregates, openSessions] = await Promise.all([
     userRepository.listActive({
       includeManager: false,
       userIds: Array.isArray(scopedUserIds) ? scopedUserIds : undefined,
@@ -750,6 +821,9 @@ export const attendanceAdminOverview = asyncHandler(async (req, res) => {
       to,
       userIds: scopedUserIds,
     }),
+    attendanceRepository.listOpenSessions({
+      userIds: scopedUserIds,
+    }),
   ]);
 
   const latestSessionByUser = new Map();
@@ -757,6 +831,13 @@ export const attendanceAdminOverview = asyncHandler(async (req, res) => {
     const userId = String(session.user);
     if (!latestSessionByUser.has(userId)) {
       latestSessionByUser.set(userId, session);
+    }
+  });
+  const openSessionByUser = new Map();
+  (openSessions || []).forEach((session) => {
+    const userId = String(session.user);
+    if (!openSessionByUser.has(userId)) {
+      openSessionByUser.set(userId, session);
     }
   });
 
@@ -768,6 +849,7 @@ export const attendanceAdminOverview = asyncHandler(async (req, res) => {
     .map((user) => {
       const userId = String(user._id);
       const latest = latestSessionByUser.get(userId) || null;
+      const openSession = openSessionByUser.get(userId) || null;
       const aggregate = aggregateByUser.get(userId) || {
         sessionsCount: 0,
         openSessions: 0,
@@ -776,10 +858,15 @@ export const attendanceAdminOverview = asyncHandler(async (req, res) => {
         latestCheckInAt: null,
         latestCheckOutAt: null,
       };
+      const openSessionsCount = Math.max(Number(aggregate.openSessions || 0), openSession ? 1 : 0);
 
       let status = 'ABSENT';
-      if (aggregate.sessionsCount > 0) {
+      if (openSession) {
+        status = 'OPEN';
+      } else if (aggregate.sessionsCount > 0) {
         status = latest?.status === 'OPEN' ? 'OPEN' : 'CHECKED_OUT';
+      } else if (isToday(user.lastLoginAt)) {
+        status = 'LOGGED_IN';
       }
 
       return {
@@ -790,15 +877,15 @@ export const attendanceAdminOverview = asyncHandler(async (req, res) => {
         department: user.department || '',
         status,
         sessionsCount: Number(aggregate.sessionsCount || 0),
-        openSessions: Number(aggregate.openSessions || 0),
+        openSessions: openSessionsCount,
         closedSessions: Number(aggregate.closedSessions || 0),
         todayWorkedMinutes: Number(aggregate.workedMinutes || 0),
         todayWorkedHours: toHours(aggregate.workedMinutes || 0),
-        lastCheckInAt: latest?.checkInAt || aggregate.latestCheckInAt || null,
+        lastCheckInAt: openSession?.checkInAt || latest?.checkInAt || aggregate.latestCheckInAt || null,
         lastCheckOutAt: latest?.checkOutAt || aggregate.latestCheckOutAt || null,
-        lastCheckInLocation: latest?.checkInLocation || null,
+        lastCheckInLocation: openSession?.checkInLocation || latest?.checkInLocation || null,
         lastCheckOutLocation: latest?.checkOutLocation || null,
-        lastLocation: latest?.checkOutLocation || latest?.checkInLocation || null,
+        lastLocation: openSession?.checkInLocation || latest?.checkOutLocation || latest?.checkInLocation || null,
       };
     })
     .sort((a, b) => {
@@ -817,6 +904,7 @@ export const attendanceAdminOverview = asyncHandler(async (req, res) => {
 
       if (employee.status === 'OPEN') acc.checkedInNow += 1;
       if (employee.status === 'CHECKED_OUT') acc.checkedOutToday += 1;
+      if (employee.status === 'LOGGED_IN') acc.loggedInToday += 1;
       if (employee.status === 'ABSENT') acc.absentToday += 1;
 
       return acc;
@@ -825,6 +913,7 @@ export const attendanceAdminOverview = asyncHandler(async (req, res) => {
       totalEmployees: 0,
       checkedInNow: 0,
       checkedOutToday: 0,
+      loggedInToday: 0,
       absentToday: 0,
       totalSessions: 0,
       openSessions: 0,

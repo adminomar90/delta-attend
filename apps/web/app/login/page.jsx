@@ -66,33 +66,33 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="container" style={{ padding: '34px 0' }}>
+    <div className="container auth-shell">
       <section className="card auth-layout">
-        <div style={{ padding: 28, background: 'linear-gradient(150deg, #081229, #1b3567)', color: '#fff' }}>
+        <div className="auth-hero">
           <img
             src="/brand/delta-plus-logo.png"
             alt="Delta Plus"
-            style={{ width: 86, height: 86, objectFit: 'contain', filter: 'brightness(0) invert(1)', marginBottom: 12 }}
+            className="auth-logo"
           />
           <span className="badge" style={{ background: 'rgba(196,215,67,0.2)', color: '#e7f28c' }}>Delta Plus Internal</span>
-          <h1 style={{ fontSize: 42, margin: '16px 0 10px' }}>إدارة عمل محفزة وعادلة</h1>
-          <p style={{ lineHeight: 1.9, opacity: 0.92 }}>
+          <h1 className="auth-title">إدارة عمل محفزة وعادلة</h1>
+          <p className="auth-copy">
             منصة داخلية تجمع إدارة المهام، التقييم، النقاط، المستويات، الشارات، والتقارير التشغيلية في تجربة عربية كاملة.
           </p>
-          <ul style={{ lineHeight: 2 }}>
+          <ul className="auth-list">
             <li>توزيع مهام ذكي من المدير إلى الموظف</li>
             <li>نقاط تُحتسب بعد الاعتماد وفق قواعد عادلة</li>
             <li>لوحات تحكم فورية وسجل تدقيق شامل</li>
           </ul>
         </div>
 
-        <form onSubmit={onSubmit} style={{ padding: 28, display: 'flex', flexDirection: 'column', gap: 14, justifyContent: 'center' }}>
+        <form onSubmit={onSubmit} className="auth-form">
           <h2 style={{ margin: 0 }}>تسجيل الدخول</h2>
           <p style={{ marginTop: 4, color: 'var(--text-soft)' }}>ادخل بيانات الحساب للوصول إلى لوحة Delta Plus</p>
 
           <label>
             البريد الإلكتروني
-            <input className="input" value={email} onChange={(e) => setEmail(e.target.value)} required disabled={otpRequired} />
+            <input className="input" type="email" value={email} onChange={(e) => setEmail(e.target.value)} required disabled={otpRequired} />
           </label>
 
           <label>
@@ -121,5 +121,4 @@ export default function LoginPage() {
     </div>
   );
 }
-
 

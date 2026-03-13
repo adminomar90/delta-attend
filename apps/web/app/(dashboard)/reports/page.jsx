@@ -112,7 +112,7 @@ export default function ReportsPage() {
       <section className="card section">
         <h2>تصدير التقارير</h2>
         <p style={{ color: 'var(--text-soft)' }}>متاح للمدير العام والمدير المالي بحسب الصلاحيات.</p>
-        <div style={{ display: 'flex', gap: 10 }}>
+        <div className="action-row">
           <button className="btn btn-primary" onClick={() => downloadFile('excel')} disabled={loading}>
             {loading ? 'جارٍ التصدير...' : 'تصدير Excel'}
           </button>
@@ -124,5 +124,4 @@ export default function ReportsPage() {
     </>
   );
 }
-
 

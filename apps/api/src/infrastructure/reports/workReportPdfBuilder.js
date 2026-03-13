@@ -36,6 +36,13 @@ const STATUS = {
 const fmtDate     = (v) => (v ? new Date(v).toLocaleDateString('ar-IQ') : '-');
 const fmtDateTime = (v) => (v ? new Date(v).toLocaleString('ar-IQ') : '-');
 const safe        = (v) => String(v ?? '').trim() || '-';
+const fmtPoints   = (v) => {
+  const parsed = Number(v || 0);
+  if (!Number.isFinite(parsed)) return '0';
+  return Number.isInteger(parsed)
+    ? String(parsed)
+    : parsed.toFixed(2).replace(/\.?0+$/, '');
+};
 
 const resolveLocalImagePath = (publicUrl, root = '') => {
   if (!root) return '';
@@ -197,14 +204,29 @@ export const buildWorkReportPdfBuffer = async (
     const eCode = safe(report?.employeeCode || report?.user?.employeeCode);
     const proj  = safe(report?.projectName  || report?.project?.name);
     const dept  = safe(report?.user?.department);
+    const participants = Array.isArray(report?.participants) ? report.participants : [];
+    const participantCount = Number(report?.participantCount || participants.length || 0);
+    const participantLabel = participants
+      .map((participant, index) => {
+        const participantName = safe(participant?.fullName || participant?.user?.fullName);
+        const participantCode = safe(participant?.employeeCode || participant?.user?.employeeCode);
+        return participantCode === '-'
+          ? `${index + 1}. ${participantName}`
+          : `${index + 1}. ${participantName} (${participantCode})`;
+      })
+      .join(' | ');
 
     tableRow('اسم الموظف',   eName, 0);
     tableRow('الرمز الوظيفي', eCode, 1);
     tableRow('القسم',         dept,  2);
     tableRow('المشروع',       proj,  3);
     tableRow('تاريخ العمل',   fmtDate(report?.workDate || report?.createdAt), 4);
+    tableRow('عدد الكادر المشارك', `${participantCount}`, 5);
+    tableRow('نقاط كاتب التقرير', fmtPoints(report?.reporterPointsAwarded || report?.pointsAwarded || 0), 6);
+    tableRow('حصة كل مشارك', participantCount ? fmtPoints(report?.participantPointsAwarded || 0) : '-', 7);
 
     doc.moveDown(0.6);
+    textSection('الكادر المشارك', participantLabel);
 
     /* ══════════════════════════════════════════════════════════════════════════
        SECTION 2 — مؤشرات الأداء
@@ -214,7 +236,7 @@ export const buildWorkReportPdfBuffer = async (
     const kpis = [
       { label: 'نسبة الإنجاز',    value: `${Number(report?.progressPercent || 0)}%` },
       { label: 'ساعات العمل',      value: `${Number(report?.hoursSpent || 0)}` },
-      { label: 'النقاط',           value: `${Number(report?.pointsAwarded || 0)}` },
+      { label: 'النقاط',           value: fmtPoints(report?.pointsAwarded || 0) },
       { label: 'النشاط',           value: safe(report?.activityType) },
     ];
 

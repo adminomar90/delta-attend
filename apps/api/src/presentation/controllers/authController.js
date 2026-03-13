@@ -1,4 +1,5 @@
-﻿import bcrypt from 'bcryptjs';
+﻿import crypto from 'node:crypto';
+import bcrypt from 'bcryptjs';
 import ExcelJS from 'exceljs';
 import { UserRepository } from '../../infrastructure/db/repositories/UserRepository.js';
 import { EmployeeFileRepository } from '../../infrastructure/db/repositories/EmployeeFileRepository.js';
@@ -6,6 +7,7 @@ import { authTokenService } from '../../application/services/authTokenService.js
 import { emailService } from '../../application/services/emailService.js';
 import { Permission, Roles } from '../../shared/constants.js';
 import { resolveManagedUserIds } from '../../shared/accessScope.js';
+import { hasAnyPermission, resolvePermissions } from '../../shared/permissions.js';
 import { AppError, asyncHandler } from '../../shared/errors.js';
 import { env } from '../../config/env.js';
 import { generateOtpCode, hashOtp, validatePasswordStrength } from '../../shared/security.js';
@@ -114,6 +116,7 @@ const serializeUser = (user) => ({
   twoFactorEnabled: !!user.twoFactorEnabled,
   forcePasswordChange: !!user.forcePasswordChange,
   lastLoginAt: user.lastLoginAt,
+  permissions: resolvePermissions(user),
 });
 
 const issueAccessToken = (user) =>
@@ -325,6 +328,7 @@ export const login = asyncHandler(async (req, res) => {
   }
 
   const token = issueAccessToken(user);
+  await userRepository.updateLastLogin(user._id);
 
   res.json({
     token,
@@ -384,6 +388,10 @@ export const me = asyncHandler(async (req, res) => {
 export const listUsers = asyncHandler(async (req, res) => {
   // ?allUsers=1 returns every active employee regardless of managed scope
   if (req.query.allUsers === '1') {
+    if (!hasAnyPermission(req.user, [Permission.MANAGE_USERS, Permission.MANAGE_PERMISSIONS])) {
+      throw new AppError('You cannot list all employees', 403);
+    }
+
     const users = await userRepository.listActive({ includeManager: true });
     return res.json({ users });
   }
@@ -514,7 +522,6 @@ export const resetUserPassword = asyncHandler(async (req, res) => {
 
   res.json({
     message: 'Password reset successfully',
-    temporaryPassword,
   });
 });
 
@@ -759,7 +766,14 @@ export const listAvailablePermissions = asyncHandler(async (req, res) => {
 export const createSuperAdmin = asyncHandler(async (req, res) => {
   const secretKey = req.headers['x-admin-secret'];
 
-  if (secretKey !== env.adminSetupSecret) {
+  if (
+    !secretKey ||
+    !env.adminSetupSecret ||
+    !crypto.timingSafeEqual(
+      Buffer.from(String(secretKey)),
+      Buffer.from(String(env.adminSetupSecret)),
+    )
+  ) {
     throw new AppError('Unauthorized', 401);
   }
 
@@ -770,7 +784,10 @@ export const createSuperAdmin = asyncHandler(async (req, res) => {
 
   const fullName = toCleanString(req.body.fullName) || 'System Admin';
   const email = toCleanString(req.body.email).toLowerCase() || 'admin@deltaplus.local';
-  const password = String(req.body.password || 'Admin@123Aa!');
+  const password = String(req.body.password || '');
+  if (!password) {
+    throw new AppError('Password is required', 400);
+  }
 
   enforcePasswordPolicy(password);
 
@@ -801,4 +818,3 @@ export const createSuperAdmin = asyncHandler(async (req, res) => {
     },
   });
 });
-

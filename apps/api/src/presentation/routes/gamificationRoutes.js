@@ -12,12 +12,15 @@ import {
   overrideUserLevel,
 } from '../controllers/gamificationController.js';
 import { requireAuth } from '../middlewares/authMiddleware.js';
-import { canManageGamification } from '../middlewares/authorizationMiddleware.js';
+import {
+  canManageGamification,
+  canViewLeaderboard,
+} from '../middlewares/authorizationMiddleware.js';
 
 const gamificationRoutes = Router();
 
 gamificationRoutes.use(requireAuth);
-gamificationRoutes.get('/leaderboard', leaderboard);
+gamificationRoutes.get('/leaderboard', canViewLeaderboard, leaderboard);
 gamificationRoutes.get('/me', myGamificationState);
 gamificationRoutes.get('/policies', policies);
 

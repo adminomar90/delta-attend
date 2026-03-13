@@ -40,7 +40,7 @@ test('resolveManagedUserIds returns hierarchy descendants for project manager', 
   assert.deepEqual([...ids].sort(), ['e1', 'e2', 'm1']);
 });
 
-test('resolveManagedUserIds adds same-department users for general manager', async () => {
+test('resolveManagedUserIds returns all active users for general manager', async () => {
   const ids = await resolveManagedUserIds({
     userRepository: createUserRepositoryStub({
       actor: { _id: 'g1', department: 'Operations' },
@@ -54,7 +54,7 @@ test('resolveManagedUserIds adds same-department users for general manager', asy
     actorRole: Roles.GENERAL_MANAGER,
   });
 
-  assert.deepEqual([...ids].sort(), ['g1', 'o1']);
+  assert.deepEqual([...ids].sort(), ['g1', 'o1', 's1']);
 });
 
 test('resolveManagedUserIds keeps unrestricted roles unfiltered', async () => {

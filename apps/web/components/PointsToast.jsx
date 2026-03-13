@@ -148,8 +148,10 @@ export default function PointsToast() {
       <div
         style={{
           position: 'fixed',
-          top: 24,
-          left: 24,
+          top: 'max(12px, env(safe-area-inset-top))',
+          left: 'max(12px, env(safe-area-inset-left))',
+          right: 'max(12px, env(safe-area-inset-right))',
+          width: 'min(420px, calc(100vw - 24px))',
           zIndex: 99999,
           display: 'flex',
           flexDirection: 'column',
@@ -170,7 +172,8 @@ export default function PointsToast() {
               background: 'linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%)',
               border: '1.5px solid rgba(255,193,7,.35)',
               boxShadow: '0 8px 32px rgba(0,0,0,.5), inset 0 1px 0 rgba(255,255,255,.05)',
-              minWidth: 260,
+              width: '100%',
+              minWidth: 'unset',
               position: 'relative',
               overflow: 'hidden',
               animation: `toastSlideIn 0.5s cubic-bezier(.34,1.56,.64,1) forwards${idx > 0 ? `, toastFadeOut 0.4s ease-in 3s forwards` : ''}`,

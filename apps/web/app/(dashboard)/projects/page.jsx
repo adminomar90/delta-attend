@@ -41,6 +41,10 @@ export default function ProjectsPage() {
   const [projects, setProjects] = useState([]);
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
+  const [approvalModal, setApprovalModal] = useState(null);
+  const [approvalComment, setApprovalComment] = useState('');
+  const [rejectionModal, setRejectionModal] = useState(null);
+  const [rejectionReason, setRejectionReason] = useState('');
   const [form, setForm] = useState({
     name: '',
     code: '',
@@ -115,10 +119,16 @@ export default function ProjectsPage() {
   };
 
   const approveProject = async (projectId) => {
-    const comment = window.prompt('ملاحظة الاعتماد (اختياري):', '') || '';
+    if (!approvalModal) {
+      setApprovalModal(projectId);
+      setApprovalComment('');
+      return;
+    }
 
     try {
-      await api.patch(`/projects/${projectId}/approve`, { comment });
+      await api.patch(`/projects/${projectId}/approve`, { comment: approvalComment });
+      setApprovalModal(null);
+      setApprovalComment('');
       await load();
     } catch (err) {
       setError(err.message || 'فشل اعتماد المشروع');
@@ -126,11 +136,18 @@ export default function ProjectsPage() {
   };
 
   const rejectProject = async (projectId) => {
-    const reason = window.prompt('سبب الرفض:', '');
-    if (!reason) return;
+    if (!rejectionModal) {
+      setRejectionModal(projectId);
+      setRejectionReason('');
+      return;
+    }
+
+    if (!rejectionReason) return;
 
     try {
-      await api.patch(`/projects/${projectId}/reject`, { reason });
+      await api.patch(`/projects/${projectId}/reject`, { reason: rejectionReason });
+      setRejectionModal(null);
+      setRejectionReason('');
       await load();
     } catch (err) {
       setError(err.message || 'فشل رفض المشروع');
@@ -212,16 +229,16 @@ export default function ProjectsPage() {
               <input className="input" type="date" value={form.endDate} onChange={(e) => setForm((p) => ({ ...p, endDate: e.target.value }))} />
             </label>
 
-            <label style={{ gridColumn: 'span 3' }}>
+            <label className="grid-span-full">
               الوصف
               <textarea className="textarea" rows={3} value={form.description} onChange={(e) => setForm((p) => ({ ...p, description: e.target.value }))} />
             </label>
 
-            <div style={{ gridColumn: 'span 3' }}>
+            <div className="grid-span-full">
               <p style={{ margin: '0 0 8px' }}>الأدوار المطلوبة لاعتماد المشروع</p>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12 }}>
+              <div className="inline-checks">
                 {roleOptions.map((role) => (
-                  <label key={role.value} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <label key={role.value} className="checkbox-row">
                     <input
                       type="checkbox"
                       checked={form.requiredApprovalRoles.includes(role.value)}
@@ -233,7 +250,7 @@ export default function ProjectsPage() {
               </div>
             </div>
 
-            <div>
+            <div className="form-actions">
               <button className="btn btn-primary" type="submit" disabled={saving}>{saving ? 'جارٍ الحفظ...' : 'إنشاء المشروع'}</button>
             </div>
           </form>
@@ -288,6 +305,44 @@ export default function ProjectsPage() {
           </tbody>
         </table>
       </section>
+
+      {approvalModal ? (
+        <div className="modal-backdrop" onClick={() => setApprovalModal(null)}>
+          <div className="modal-panel" onClick={(e) => e.stopPropagation()}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+              <h3 style={{ margin: 0 }}>اعتماد المشروع</h3>
+              <button type="button" className="modal-close" onClick={() => setApprovalModal(null)}>&times;</button>
+            </div>
+            <label>
+              ملاحظة الاعتماد (اختياري)
+              <input className="input" value={approvalComment} onChange={(e) => setApprovalComment(e.target.value)} placeholder="ملاحظة..." />
+            </label>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 16 }}>
+              <button type="button" className="btn btn-soft" onClick={() => setApprovalModal(null)}>إلغاء</button>
+              <button type="button" className="btn btn-primary" onClick={() => approveProject(approvalModal)}>اعتماد</button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {rejectionModal ? (
+        <div className="modal-backdrop" onClick={() => setRejectionModal(null)}>
+          <div className="modal-panel" onClick={(e) => e.stopPropagation()}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+              <h3 style={{ margin: 0 }}>رفض المشروع</h3>
+              <button type="button" className="modal-close" onClick={() => setRejectionModal(null)}>&times;</button>
+            </div>
+            <label>
+              سبب الرفض
+              <input className="input" value={rejectionReason} onChange={(e) => setRejectionReason(e.target.value)} placeholder="سبب الرفض..." required />
+            </label>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 16 }}>
+              <button type="button" className="btn btn-soft" onClick={() => setRejectionModal(null)}>إلغاء</button>
+              <button type="button" className="btn btn-primary" onClick={() => rejectionReason && rejectProject(rejectionModal)}>تأكيد الرفض</button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </>
   );
 }

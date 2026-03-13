@@ -2,14 +2,29 @@
 
 import { useEffect, useState } from 'react';
 import { api } from '../../../lib/api';
+import { authStorage } from '../../../lib/auth';
+import { Permission, hasPermission } from '../../../lib/permissions';
 
 export default function LeaderboardPage() {
+  const currentUser = authStorage.getUser();
   const [period, setPeriod] = useState('monthly');
   const [data, setData] = useState([]);
   const [error, setError] = useState('');
+  const canViewLeaderboard = hasPermission(currentUser, Permission.VIEW_LEADERBOARD);
+  const scopeLabel = currentUser?.role === 'GENERAL_MANAGER'
+    ? 'مستوى الشركة'
+    : ['PROJECT_MANAGER', 'ASSISTANT_PROJECT_MANAGER', 'TEAM_LEAD'].includes(currentUser?.role)
+      ? 'مستوى الفريق/الإدارة'
+      : 'مستواك الشخصي';
 
   const load = async (p) => {
+    if (!canViewLeaderboard) {
+      setData([]);
+      return;
+    }
+
     try {
+      setError('');
       const response = await api.get(`/gamification/leaderboard?period=${p}&limit=20`);
       setData(response.leaderboard || []);
     } catch (err) {
@@ -19,13 +34,24 @@ export default function LeaderboardPage() {
 
   useEffect(() => {
     load(period);
-  }, [period]);
+  }, [period, canViewLeaderboard]);
+
+  if (!canViewLeaderboard) {
+    return (
+      <section className="card section" style={{ color: 'var(--text-soft)' }}>
+        لا تملك صلاحية عرض لوحة الصدارة.
+      </section>
+    );
+  }
 
   return (
     <section className="card section">
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <h2>لوحة الصدارة</h2>
-        <select className="select" style={{ width: 180 }} value={period} onChange={(e) => setPeriod(e.target.value)}>
+      <div className="section-header">
+        <div>
+          <h2 style={{ marginBottom: 6 }}>لوحة الصدارة</h2>
+          <p style={{ margin: 0, color: 'var(--text-soft)' }}>النطاق الحالي: {scopeLabel}</p>
+        </div>
+        <select className="select select-compact" value={period} onChange={(e) => setPeriod(e.target.value)}>
           <option value="daily">يومي</option>
           <option value="weekly">أسبوعي</option>
           <option value="monthly">شهري</option>

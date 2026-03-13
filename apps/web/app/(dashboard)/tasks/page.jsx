@@ -42,6 +42,9 @@ export default function TasksPage() {
 
   const currentUser = authStorage.getUser();
   const loadingRef = useRef(false);
+  const [taskApprovalModal, setTaskApprovalModal] = useState(null);
+  const [taskQualityScore, setTaskQualityScore] = useState('4');
+  const [taskApprovalNote, setTaskApprovalNote] = useState('');
 
   const canCreate = useMemo(() => {
     const allowed = ['GENERAL_MANAGER', 'PROJECT_MANAGER', 'ASSISTANT_PROJECT_MANAGER', 'TEAM_LEAD'];
@@ -127,19 +130,20 @@ export default function TasksPage() {
   };
 
   const approveTask = async (taskId) => {
-    const quality = window.prompt('قيّم جودة الإنجاز من 1 إلى 5', '4');
-    if (!quality) return;
-
-    const note = window.prompt('ملاحظة الاعتماد (اختياري):', '') || '';
+    if (!taskApprovalModal) {
+      setTaskApprovalModal(taskId);
+      setTaskQualityScore('4');
+      setTaskApprovalNote('');
+      return;
+    }
 
     try {
-      const response = await api.patch(`/tasks/${taskId}/approve`, {
-        qualityScore: Number(quality),
-        note,
+      await api.patch(`/tasks/${taskId}/approve`, {
+        qualityScore: Number(taskQualityScore),
+        note: taskApprovalNote,
       });
 
-      /* points toast is auto-triggered via api.js interceptor */
-
+      setTaskApprovalModal(null);
       await load();
     } catch (err) {
       setError(err.message || 'فشل اعتماد المهمة');
@@ -262,12 +266,12 @@ export default function TasksPage() {
               />
             </label>
 
-            <label style={{ gridColumn: 'span 3' }}>
+            <label className="grid-span-full">
               الوصف
               <textarea className="textarea" rows={3} value={form.description} onChange={(e) => setForm((prev) => ({ ...prev, description: e.target.value }))} />
             </label>
 
-            <div style={{ alignSelf: 'end' }}>
+            <div className="form-actions">
               <button className="btn btn-primary" type="submit" disabled={saving}>
                 {saving ? 'جارٍ الحفظ...' : 'إسناد المهمة'}
               </button>
@@ -277,7 +281,7 @@ export default function TasksPage() {
       ) : null}
 
       <section className="card section">
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+        <div className="section-header">
           <h2 style={{ margin: 0 }}>قائمة المهام</h2>
           <button className="btn btn-soft" onClick={() => load()} style={{ fontSize: 13 }}>↻ تحديث</button>
         </div>
@@ -346,7 +350,35 @@ export default function TasksPage() {
           </tbody>
         </table>
       </section>
+
+      {taskApprovalModal ? (
+        <div className="modal-backdrop" onClick={() => setTaskApprovalModal(null)}>
+          <div className="modal-panel" onClick={(e) => e.stopPropagation()}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+              <h3 style={{ margin: 0 }}>اعتماد المهمة</h3>
+              <button type="button" className="modal-close" onClick={() => setTaskApprovalModal(null)}>&times;</button>
+            </div>
+            <label>
+              جودة الإنجاز (1 إلى 5)
+              <select className="select" value={taskQualityScore} onChange={(e) => setTaskQualityScore(e.target.value)}>
+                <option value="1">1 - ضعيف</option>
+                <option value="2">2 - مقبول</option>
+                <option value="3">3 - جيد</option>
+                <option value="4">4 - جيد جداً</option>
+                <option value="5">5 - ممتاز</option>
+              </select>
+            </label>
+            <label style={{ marginTop: 12 }}>
+              ملاحظة الاعتماد (اختياري)
+              <input className="input" value={taskApprovalNote} onChange={(e) => setTaskApprovalNote(e.target.value)} placeholder="ملاحظة..." />
+            </label>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 16 }}>
+              <button type="button" className="btn btn-soft" onClick={() => setTaskApprovalModal(null)}>إلغاء</button>
+              <button type="button" className="btn btn-primary" onClick={() => approveTask(taskApprovalModal)}>اعتماد</button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </>
   );
 }
-

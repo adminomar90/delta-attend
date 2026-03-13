@@ -1,13 +1,10 @@
 import { Roles } from './constants.js';
 
 const HIERARCHY_SCOPED_ROLES = new Set([
-  Roles.GENERAL_MANAGER,
   Roles.PROJECT_MANAGER,
   Roles.ASSISTANT_PROJECT_MANAGER,
   Roles.TEAM_LEAD,
 ]);
-
-const normalizeDepartment = (value) => String(value || '').trim().toLowerCase();
 
 export const resolveManagedUserIds = async ({ userRepository, actorId, actorRole }) => {
   const actorIdString = String(actorId || '');
@@ -19,14 +16,16 @@ export const resolveManagedUserIds = async ({ userRepository, actorId, actorRole
     return [actorIdString];
   }
 
+  if (actorRole === Roles.GENERAL_MANAGER) {
+    const hierarchyNodes = await userRepository.listHierarchyNodes();
+    return hierarchyNodes.map((node) => String(node._id));
+  }
+
   if (!HIERARCHY_SCOPED_ROLES.has(actorRole)) {
     return null;
   }
 
-  const [actor, hierarchyNodes] = await Promise.all([
-    userRepository.findById(actorIdString),
-    userRepository.listHierarchyNodes(),
-  ]);
+  const hierarchyNodes = await userRepository.listHierarchyNodes();
 
   const childrenByManager = new Map();
   hierarchyNodes.forEach((node) => {
@@ -56,15 +55,6 @@ export const resolveManagedUserIds = async ({ userRepository, actorId, actorRole
 
       managed.add(childId);
       queue.push(childId);
-    });
-  }
-
-  if (actorRole === Roles.GENERAL_MANAGER && actor?.department) {
-    const managerDepartment = normalizeDepartment(actor.department);
-    hierarchyNodes.forEach((node) => {
-      if (normalizeDepartment(node.department) === managerDepartment) {
-        managed.add(String(node._id));
-      }
     });
   }
 

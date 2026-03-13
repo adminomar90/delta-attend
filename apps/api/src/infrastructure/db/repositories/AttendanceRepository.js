@@ -49,6 +49,18 @@ export class AttendanceRepository {
       .limit(limit);
   }
 
+  async listOpenSessions({ userIds } = {}) {
+    const filter = {
+      status: 'OPEN',
+    };
+
+    if (Array.isArray(userIds)) {
+      filter.user = { $in: userIds };
+    }
+
+    return AttendanceModel.find(filter).sort({ checkInAt: -1 });
+  }
+
   async updateApprovalById(id, payload) {
     return AttendanceModel.findByIdAndUpdate(id, payload, { new: true });
   }

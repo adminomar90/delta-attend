@@ -32,4 +32,8 @@ export class WorkReportRepository {
       .populate('project', 'name code status')
       .populate('approvedBy', 'fullName role');
   }
+
+  async deleteById(id) {
+    return WorkReportModel.findByIdAndDelete(id);
+  }
 }

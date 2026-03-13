@@ -2,6 +2,10 @@ import { env } from '../../config/env.js';
 import { sequenceService } from '../../application/services/sequenceService.js';
 import { auditService } from '../../application/services/auditService.js';
 import { notificationService } from '../../application/services/notificationService.js';
+import {
+  NotificationWatchPermission,
+  resolveNotificationAudience,
+} from '../../application/services/notificationAudienceService.js';
 import { buildWhatsAppSendUrl } from '../../shared/attendanceUtils.js';
 import { AppError, asyncHandler } from '../../shared/errors.js';
 import {
@@ -181,6 +185,25 @@ export const createMaterialRequest = asyncHandler(async (req, res) => {
       whatsappDelivery: whatsapp.delivery,
     },
     req,
+  });
+
+  const createRequestRecipients = await resolveNotificationAudience({
+    userRepository,
+    actorId: req.user.id,
+    watchPermission: NotificationWatchPermission.OPERATION,
+  });
+  await notificationService.notifyOperationActivity(createRequestRecipients, {
+    titleAr: 'إنشاء طلب مواد',
+    actorName: req.user.name || req.user.fullName || 'مستخدم النظام',
+    actionLabel: 'إنشاء طلب مواد',
+    entityLabel: request.requestNo,
+    occurredAt: request.createdAt || new Date(),
+    metadata: {
+      entityType: 'MATERIAL_REQUEST',
+      entityId: String(request._id),
+      action: 'MATERIAL_REQUEST_CREATED',
+      projectId,
+    },
   });
 
   res.status(201).json({ request, whatsapp });
@@ -401,6 +424,27 @@ export const reviewMaterialRequest = asyncHandler(async (req, res) => {
     req,
   });
 
+  const reviewRecipients = await resolveNotificationAudience({
+    userRepository,
+    actorId: request.requestedBy?._id || request.requestedBy,
+    watchPermission: NotificationWatchPermission.OPERATION,
+    excludeUserIds: [req.user.id],
+  });
+  await notificationService.notifyOperationActivity(reviewRecipients, {
+    titleAr: nextStatus === 'REJECTED' ? 'رفض طلب مواد' : 'اعتماد طلب مواد',
+    actorName: req.user.name || req.user.fullName || 'مستخدم النظام',
+    actionLabel: nextStatus === 'REJECTED' ? 'رفض طلب مواد' : 'اعتماد طلب مواد',
+    entityLabel: request.requestNo,
+    occurredAt: new Date(),
+    metadata: {
+      entityType: 'MATERIAL_REQUEST',
+      entityId: String(request._id),
+      action: nextStatus === 'REJECTED' ? 'MATERIAL_REQUEST_REJECTED' : 'MATERIAL_REQUEST_REVIEWED',
+      status: nextStatus,
+      approvalType,
+    },
+  });
+
   res.json({ request: updated, whatsapp });
 });
 
@@ -559,6 +603,27 @@ export const prepareMaterialRequest = asyncHandler(async (req, res) => {
       warehouseId: warehouse?._id ? String(warehouse._id) : null,
     },
     req,
+  });
+
+  const prepareRecipients = await resolveNotificationAudience({
+    userRepository,
+    actorId: request.requestedBy?._id || request.requestedBy,
+    watchPermission: NotificationWatchPermission.OPERATION,
+    excludeUserIds: [req.user.id],
+  });
+  await notificationService.notifyOperationActivity(prepareRecipients, {
+    titleAr: 'تجهيز طلب مواد',
+    actorName: req.user.name || req.user.fullName || 'مستخدم النظام',
+    actionLabel: mode === 'FULL' ? 'تجهيز كامل لطلب مواد' : 'تجهيز جزئي لطلب مواد',
+    entityLabel: request.requestNo,
+    occurredAt: new Date(),
+    metadata: {
+      entityType: 'MATERIAL_REQUEST',
+      entityId: String(request._id),
+      action: 'MATERIAL_REQUEST_PREPARED',
+      mode,
+      status: updated.status,
+    },
   });
 
   res.json({ request: updated });
@@ -804,6 +869,28 @@ export const dispatchMaterialRequest = asyncHandler(async (req, res) => {
       whatsappDelivery: whatsapp.delivery,
     },
     req,
+  });
+
+  const dispatchRecipients = await resolveNotificationAudience({
+    userRepository,
+    actorId: recipient._id,
+    watchPermission: NotificationWatchPermission.OPERATION,
+    excludeUserIds: [req.user.id],
+  });
+  await notificationService.notifyOperationActivity(dispatchRecipients, {
+    titleAr: 'تسليم مواد للمشروع',
+    actorName: req.user.name || req.user.fullName || 'مستخدم النظام',
+    actionLabel: 'تسليم مواد للمشروع',
+    entityLabel: request.requestNo,
+    occurredAt: dispatch.deliveredAt || new Date(),
+    metadata: {
+      entityType: 'MATERIAL_REQUEST',
+      entityId: String(request._id),
+      action: 'MATERIAL_REQUEST_DISPATCHED',
+      dispatchId: String(dispatch._id),
+      custodyId: String(custody._id),
+      recipientId: String(recipient._id),
+    },
   });
 
   res.json({ request: updatedRequest, dispatch, custody, whatsapp });

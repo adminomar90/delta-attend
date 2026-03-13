@@ -52,10 +52,10 @@ const Badge = ({ status }) => (
 const Modal = ({ open, title, onClose, children }) => {
   if (!open) return null;
   return (
-    <div style={{ position: 'fixed', inset: 0, zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,.55)' }} onClick={onClose}>
-      <div style={{ background: 'var(--card-bg, #1e293b)', borderRadius: 12, padding: 24, minWidth: 420, maxWidth: '90vw', maxHeight: '85vh', overflowY: 'auto', boxShadow: '0 8px 32px rgba(0,0,0,.4)' }} onClick={(e) => e.stopPropagation()}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-          <h3 style={{ margin: 0 }}>{title}</h3>
+    <div className="modal-backdrop" onClick={onClose}>
+      <div className="modal-panel" onClick={(e) => e.stopPropagation()}>
+        <div className="modal-header">
+          <h3>{title}</h3>
           <button type="button" onClick={onClose} style={{ background: 'none', border: 'none', color: 'var(--text-soft)', fontSize: 22, cursor: 'pointer' }}>✕</button>
         </div>
         {children}
@@ -321,11 +321,11 @@ export default function MaterialsPage() {
       </section>
 
       {/* TABS */}
-      <div style={{ display: 'flex', gap: 0, borderBottom: '1px solid var(--border, #334155)', marginBottom: 16 }}>
+      <div className="tabs-bar">
         <button type="button" style={tabStyle('requests')} onClick={() => setActiveTab('requests')}>طلبات المواد</button>
         <button type="button" style={tabStyle('custodies')} onClick={() => setActiveTab('custodies')}>الذمم والتصفية</button>
         {canReports && <button type="button" style={tabStyle('reports')} onClick={() => setActiveTab('reports')}>التقارير</button>}
-        <div style={{ flex: 1 }} />
+        <div className="tabs-spacer" />
         <button className="btn btn-soft" type="button" onClick={load} disabled={loading} style={{ alignSelf: 'center', fontSize: 12 }}>{loading ? 'جارٍ...' : 'تحديث ↻'}</button>
       </div>
 

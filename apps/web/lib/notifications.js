@@ -10,6 +10,8 @@ const NotificationContext = createContext({
   requestPermission: () => {},
   refresh: () => {},
   debug: {},
+  lastNotification: null,
+  lastNotificationAt: 0,
 });
 
 export const useNotifications = () => useContext(NotificationContext);
@@ -33,6 +35,8 @@ function urlBase64ToUint8Array(base64String) {
 export function NotificationProvider({ children }) {
   const [unreadCount, setUnreadCount] = useState(0);
   const [browserPermission, setBrowserPermission] = useState('default');
+  const [lastNotification, setLastNotification] = useState(null);
+  const [lastNotificationAt, setLastNotificationAt] = useState(0);
   const sseRef = useRef(null);
   const swRegRef = useRef(null);
 
@@ -199,7 +203,7 @@ export function NotificationProvider({ children }) {
       addLog('error', `خطأ في طلب الإذن: ${err.message}`);
       return 'denied';
     }
-  }, [addLog]);
+  }, [addLog, subscribeToPush]);
 
   /* ── Fire notification — auto-requests permission if default ── */
   const fireNotification = useCallback(async (title, body, options = {}) => {
@@ -311,6 +315,8 @@ export function NotificationProvider({ children }) {
         const payload = JSON.parse(e.data);
         const newCount = payload.unreadCount ?? 0;
         setUnreadCount(newCount);
+        setLastNotification(payload.notification || null);
+        setLastNotificationAt(Date.now());
         updateDebug({ lastEvent: ts() });
         addLog('info', `حدث SSE: إشعار جديد (غير مقروءة: ${newCount})`);
 
@@ -328,11 +334,9 @@ export function NotificationProvider({ children }) {
     };
 
     es.onerror = () => {
-      updateDebug((prev) => ({
-        ...prev,
+      updateDebug({
         sseState: 'error',
-        reconnects: (prev.reconnects || 0) + 1,
-      }));
+      });
       setDebug((prev) => ({
         ...prev,
         sseState: 'error',
@@ -444,6 +448,8 @@ export function NotificationProvider({ children }) {
         requestPermission,
         refresh,
         debug,
+        lastNotification,
+        lastNotificationAt,
         inAppToast,
         dismissToast,
         testLocalNotification,

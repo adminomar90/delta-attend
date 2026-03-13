@@ -2,6 +2,8 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { api } from '../../../lib/api';
+import { authStorage } from '../../../lib/auth';
+import { Permission, hasPermission } from '../../../lib/permissions';
 
 const formatDateTime = (value) => {
   if (!value) {
@@ -158,6 +160,8 @@ const getCurrentGeoPosition = () =>
   });
 
 export default function AttendancePage() {
+  const currentUser = authStorage.getUser();
+  const canViewAttendanceMonitor = hasPermission(currentUser, Permission.VIEW_ATTENDANCE_MONITOR);
   const [meta, setMeta] = useState(null);
   const [history, setHistory] = useState([]);
   const [error, setError] = useState('');
@@ -178,7 +182,9 @@ export default function AttendancePage() {
       const [metaRes, historyRes, adminRes] = await Promise.all([
         api.get('/attendance/meta'),
         api.get('/attendance/history?limit=20'),
-        api.get('/attendance/admin/overview').catch(() => null),
+        canViewAttendanceMonitor
+          ? api.get('/attendance/admin/overview').catch(() => null)
+          : Promise.resolve(null),
       ]);
 
       setMeta(metaRes);
@@ -200,7 +206,7 @@ export default function AttendancePage() {
 
   useEffect(() => {
     load();
-  }, []);
+  }, [canViewAttendanceMonitor]);
 
   const openRecord = meta?.openRecord || null;
   const canCheckIn = !openRecord;
@@ -512,7 +518,7 @@ export default function AttendancePage() {
             <strong>{adminOverview.totals?.checkedOutToday || 0}</strong> | إجمالي ساعات اليوم:{' '}
             <strong>{adminOverview.totals?.totalWorkedHours || 0}</strong>
           </p>
-          <div style={{ display: 'flex', gap: 8, margin: '10px 0 14px' }}>
+          <div className="action-row" style={{ margin: '10px 0 14px' }}>
             <button
               type="button"
               className="btn btn-primary"
@@ -582,26 +588,15 @@ export default function AttendancePage() {
         <p style={{ marginTop: 0, color: 'var(--text-soft)', fontSize: 14 }}>
           أدخل كود التحقق الموجود في رسالة الواتساب للتحقق من صحتها وعرض تفاصيل السجل.
         </p>
-        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', marginBottom: 12 }}>
+        <div className="action-row" style={{ marginBottom: 12 }}>
           <input
+            className="input verify-code-input"
             type="text"
             value={verifyCode}
             onChange={(e) => setVerifyCode(e.target.value.toUpperCase())}
             onKeyDown={(e) => e.key === 'Enter' && handleVerifyCode()}
             placeholder="أدخل كود التحقق (مثال: K7X2M9QA)"
             maxLength={8}
-            style={{
-              padding: '8px 14px',
-              borderRadius: 8,
-              border: '1px solid var(--border, #2a3550)',
-              background: 'var(--card, #111c35)',
-              color: 'inherit',
-              fontFamily: 'monospace',
-              fontSize: 15,
-              letterSpacing: 2,
-              width: 200,
-              textTransform: 'uppercase',
-            }}
           />
           <button
             type="button"
@@ -626,17 +621,11 @@ export default function AttendancePage() {
         ) : null}
 
         {verifyResult ? (
-          <div style={{
-            background: 'rgba(196,215,67,0.06)',
-            border: '1px solid rgba(196,215,67,0.25)',
-            borderRadius: 10,
-            padding: '16px 18px',
-            marginTop: 4,
-          }}>
+          <div className="verify-panel">
             <p style={{ margin: '0 0 10px', color: '#c4d743', fontWeight: 700, fontSize: 15 }}>
               ✓ كود التحقق صحيح — السجل موثوق
             </p>
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14 }}>
+            <table className="verify-table">
               <tbody>
                 {[
                   ['اسم الموظف', verifyResult.employeeName || '-'],
@@ -648,7 +637,7 @@ export default function AttendancePage() {
                   ['كود التحقق', generateVerificationCode(verifyResult)],
                 ].map(([label, value]) => (
                   <tr key={label}>
-                    <td style={{ padding: '5px 0', color: 'var(--text-soft)', width: 140, verticalAlign: 'top' }}>{label}</td>
+                    <td className="verify-label">{label}</td>
                     <td style={{ padding: '5px 0', fontWeight: 600, fontFamily: label === 'كود التحقق' ? 'monospace' : 'inherit', color: label === 'كود التحقق' ? '#c4d743' : 'inherit' }}>{value}</td>
                   </tr>
                 ))}

@@ -4,6 +4,10 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { api, assetUrl } from '../../../lib/api';
 import { authStorage } from '../../../lib/auth';
 import { Permission, hasPermission } from '../../../lib/permissions';
+import {
+  calculateWorkReportDistribution,
+  formatWorkReportPoints,
+} from '../../../lib/workReportPoints';
 
 const statusLabelMap = {
   SUBMITTED: 'بانتظار الاعتماد',
@@ -30,6 +34,8 @@ const defaultForm = {
   accomplishments: '',
   challenges: '',
   nextSteps: '',
+  participantCount: 0,
+  participantIds: [],
 };
 
 const resolveUploadUrl = (value) => {
@@ -56,7 +62,9 @@ const downloadBlob = (blob, filename) => {
 
 export default function WorkReportsPage() {
   const currentUser = authStorage.getUser();
+  const currentUserId = String(currentUser?.id || currentUser?._id || '');
   const [projects, setProjects] = useState([]);
+  const [employees, setEmployees] = useState([]);
   const [reports, setReports] = useState([]);
   const [form, setForm] = useState(defaultForm);
   const [attachments, setAttachments] = useState([]);
@@ -82,9 +90,28 @@ export default function WorkReportsPage() {
     return hasPermission(currentUser, Permission.APPROVE_TASKS);
   }, [currentUser?.role, currentUser?.customPermissions, currentUser?.permissions]);
 
+  const canSendWhatsapp = useMemo(() => {
+    return hasPermission(currentUser, Permission.SEND_REPORTS_WHATSAPP);
+  }, [currentUser?.role, currentUser?.customPermissions, currentUser?.permissions]);
+
   const projectOptions = useMemo(() => {
     return (projects || []).filter((project) => project.status !== 'REJECTED');
   }, [projects]);
+
+  const employeeOptions = useMemo(() => {
+    return (employees || []).filter((employee) => {
+      const employeeId = String(employee.id || employee._id || '');
+      return employeeId && employeeId !== currentUserId;
+    });
+  }, [employees, currentUserId]);
+
+  const participantCount = Math.max(0, Number(form.participantCount || 0));
+  const participantSlots = Array.from({ length: participantCount }, (_, index) => index);
+  const approvalReport = reports.find((report) => report._id === approvalForm.reportId) || null;
+  const approvalDistribution = calculateWorkReportDistribution(
+    approvalForm.points,
+    approvalReport?.participants?.length || approvalReport?.participantCount || 0,
+  );
 
   const clearAttachments = () => {
     attachmentsRef.current.forEach((item) => {
@@ -104,17 +131,59 @@ export default function WorkReportsPage() {
     clearAttachments();
   };
 
+  const syncParticipantCount = (value) => {
+    const rawValue = String(value ?? '').trim();
+
+    if (!rawValue) {
+      setForm((prev) => ({
+        ...prev,
+        participantCount: '',
+        participantIds: [],
+      }));
+      return;
+    }
+
+    const nextCount = Math.max(0, Math.min(100, Number(rawValue) || 0));
+    setForm((prev) => ({
+      ...prev,
+      participantCount: nextCount,
+      participantIds: Array.from(
+        { length: nextCount },
+        (_, index) => prev.participantIds?.[index] || '',
+      ),
+    }));
+  };
+
+  const updateParticipant = (index, value) => {
+    setForm((prev) => {
+      const currentCount = Math.max(0, Number(prev.participantCount || 0));
+      const nextParticipantIds = Array.from(
+        { length: currentCount },
+        (_, participantIndex) => prev.participantIds?.[participantIndex] || '',
+      );
+
+      nextParticipantIds[index] = value;
+
+      return {
+        ...prev,
+        participantIds: nextParticipantIds,
+      };
+    });
+  };
+
   const load = async () => {
     setLoading(true);
     setError('');
 
     try {
-      const [projectsRes, reportsRes] = await Promise.all([
+      const [projectsRes, reportsRes, employeesRes] = await Promise.all([
         api.get('/projects'),
         api.get('/work-reports'),
+        api.get('/work-reports/employees'),
       ]);
       setProjects(projectsRes.projects || []);
       setReports(reportsRes.reports || []);
+      setEmployees(employeesRes.employees || []);
     } catch (err) {
       setError(err.message || 'تعذر تحميل تقارير العمل');
     } finally {
@@ -178,6 +247,24 @@ export default function WorkReportsPage() {
     setInfo('');
 
     try {
+      const normalizedParticipantCount = Math.max(0, Number(form.participantCount || 0));
+      const participantIds = Array.from(
+        { length: normalizedParticipantCount },
+        (_, index) => String(form.participantIds?.[index] || '').trim(),
+      ).filter(Boolean);
+
+      if (participantIds.length !== normalizedParticipantCount) {
+        throw new Error('يرجى اختيار أسماء جميع أفراد الكادر المشارك.');
+      }
+
+      if (new Set(participantIds).size !== participantIds.length) {
+        throw new Error('لا يمكن اختيار نفس الموظف أكثر من مرة داخل التقرير نفسه.');
+      }
+
+      if (participantIds.includes(currentUserId)) {
+        throw new Error('لا يمكن إضافة كاتب التقرير ضمن الكادر المشارك.');
+      }
+
       const payload = new FormData();
       payload.append('projectId', form.projectId);
       payload.append('activityType', form.activityType);
@@ -189,6 +276,8 @@ export default function WorkReportsPage() {
       payload.append('accomplishments', form.accomplishments);
       payload.append('challenges', form.challenges);
       payload.append('nextSteps', form.nextSteps);
+      payload.append('participantCount', String(normalizedParticipantCount));
+      payload.append('participantIds', JSON.stringify(participantIds));
 
       attachments.forEach((item) => {
         payload.append('images', item.file);
@@ -415,13 +504,27 @@ export default function WorkReportsPage() {
               onChange={(e) => setForm((prev) => ({ ...prev, hoursSpent: e.target.value }))}
             />
           </label>
-          <div style={{ alignSelf: 'end' }}>
+          <label>
+            عدد الكادر المشارك
+            <input
+              className="input"
+              type="number"
+              min={0}
+              max={Math.max(0, employeeOptions.length)}
+              value={form.participantCount}
+              onChange={(e) => syncParticipantCount(e.target.value)}
+            />
+            <span style={{ display: 'block', marginTop: 6, fontSize: 12, color: 'var(--text-soft)' }}>
+              أدخل العدد ليتم إنشاء حقول اختيار الأسماء تلقائيًا.
+            </span>
+          </label>
+          <div className="form-actions">
             <button className="btn btn-soft" type="button" onClick={resetForm}>
               إعادة تعيين
             </button>
           </div>
 
-          <label style={{ gridColumn: 'span 3' }}>
+          <label className="grid-span-full">
             تفاصيل العمل
             <textarea
               className="textarea"
@@ -431,7 +534,7 @@ export default function WorkReportsPage() {
               required
             />
           </label>
-          <label style={{ gridColumn: 'span 3' }}>
+          <label className="grid-span-full">
             ما تم إنجازه
             <textarea
               className="textarea"
@@ -440,7 +543,7 @@ export default function WorkReportsPage() {
               onChange={(e) => setForm((prev) => ({ ...prev, accomplishments: e.target.value }))}
             />
           </label>
-          <label style={{ gridColumn: 'span 3' }}>
+          <label className="grid-span-full">
             التحديات والمشاكل
             <textarea
               className="textarea"
@@ -449,7 +552,7 @@ export default function WorkReportsPage() {
               onChange={(e) => setForm((prev) => ({ ...prev, challenges: e.target.value }))}
             />
           </label>
-          <label style={{ gridColumn: 'span 3' }}>
+          <label className="grid-span-full">
             الخطوات القادمة
             <textarea
               className="textarea"
@@ -459,12 +562,58 @@ export default function WorkReportsPage() {
             />
           </label>
 
-          <div style={{ gridColumn: 'span 3' }}>
+          {participantSlots.length ? (
+            <div className="grid-span-full">
+              <h3 style={{ margin: '0 0 8px' }}>الكادر المشارك</h3>
+              <p style={{ marginTop: 0, color: 'var(--text-soft)' }}>
+                اختر أسماء الموظفين المشاركين في التنفيذ. لا يمكن تكرار نفس الموظف داخل التقرير.
+              </p>
+              <div className="grid-3" style={{ gap: 12 }}>
+                {participantSlots.map((slotIndex) => {
+                  const otherSelections = new Set(
+                    (form.participantIds || [])
+                      .filter((_, currentIndex) => currentIndex !== slotIndex)
+                      .filter(Boolean),
+                  );
+
+                  return (
+                    <label key={`participant-${slotIndex}`}>
+                      المشارك {slotIndex + 1}
+                      <select
+                        className="select"
+                        value={form.participantIds?.[slotIndex] || ''}
+                        onChange={(e) => updateParticipant(slotIndex, e.target.value)}
+                        required
+                      >
+                        <option value="">اختر الموظف</option>
+                        {employeeOptions.map((employee) => {
+                          const employeeId = String(employee.id || employee._id || '');
+                          const employeeCode = employee.employeeCode ? ` - ${employee.employeeCode}` : '';
+
+                          return (
+                            <option
+                              key={employeeId}
+                              value={employeeId}
+                              disabled={otherSelections.has(employeeId)}
+                            >
+                              {employee.fullName}{employeeCode}
+                            </option>
+                          );
+                        })}
+                      </select>
+                    </label>
+                  );
+                })}
+              </div>
+            </div>
+          ) : null}
+
+          <div className="grid-span-full">
             <h3 style={{ margin: '0 0 8px' }}>صور الأعمال (حتى 10 صور)</h3>
             <p style={{ marginTop: 0, color: 'var(--text-soft)' }}>
               يمكنك فتح كاميرا الموبايل مباشرة أو اختيار صور موجودة في الجهاز.
             </p>
-            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 10 }}>
+            <div className="action-row" style={{ marginBottom: 10 }}>
               <label className="btn btn-soft" style={{ cursor: 'pointer' }}>
                 فتح الكاميرا مباشرة
                 <input
@@ -551,7 +700,7 @@ export default function WorkReportsPage() {
           <h2>اعتماد تقرير العمل</h2>
           <form className="grid-3" onSubmit={submitApproval}>
             <label>
-              النقاط الممنوحة (إلزامي)
+              إجمالي نقاط التقرير (إلزامي)
               <input
                 className="input"
                 type="number"
@@ -561,8 +710,14 @@ export default function WorkReportsPage() {
                 onChange={(e) => setApprovalForm((prev) => ({ ...prev, points: e.target.value }))}
                 required
               />
+              <span style={{ display: 'block', marginTop: 6, fontSize: 12, color: 'var(--text-soft)' }}>
+                الكاتب يحصل على {formatWorkReportPoints(approvalDistribution.reporterPoints)} نقطة
+                {approvalDistribution.participantCount
+                  ? `، وكل مشارك يحصل على ${formatWorkReportPoints(approvalDistribution.participantPoints)} نقطة.`
+                  : '، ولا توجد حصص مشاركة إضافية في هذا التقرير.'}
+              </span>
             </label>
-            <label style={{ gridColumn: 'span 2' }}>
+            <label className="grid-span-full">
               تعليق المدير
               <input
                 className="input"
@@ -570,7 +725,7 @@ export default function WorkReportsPage() {
                 onChange={(e) => setApprovalForm((prev) => ({ ...prev, managerComment: e.target.value }))}
               />
             </label>
-            <div style={{ display: 'flex', gap: 8, alignSelf: 'end' }}>
+            <div className="form-actions">
               <button className="btn btn-primary" type="submit" disabled={approving}>
                 {approving ? 'جارٍ الاعتماد...' : 'تأكيد الاعتماد'}
               </button>
@@ -600,7 +755,7 @@ export default function WorkReportsPage() {
                 required
               />
             </label>
-            <label style={{ gridColumn: 'span 2' }}>
+            <label className="grid-span-full">
               تعليق إضافي
               <input
                 className="input"
@@ -608,7 +763,7 @@ export default function WorkReportsPage() {
                 onChange={(e) => setRejectionForm((prev) => ({ ...prev, managerComment: e.target.value }))}
               />
             </label>
-            <div style={{ display: 'flex', gap: 8, alignSelf: 'end' }}>
+            <div className="form-actions">
               <button className="btn btn-primary" type="submit" disabled={rejecting}>
                 {rejecting ? 'جارٍ الرفض...' : 'تأكيد الرفض'}
               </button>
@@ -648,6 +803,14 @@ export default function WorkReportsPage() {
                 const userId = String(report.user?._id || report.user?.id || '');
                 const isOwnReport = userId === String(currentUser?.id || '');
                 const canModerate = canApprove && !isOwnReport && report.status === 'SUBMITTED';
+                const participantNames = (report.participants || [])
+                  .map((participant) => participant.fullName || participant.user?.fullName || '')
+                  .filter(Boolean);
+                const reportParticipantCount = Number(report.participantCount || participantNames.length || 0);
+                const distribution = calculateWorkReportDistribution(
+                  report.pointsAwarded || 0,
+                  reportParticipantCount,
+                );
 
                 return (
                   <tr key={report._id}>
@@ -656,6 +819,14 @@ export default function WorkReportsPage() {
                       <div style={{ fontSize: 12, color: 'var(--text-soft)' }}>
                         الرمز: {report.employeeCode || report.user?.employeeCode || '-'}
                       </div>
+                      <div style={{ fontSize: 12, color: 'var(--text-soft)', marginTop: 4 }}>
+                        الكادر المشارك: {reportParticipantCount || 0}
+                      </div>
+                      {participantNames.length ? (
+                        <div style={{ fontSize: 12, color: 'var(--text-soft)', marginTop: 4 }}>
+                          {participantNames.join('، ')}
+                        </div>
+                      ) : null}
                     </td>
                     <td>{report.project?.name || report.projectName || '-'}</td>
                     <td>{formatDate(report.workDate || report.createdAt)}</td>
@@ -670,13 +841,32 @@ export default function WorkReportsPage() {
                         </div>
                       ) : null}
                     </td>
-                    <td>{report.pointsAwarded || 0}</td>
-                    <td style={{ minWidth: 260 }}>
+                    <td>
+                      <strong>{formatWorkReportPoints(report.pointsAwarded || 0)}</strong>
+                      {report.status === 'APPROVED' ? (
+                        <div style={{ fontSize: 12, color: 'var(--text-soft)', marginTop: 4 }}>
+                          الكاتب: {formatWorkReportPoints(
+                            report.reporterPointsAwarded || distribution.reporterPoints,
+                          )}
+                          {reportParticipantCount
+                            ? ` | لكل مشارك: ${formatWorkReportPoints(
+                              report.participantPointsAwarded || distribution.participantPoints,
+                            )}`
+                            : ''}
+                        </div>
+                      ) : null}
+                    </td>
+                    <td className="table-cell-wide">
                       {report.title ? <div><strong>{report.title}</strong></div> : null}
                       <div style={{ fontSize: 12, color: 'var(--text-soft)' }}>{report.details || '-'}</div>
                       <div style={{ fontSize: 12, color: 'var(--text-soft)', marginTop: 4 }}>
                         ساعات العمل: {report.hoursSpent || 0}
                       </div>
+                      {reportParticipantCount ? (
+                        <div style={{ fontSize: 12, color: 'var(--text-soft)', marginTop: 4 }}>
+                          توزيع النقاط عند الاعتماد: 35% للكاتب و65% على المشاركين بالتساوي.
+                        </div>
+                      ) : null}
                       {(report.images || []).length ? (
                         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 8 }}>
                           {(report.images || []).map((image, index) => (
@@ -711,9 +901,11 @@ export default function WorkReportsPage() {
                         <button className="btn btn-soft" type="button" onClick={() => downloadReportPdf(report)}>
                           حفظ PDF
                         </button>
-                        <button className="btn btn-soft" type="button" onClick={() => sendReportPdfToWhatsApp(report)}>
-                          واتساب PDF
-                        </button>
+                        {canSendWhatsapp ? (
+                          <button className="btn btn-soft" type="button" onClick={() => sendReportPdfToWhatsApp(report)}>
+                            واتساب PDF
+                          </button>
+                        ) : null}
                       </div>
                       {canModerate ? (
                         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 6 }}>

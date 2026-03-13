@@ -81,7 +81,26 @@ async function createAndPush(payload) {
   return notification;
 }
 
+async function createManyAndPush(userIds = [], payload = {}) {
+  const recipients = [...new Set(userIds.map((item) => String(item || '').trim()).filter(Boolean))];
+  if (!recipients.length) {
+    return [];
+  }
+
+  return Promise.all(
+    recipients.map((userId) =>
+      createAndPush({
+        ...payload,
+        user: userId,
+      })),
+  );
+}
+
 export const notificationService = {
+  async notifyUsers(userIds, payload = {}) {
+    return createManyAndPush(userIds, payload);
+  },
+
   async notifyTaskAssigned(userId, task, email = '') {
     await createAndPush({
       user: userId,
@@ -147,6 +166,60 @@ export const notificationService = {
       messageAr: `مبروك، تم تحقيق الهدف: ${goal.title}`,
       metadata: {
         goalId: goal._id,
+      },
+    });
+  },
+
+  async notifyAttendanceActivity(userIds, payload = {}) {
+    const occurredAt = payload.occurredAt ? new Date(payload.occurredAt) : new Date();
+    const formattedDate = occurredAt.toLocaleDateString('ar-IQ');
+    const formattedTime = occurredAt.toLocaleTimeString('ar-IQ', {
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+    const operationLabel = payload.operationLabel || 'تسجيل الحضور';
+
+    return createManyAndPush(userIds, {
+      type: 'ATTENDANCE_ACTIVITY',
+      titleAr: operationLabel,
+      messageAr: `قام الموظف (${payload.employeeName || '-'}) بـ${operationLabel} الساعة ${formattedTime} بتاريخ ${formattedDate}.`,
+      metadata: {
+        ...payload.metadata,
+        occurredAt,
+      },
+    });
+  },
+
+  async notifyWorkReportCreated(userIds, payload = {}) {
+    const occurredAt = payload.occurredAt ? new Date(payload.occurredAt) : new Date();
+    const formattedDate = occurredAt.toLocaleDateString('ar-IQ');
+
+    return createManyAndPush(userIds, {
+      type: 'WORK_REPORT_CREATED',
+      titleAr: 'إنشاء تقرير عمل',
+      messageAr: `أنشأ الموظف (${payload.employeeName || '-'}) تقرير العمل "${payload.reportTitle || '-'}" للمشروع (${payload.projectName || '-'}) بتاريخ ${formattedDate}.`,
+      metadata: {
+        ...payload.metadata,
+        occurredAt,
+      },
+    });
+  },
+
+  async notifyOperationActivity(userIds, payload = {}) {
+    const occurredAt = payload.occurredAt ? new Date(payload.occurredAt) : new Date();
+    const formattedDate = occurredAt.toLocaleDateString('ar-IQ');
+    const formattedTime = occurredAt.toLocaleTimeString('ar-IQ', {
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+
+    return createManyAndPush(userIds, {
+      type: 'OPERATION_ACTIVITY',
+      titleAr: payload.titleAr || 'عملية جديدة داخل النظام',
+      messageAr: `قام المستخدم (${payload.actorName || '-'}) بتنفيذ عملية ${payload.actionLabel || '-'} على (${payload.entityLabel || '-'}) بتاريخ ${formattedDate} الساعة ${formattedTime}.`,
+      metadata: {
+        ...payload.metadata,
+        occurredAt,
       },
     });
   },

@@ -7,7 +7,8 @@ import { PointsLedgerRepository } from '../../infrastructure/db/repositories/Poi
 import { UserRepository } from '../../infrastructure/db/repositories/UserRepository.js';
 import { AttendanceRepository } from '../../infrastructure/db/repositories/AttendanceRepository.js';
 import { applyManagedScopeOnFilter, resolveManagedUserIds } from '../../shared/accessScope.js';
-import { TaskStatus } from '../../shared/constants.js';
+import { Permission, TaskStatus } from '../../shared/constants.js';
+import { hasPermission } from '../../shared/permissions.js';
 import { asyncHandler } from '../../shared/errors.js';
 
 const pointsLedgerRepository = new PointsLedgerRepository();
@@ -33,6 +34,8 @@ export const dashboardSummary = asyncHandler(async (req, res) => {
     goalFilter.user = { $in: managedUserIds };
   }
 
+  const canSeeLeaderboard = hasPermission(req.user, Permission.VIEW_LEADERBOARD);
+
   const [
     totalTasks,
     pendingApprovals,
@@ -50,12 +53,14 @@ export const dashboardSummary = asyncHandler(async (req, res) => {
     ProjectModel.countDocuments({ status: 'ACTIVE' }),
     GoalModel.find(goalFilter).sort({ endDate: 1 }).limit(6).populate('user', 'fullName level pointsTotal'),
     NotificationModel.countDocuments({ user: req.user.id, readAt: null }),
-    pointsLedgerRepository.leaderboard({
-      startDate: dayjs().startOf('month').toDate(),
-      endDate: dayjs().endOf('month').toDate(),
-      limit: 10,
-      userIds: managedUserIds,
-    }),
+    canSeeLeaderboard
+      ? pointsLedgerRepository.leaderboard({
+          startDate: dayjs().startOf('month').toDate(),
+          endDate: dayjs().endOf('month').toDate(),
+          limit: 10,
+          userIds: managedUserIds,
+        })
+      : [],
   ]);
 
   const attendanceAggregates = await attendanceRepository.aggregateByUserForDateRange({
@@ -110,6 +115,8 @@ export const dashboardSummary = asyncHandler(async (req, res) => {
     },
     taskStatusBreakdown,
     goals,
-    leaderboard: leaderboard.map((item, index) => ({ rank: index + 1, ...item })),
+    leaderboard: canSeeLeaderboard
+      ? leaderboard.map((item, index) => ({ rank: index + 1, ...item }))
+      : [],
   });
 });

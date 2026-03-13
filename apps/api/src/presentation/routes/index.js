@@ -11,6 +11,7 @@ import notificationsRoutes from './notificationsRoutes.js';
 import attendanceRoutes from './attendanceRoutes.js';
 import workReportsRoutes from './workReportsRoutes.js';
 import materialsRoutes from './materialsRoutes.js';
+import approvalHistoryRoutes from './approvalHistoryRoutes.js';
 
 const router = Router();
 
@@ -26,5 +27,6 @@ router.use('/notifications', notificationsRoutes);
 router.use('/attendance', attendanceRoutes);
 router.use('/work-reports', workReportsRoutes);
 router.use('/materials', materialsRoutes);
+router.use('/approval-history', approvalHistoryRoutes);
 
 export default router;

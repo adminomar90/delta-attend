@@ -6,14 +6,21 @@ import { GoalRepository } from '../../infrastructure/db/repositories/GoalReposit
 import { buildWorkReportPdfBuffer } from '../../infrastructure/reports/workReportPdfBuilder.js';
 import { auditService } from '../../application/services/auditService.js';
 import { notificationService } from '../../application/services/notificationService.js';
+import {
+  NotificationWatchPermission,
+  resolveNotificationAudience,
+} from '../../application/services/notificationAudienceService.js';
 import { levelService } from '../../application/services/levelService.js';
 import { badgeService } from '../../application/services/badgeService.js';
+import { workReportPointsService } from '../../application/services/workReportPointsService.js';
 import { env } from '../../config/env.js';
 import {
   applyManagedScopeOnFilter,
   isUserWithinManagedScope,
   resolveManagedUserIds,
 } from '../../shared/accessScope.js';
+import { Permission } from '../../shared/constants.js';
+import { hasAnyPermission, hasPermission } from '../../shared/permissions.js';
 import { buildWhatsAppSendUrl } from '../../shared/attendanceUtils.js';
 import { AppError, asyncHandler } from '../../shared/errors.js';
 import fs from 'fs';
@@ -83,6 +90,28 @@ const parseImageComments = (value) => {
   return [];
 };
 
+const parseIdArray = (value) => {
+  if (Array.isArray(value)) {
+    return value.map((item) => toCleanString(item)).filter(Boolean);
+  }
+
+  const raw = toCleanString(value);
+  if (!raw) {
+    return [];
+  }
+
+  try {
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed)) {
+      return parsed.map((item) => toCleanString(item)).filter(Boolean);
+    }
+  } catch {
+    return raw.split(',').map((item) => toCleanString(item)).filter(Boolean);
+  }
+
+  return [];
+};
+
 const buildUploadedImages = (files = [], comments = []) =>
   files.map((file, index) => ({
     publicUrl: `/uploads/${file.filename}`,
@@ -92,9 +121,181 @@ const buildUploadedImages = (files = [], comments = []) =>
     comment: toCleanString(comments[index]),
   }));
 
+const formatPoints = (value) => {
+  const parsed = Number(value || 0);
+  if (!Number.isFinite(parsed)) {
+    return '0';
+  }
+
+  return Number.isInteger(parsed)
+    ? String(parsed)
+    : parsed.toFixed(2).replace(/\.?0+$/, '');
+};
+
 const resolvePublicBaseUrl = (req) => `${req.protocol}://${req.get('host')}`;
+const uploadRootDir = path.resolve(process.cwd(), env.uploadsDir);
+const storedWorkReportsDir = path.resolve(uploadRootDir, 'work-reports');
+
+const hasWorkReportArchiveAccess = (user = {}) =>
+  hasPermission(user, Permission.VIEW_COMPLETED_WORK_REPORTS);
+
+const hasOwnWorkReportAccess = (user = {}) =>
+  hasAnyPermission(user, [
+    Permission.VIEW_OWN_WORK_REPORTS,
+    Permission.VIEW_TEAM_WORK_REPORTS,
+    Permission.APPROVE_TASKS,
+    Permission.VIEW_COMPLETED_WORK_REPORTS,
+  ]);
+
+const hasTeamWorkReportAccess = (user = {}) =>
+  hasAnyPermission(user, [
+    Permission.VIEW_TEAM_WORK_REPORTS,
+    Permission.APPROVE_TASKS,
+    Permission.VIEW_COMPLETED_WORK_REPORTS,
+  ]);
+
+const resolveStoredWorkReportPdfAbsolutePath = (publicUrl) => {
+  const raw = toCleanString(publicUrl);
+  if (!raw.startsWith('/uploads/')) {
+    return '';
+  }
+
+  const relativePath = raw.split('?')[0].split('#')[0].replace('/uploads/', '');
+  const absolutePath = path.resolve(uploadRootDir, relativePath);
+  if (!absolutePath.startsWith(uploadRootDir)) {
+    return '';
+  }
+
+  return absolutePath;
+};
+
+const buildStoredWorkReportPdfPayload = ({ publicUrl, filename, absolutePath }) => ({
+  publicUrl,
+  filename,
+  size: fs.existsSync(absolutePath) ? Number(fs.statSync(absolutePath).size || 0) : 0,
+  generatedAt: new Date(),
+});
+
+const serializeWorkReportParticipantEmployee = (user) => ({
+  id: String(user._id || user.id),
+  fullName: user.fullName,
+  employeeCode: user.employeeCode || '',
+  role: user.role || '',
+  department: user.department || '',
+  jobTitle: user.jobTitle || '',
+});
+
+const resolveWorkReportParticipants = async ({ participantIds, participantCount, authorId }) => {
+  const cleanedIds = participantIds.map((item) => toCleanString(item)).filter(Boolean);
+
+  if (new Set(cleanedIds).size !== cleanedIds.length) {
+    throw new AppError('Participants must be unique within the same work report', 400);
+  }
+
+  if (cleanedIds.includes(String(authorId))) {
+    throw new AppError('Report author cannot be selected as a participant', 400);
+  }
+
+  if (participantCount !== cleanedIds.length) {
+    throw new AppError('participantCount must match the selected participants', 400);
+  }
+
+  if (!cleanedIds.length) {
+    return [];
+  }
+
+  const participants = await userRepository.listByIds(cleanedIds);
+  if (participants.length !== cleanedIds.length) {
+    throw new AppError('One or more selected participants are invalid or inactive', 400);
+  }
+
+  const participantMap = new Map(
+    participants.map((item) => [String(item._id || item.id), item]),
+  );
+
+  return cleanedIds.map((id) => {
+    const participant = participantMap.get(String(id));
+    if (!participant) {
+      throw new AppError('One or more selected participants are invalid or inactive', 400);
+    }
+
+    return {
+      user: participant._id,
+      fullName: participant.fullName,
+      employeeCode: participant.employeeCode || '',
+    };
+  });
+};
+
+const grantPointsToWorkReportUser = async ({
+  userId,
+  points,
+  report,
+  approvedBy,
+  distributionRole,
+}) => {
+  const safePoints = Number(points || 0);
+  if (safePoints <= 0) {
+    return null;
+  }
+
+  const targetUser = await userRepository.findById(userId);
+  if (!targetUser) {
+    throw new AppError('Work report participant account was not found during approval', 409);
+  }
+
+  await pointsLedgerRepository.create({
+    user: targetUser._id,
+    points: safePoints,
+    category: 'WORK_REPORT_APPROVAL',
+    reason: distributionRole === 'REPORT_AUTHOR'
+      ? `اعتماد تقرير عمل: ${report.title || report.projectName || 'بدون عنوان'}`
+      : `مشاركة في تقرير عمل: ${report.title || report.projectName || 'بدون عنوان'}`,
+    approvedBy,
+    sourceAction: 'WORK_REPORT_APPROVAL',
+    metadata: {
+      workReportId: String(report._id),
+      distributionRole,
+      totalPoints: Number(report.pointsAwarded || 0),
+      participantCount: Number(report.participantCount || report.participants?.length || 0),
+    },
+  });
+
+  const updatedPoints = Number(targetUser.pointsTotal || 0) + safePoints;
+  const nextLevel = levelService.resolveLevel(updatedPoints);
+  const updatedUser = await userRepository.incrementPointsAndSetLevel(targetUser._id, safePoints, nextLevel);
+  const generatedBadges = badgeService.evaluate(updatedUser, 0);
+
+  for (const badgeCode of generatedBadges) {
+    if (!updatedUser.badges.includes(badgeCode)) {
+      await userRepository.attachBadge(updatedUser._id, badgeCode);
+    }
+  }
+
+  const goalUpdates = await goalRepository.incrementActiveGoals(updatedUser._id, safePoints);
+  for (const goal of goalUpdates) {
+    if (goal.achieved) {
+      await notificationService.notifyGoalAchieved(updatedUser._id, goal);
+    }
+  }
+
+  return updatedUser;
+};
 
 const assertWorkReportAccess = async (req, report) => {
+  if (report?.status === 'APPROVED' && hasWorkReportArchiveAccess(req.user)) {
+    return;
+  }
+
+  const reportOwnerId = String(report.user?._id || report.user || '');
+  if (reportOwnerId === String(req.user.id) && hasOwnWorkReportAccess(req.user)) {
+    return;
+  }
+
+  if (!hasTeamWorkReportAccess(req.user)) {
+    throw new AppError('You cannot access this work report', 403);
+  }
+
   const managedUserIds = await resolveManagedUserIds({
     userRepository,
     actorId: req.user.id,
@@ -109,22 +310,59 @@ const assertWorkReportAccess = async (req, report) => {
 const createStoredWorkReportPdf = async ({ report, req }) => {
   const buffer = await buildWorkReportPdfBuffer(report, {
     publicBaseUrl: resolvePublicBaseUrl(req),
-    uploadRootDir: path.resolve(process.cwd(), env.uploadsDir),
+    uploadRootDir,
   });
 
-  const reportsDir = path.resolve(process.cwd(), env.uploadsDir, 'work-reports');
-  if (!fs.existsSync(reportsDir)) {
-    fs.mkdirSync(reportsDir, { recursive: true });
+  if (!fs.existsSync(storedWorkReportsDir)) {
+    fs.mkdirSync(storedWorkReportsDir, { recursive: true });
   }
 
   const filename = `work-report-${String(report._id)}-${Date.now()}-${randomUUID().slice(0, 8)}.pdf`;
-  const absolutePath = path.resolve(reportsDir, filename);
+  const absolutePath = path.resolve(storedWorkReportsDir, filename);
   fs.writeFileSync(absolutePath, buffer);
 
   return {
     filename,
     absolutePath,
     pdfUrl: `/uploads/work-reports/${filename}`,
+  };
+};
+
+const ensureStoredWorkReportPdf = async ({ report, req }) => {
+  const existingPublicUrl = toCleanString(report?.pdfFile?.publicUrl);
+  const existingFilename = toCleanString(report?.pdfFile?.filename);
+  const existingAbsolutePath = resolveStoredWorkReportPdfAbsolutePath(existingPublicUrl);
+
+  if (existingPublicUrl && existingFilename && existingAbsolutePath && fs.existsSync(existingAbsolutePath)) {
+    return {
+      report,
+      pdfFile: {
+        publicUrl: existingPublicUrl,
+        filename: existingFilename,
+        size: Number(report?.pdfFile?.size || fs.statSync(existingAbsolutePath).size || 0),
+        generatedAt: report?.pdfFile?.generatedAt || null,
+      },
+      absolutePath: existingAbsolutePath,
+      createdNew: false,
+    };
+  }
+
+  const stored = await createStoredWorkReportPdf({ report, req });
+  const pdfFile = buildStoredWorkReportPdfPayload({
+    publicUrl: stored.pdfUrl,
+    filename: stored.filename,
+    absolutePath: stored.absolutePath,
+  });
+
+  const updatedReport = await workReportRepository.updateById(report._id, {
+    pdfFile,
+  });
+
+  return {
+    report: updatedReport,
+    pdfFile,
+    absolutePath: stored.absolutePath,
+    createdNew: true,
   };
 };
 
@@ -140,6 +378,8 @@ const buildWorkReportWhatsappMessage = (report, pdfAbsoluteUrl) => {
   const employeeCode = report?.employeeCode || report?.user?.employeeCode || '-';
   const projectName = report?.project?.name || report?.projectName || '-';
   const progress = Number(report?.progressPercent || 0);
+  const participantCount = Number(report?.participantCount || report?.participants?.length || 0);
+  const participantSummaryLine = `عدد الكادر المشارك: ${participantCount}`;
 
   return [
     'تقرير عمل PDF - Delta Plus',
@@ -147,11 +387,19 @@ const buildWorkReportWhatsappMessage = (report, pdfAbsoluteUrl) => {
     `رمز الموظف: ${employeeCode}`,
     `المشروع: ${projectName}`,
     `نسبة الإنجاز: ${progress}%`,
+    participantSummaryLine,
     `تاريخ التقرير: ${new Date(report?.workDate || report?.createdAt || new Date()).toLocaleDateString('ar-IQ')}`,
     `رابط التقرير PDF: ${pdfAbsoluteUrl}`,
     'يرجى فتح الرابط ومراجعة التقرير.',
   ].join('\n');
 };
+
+export const listWorkReportEmployees = asyncHandler(async (_req, res) => {
+  const users = await userRepository.listActive({ includeManager: false });
+  res.json({
+    employees: users.map((user) => serializeWorkReportParticipantEmployee(user)),
+  });
+});
 
 export const createWorkReport = asyncHandler(async (req, res) => {
   const projectId = toCleanString(req.body.projectId || req.body.project);
@@ -188,6 +436,18 @@ export const createWorkReport = asyncHandler(async (req, res) => {
     fallback: 0,
     fieldName: 'hoursSpent',
   });
+  const participantIds = parseIdArray(req.body.participantIds);
+  const participantCount = toNumberInRange(req.body.participantCount, {
+    min: 0,
+    max: 100,
+    fallback: participantIds.length,
+    fieldName: 'participantCount',
+  });
+  const participants = await resolveWorkReportParticipants({
+    participantIds,
+    participantCount,
+    authorId: req.user.id,
+  });
   const files = Array.isArray(req.files) ? req.files : [];
   const comments = parseImageComments(req.body.imageComments);
   const images = buildUploadedImages(files, comments);
@@ -208,11 +468,28 @@ export const createWorkReport = asyncHandler(async (req, res) => {
     hoursSpent,
     workDate: toOptionalDate(req.body.workDate) || new Date(),
     images,
+    participantCount,
+    participants,
     status: 'SUBMITTED',
     pointsAwarded: 0,
+    reporterPointsAwarded: 0,
+    participantPointsAwarded: 0,
+    participantsTotalAwarded: 0,
   });
 
-  const report = await workReportRepository.findById(created._id);
+  let report = await workReportRepository.findById(created._id);
+
+  try {
+    const storedPdf = await ensureStoredWorkReportPdf({
+      report,
+      req,
+    });
+    report = storedPdf.report;
+  } catch (pdfError) {
+    // Log the error but do NOT delete the report — the user's data is preserved.
+    // The PDF can be regenerated later via ensureStoredWorkReportPdf.
+    console.error('PDF generation failed for work report', created._id, pdfError.message);
+  }
 
   await auditService.log({
     actorId: req.user.id,
@@ -224,15 +501,56 @@ export const createWorkReport = asyncHandler(async (req, res) => {
       progressPercent,
       hoursSpent,
       imagesCount: images.length,
+      participantCount,
+      participantIds: participants.map((item) => String(item.user)),
+      pdfUrl: report.pdfFile?.publicUrl || '',
       status: 'SUBMITTED',
     },
     req,
+  });
+
+  const workReportRecipients = await resolveNotificationAudience({
+    userRepository,
+    actorId: req.user.id,
+    watchPermission: NotificationWatchPermission.WORK_REPORT,
+  });
+  await notificationService.notifyWorkReportCreated(workReportRecipients, {
+    employeeName: user.fullName,
+    reportTitle: report.title || report.activityType || 'بدون عنوان',
+    projectName: project.name || report.projectName || '-',
+    occurredAt: report.createdAt || new Date(),
+    metadata: {
+      workReportId: String(report._id),
+      projectId: String(project._id),
+    },
+  });
+
+  const operationRecipients = await resolveNotificationAudience({
+    userRepository,
+    actorId: req.user.id,
+    watchPermission: NotificationWatchPermission.OPERATION,
+  });
+  await notificationService.notifyOperationActivity(operationRecipients, {
+    titleAr: 'إنشاء تقرير عمل',
+    actorName: user.fullName,
+    actionLabel: 'إنشاء تقرير عمل',
+    entityLabel: report.title || project.name || 'تقرير عمل',
+    occurredAt: report.createdAt || new Date(),
+    metadata: {
+      entityType: 'WORK_REPORT',
+      entityId: String(report._id),
+      action: 'WORK_REPORT_CREATED',
+    },
   });
 
   res.status(201).json({ report });
 });
 
 export const listWorkReports = asyncHandler(async (req, res) => {
+  if (!hasOwnWorkReportAccess(req.user)) {
+    throw new AppError('You cannot view work reports', 403);
+  }
+
   const filter = {};
 
   if (req.query.status) {
@@ -242,20 +560,31 @@ export const listWorkReports = asyncHandler(async (req, res) => {
     filter.project = req.query.projectId;
   }
 
-  const managedUserIds = await resolveManagedUserIds({
-    userRepository,
-    actorId: req.user.id,
-    actorRole: req.user.role,
-  });
+  const managedUserIds = hasTeamWorkReportAccess(req.user)
+    ? await resolveManagedUserIds({
+        userRepository,
+        actorId: req.user.id,
+        actorRole: req.user.role,
+      })
+    : [req.user.id];
 
   applyManagedScopeOnFilter({
     filter,
     managedUserIds,
     field: 'user',
-    requestedUserId: req.query.userId,
+    requestedUserId: hasTeamWorkReportAccess(req.user) ? req.query.userId : req.user.id,
   });
 
   const reports = await workReportRepository.list(filter);
+  res.json({ reports });
+});
+
+export const listCompletedWorkReports = asyncHandler(async (_req, res) => {
+  const reports = await workReportRepository.list(
+    { status: 'APPROVED' },
+    { sort: { approvedAt: -1, createdAt: -1 } },
+  );
+
   res.json({ reports });
 });
 
@@ -278,16 +607,16 @@ export const exportWorkReportPdf = asyncHandler(async (req, res) => {
 
   await assertWorkReportAccess(req, report);
 
-  const buffer = await buildWorkReportPdfBuffer(report, {
-    publicBaseUrl: resolvePublicBaseUrl(req),
-    uploadRootDir: path.resolve(process.cwd(), env.uploadsDir),
+  const stored = await ensureStoredWorkReportPdf({
+    report,
+    req,
   });
-
-  const filename = `work-report-${String(report._id)}.pdf`;
+  const filename = stored.pdfFile.filename || `work-report-${String(report._id)}.pdf`;
+  const disposition = req.query.download === '1' ? 'attachment' : 'inline';
 
   res.setHeader('Content-Type', 'application/pdf');
-  res.setHeader('Content-Disposition', `inline; filename="${filename}"`);
-  res.send(buffer);
+  res.setHeader('Content-Disposition', `${disposition}; filename="${filename}"`);
+  res.sendFile(stored.absolutePath);
 });
 
 export const saveWorkReportPdf = asyncHandler(async (req, res) => {
@@ -298,30 +627,35 @@ export const saveWorkReportPdf = asyncHandler(async (req, res) => {
 
   await assertWorkReportAccess(req, report);
 
-  const stored = await createStoredWorkReportPdf({
+  const stored = await ensureStoredWorkReportPdf({
     report,
     req,
   });
-  const pdfUrl = stored.pdfUrl;
+  const pdfUrl = stored.pdfFile.publicUrl;
 
   await auditService.log({
     actorId: req.user.id,
-    action: 'WORK_REPORT_PDF_SAVED',
+    action: 'WORK_REPORT_PDF_RESOLVED',
     entityType: 'WORK_REPORT',
     entityId: report._id,
     after: {
       pdfUrl,
+      reusedExisting: !stored.createdNew,
     },
     req,
   });
 
-  res.status(201).json({
+  res.status(stored.createdNew ? 201 : 200).json({
     reportId: String(report._id),
     pdfUrl,
   });
 });
 
 export const workReportWhatsappLink = asyncHandler(async (req, res) => {
+  if (!hasPermission(req.user, Permission.SEND_REPORTS_WHATSAPP)) {
+    throw new AppError('You cannot send work reports to WhatsApp', 403);
+  }
+
   const report = await workReportRepository.findById(req.params.id);
   if (!report) {
     throw new AppError('Work report not found', 404);
@@ -329,13 +663,13 @@ export const workReportWhatsappLink = asyncHandler(async (req, res) => {
 
   await assertWorkReportAccess(req, report);
 
-  const stored = await createStoredWorkReportPdf({
+  const stored = await ensureStoredWorkReportPdf({
     report,
     req,
   });
 
   const recipient = await resolveWorkReportRecipientPhone(report);
-  const pdfAbsoluteUrl = `${resolvePublicBaseUrl(req)}${stored.pdfUrl}`;
+  const pdfAbsoluteUrl = `${resolvePublicBaseUrl(req)}${stored.pdfFile.publicUrl}`;
   const message = buildWorkReportWhatsappMessage(report, pdfAbsoluteUrl);
   const directUrl = buildWhatsAppSendUrl(recipient, message);
   const whatsappUrl = directUrl || `https://wa.me/?text=${encodeURIComponent(message)}`;
@@ -347,14 +681,15 @@ export const workReportWhatsappLink = asyncHandler(async (req, res) => {
     entityId: report._id,
     after: {
       recipient,
-      pdfUrl: stored.pdfUrl,
+      pdfUrl: stored.pdfFile.publicUrl,
+      reusedExisting: !stored.createdNew,
       mode: directUrl ? 'DIRECT' : 'MANUAL_SELECT',
     },
     req,
   });
 
   res.json({
-    pdfUrl: stored.pdfUrl,
+    pdfUrl: stored.pdfFile.publicUrl,
     whatsapp: {
       recipient,
       url: whatsappUrl,
@@ -387,66 +722,88 @@ export const approveWorkReport = asyncHandler(async (req, res) => {
     throw new AppError('You can only approve reports for employees in your management scope', 403);
   }
 
-  const points = Math.round(toNumberInRange(req.body.points, {
+  const points = toNumberInRange(req.body.points, {
     min: 1,
     max: 1000,
     fallback: NaN,
     fieldName: 'points',
-  }));
+  });
   const managerComment = toCleanString(req.body.managerComment);
+  const distribution = workReportPointsService.calculateDistribution(
+    points,
+    report.participants?.length || 0,
+  );
+  const authorId = report.user?._id || report.user;
+  const participants = Array.isArray(report.participants) ? report.participants : [];
+  const reportLabel = report.title || report.projectName || 'بدون عنوان';
 
   const before = {
     status: report.status,
     pointsAwarded: report.pointsAwarded || 0,
+    reporterPointsAwarded: report.reporterPointsAwarded || 0,
+    participantPointsAwarded: report.participantPointsAwarded || 0,
+    participantsTotalAwarded: report.participantsTotalAwarded || 0,
   };
 
   const updated = await workReportRepository.updateById(report._id, {
     status: 'APPROVED',
-    pointsAwarded: points,
+    pointsAwarded: distribution.totalPoints,
+    reporterPointsAwarded: distribution.reporterPoints,
+    participantPointsAwarded: distribution.participantPoints,
+    participantsTotalAwarded: distribution.participantsTotalPoints,
     approvedBy: req.user.id,
     approvedAt: new Date(),
     managerComment,
     rejectionReason: '',
   });
 
-  await pointsLedgerRepository.create({
-    user: report.user?._id || report.user,
-    points,
-    category: 'WORK_REPORT_APPROVAL',
-    reason: `اعتماد تقرير عمل: ${report.title || report.projectName || 'بدون عنوان'}`,
+  await grantPointsToWorkReportUser({
+    userId: authorId,
+    points: distribution.reporterPoints,
+    report: updated,
     approvedBy: req.user.id,
+    distributionRole: 'REPORT_AUTHOR',
   });
 
-  const assigneeCurrent = await userRepository.findById(report.user?._id || report.user);
-  if (assigneeCurrent) {
-    const updatedPoints = Number(assigneeCurrent.pointsTotal || 0) + points;
-    const nextLevel = levelService.resolveLevel(updatedPoints);
-    const updatedUser = await userRepository.incrementPointsAndSetLevel(assigneeCurrent._id, points, nextLevel);
-    const generatedBadges = badgeService.evaluate(updatedUser, 0);
-
-    for (const badgeCode of generatedBadges) {
-      if (!updatedUser.badges.includes(badgeCode)) {
-        await userRepository.attachBadge(updatedUser._id, badgeCode);
-      }
-    }
-
-    const goalUpdates = await goalRepository.incrementActiveGoals(updatedUser._id, points);
-    for (const goal of goalUpdates) {
-      if (goal.achieved) {
-        await notificationService.notifyGoalAchieved(updatedUser._id, goal);
-      }
-    }
+  for (const participant of participants) {
+    await grantPointsToWorkReportUser({
+      userId: participant.user?._id || participant.user,
+      points: distribution.participantPoints,
+      report: updated,
+      approvedBy: req.user.id,
+      distributionRole: 'PARTICIPANT',
+    });
   }
 
   await notificationService.notifySystem(
-    report.user?._id || report.user,
+    authorId,
     'اعتماد تقرير العمل',
-    `تم اعتماد تقرير العمل "${report.title || report.projectName || 'بدون عنوان'}" وإضافة ${points} نقطة.`,
+    participants.length
+      ? `تم اعتماد تقرير العمل "${reportLabel}" ومنحك ${formatPoints(distribution.reporterPoints)} نقطة ككاتب للتقرير.`
+      : `تم اعتماد تقرير العمل "${reportLabel}" ومنحك ${formatPoints(distribution.reporterPoints)} نقطة.`,
     {
       workReportId: String(report._id),
-      points,
+      totalPoints: distribution.totalPoints,
+      reporterPoints: distribution.reporterPoints,
+      participantPoints: distribution.participantPoints,
+      participantCount: distribution.participantCount,
     },
   );
+
+  for (const participant of participants) {
+    await notificationService.notifySystem(
+      participant.user?._id || participant.user,
+      'مشاركة في تقرير العمل',
+      `تم اعتماد تقرير العمل "${reportLabel}" ومنحك ${formatPoints(distribution.participantPoints)} نقطة كمشارك في التنفيذ.`,
+      {
+        workReportId: String(report._id),
+        totalPoints: distribution.totalPoints,
+        reporterPoints: distribution.reporterPoints,
+        participantPoints: distribution.participantPoints,
+        participantCount: distribution.participantCount,
+      },
+    );
+  }
 
   await auditService.log({
     actorId: req.user.id,
@@ -456,14 +813,40 @@ export const approveWorkReport = asyncHandler(async (req, res) => {
     before,
     after: {
       status: 'APPROVED',
-      pointsAwarded: points,
+      pointsAwarded: distribution.totalPoints,
+      reporterPointsAwarded: distribution.reporterPoints,
+      participantPointsAwarded: distribution.participantPoints,
+      participantsTotalAwarded: distribution.participantsTotalPoints,
+      participantCount: distribution.participantCount,
     },
     req,
   });
 
+  const reportOperationRecipients = await resolveNotificationAudience({
+    userRepository,
+    actorId: authorId,
+    watchPermission: NotificationWatchPermission.OPERATION,
+    excludeUserIds: [req.user.id],
+  });
+  await notificationService.notifyOperationActivity(reportOperationRecipients, {
+    titleAr: 'اعتماد تقرير عمل',
+    actorName: req.user.name || req.user.fullName || 'المعتمد',
+    actionLabel: 'اعتماد تقرير عمل',
+    entityLabel: reportLabel,
+    occurredAt: updated.approvedAt || new Date(),
+    metadata: {
+      entityType: 'WORK_REPORT',
+      entityId: String(report._id),
+      action: 'WORK_REPORT_APPROVED',
+      totalPoints: distribution.totalPoints,
+      participantCount: distribution.participantCount,
+    },
+  });
+
   res.json({
     report: updated,
-    grantedPoints: points,
+    grantedPoints: distribution.totalPoints,
+    distribution,
   });
 });
 
@@ -501,6 +884,9 @@ export const rejectWorkReport = asyncHandler(async (req, res) => {
     rejectionReason: reason,
     managerComment: toCleanString(req.body.managerComment),
     pointsAwarded: 0,
+    reporterPointsAwarded: 0,
+    participantPointsAwarded: 0,
+    participantsTotalAwarded: 0,
     approvedBy: null,
     approvedAt: null,
   });
@@ -525,6 +911,26 @@ export const rejectWorkReport = asyncHandler(async (req, res) => {
       reason,
     },
     req,
+  });
+
+  const rejectedOperationRecipients = await resolveNotificationAudience({
+    userRepository,
+    actorId: report.user?._id || report.user,
+    watchPermission: NotificationWatchPermission.OPERATION,
+    excludeUserIds: [req.user.id],
+  });
+  await notificationService.notifyOperationActivity(rejectedOperationRecipients, {
+    titleAr: 'رفض تقرير عمل',
+    actorName: req.user.name || req.user.fullName || 'المعتمد',
+    actionLabel: 'رفض تقرير عمل',
+    entityLabel: report.title || report.projectName || 'تقرير عمل',
+    occurredAt: new Date(),
+    metadata: {
+      entityType: 'WORK_REPORT',
+      entityId: String(report._id),
+      action: 'WORK_REPORT_REJECTED',
+      reason,
+    },
   });
 
   res.json({ report: updated });

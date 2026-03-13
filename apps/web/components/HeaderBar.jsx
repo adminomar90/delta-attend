@@ -22,13 +22,12 @@ export default function HeaderBar({ title, subtitle, user, onMenuToggle }) {
         <button className="hamburger-btn" onClick={onMenuToggle} aria-label="القائمة">
           <span /><span /><span />
         </button>
-        <div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+        <div className="header-title-copy">
+          <div className="header-title-row">
             <img
               className="header-logo"
               src="/brand/delta-plus-logo.png"
               alt="Delta Plus"
-              style={{ width: 32, height: 32, objectFit: 'contain', filter: 'brightness(0) invert(1)' }}
             />
             <h1>{title}</h1>
           </div>
@@ -61,5 +60,4 @@ export default function HeaderBar({ title, subtitle, user, onMenuToggle }) {
     </header>
   );
 }
-
 

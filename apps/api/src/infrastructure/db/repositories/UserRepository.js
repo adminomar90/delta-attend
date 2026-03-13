@@ -159,7 +159,7 @@ export class UserRepository {
   }
 
   async listByIds(ids = []) {
-    return UserModel.find({ _id: { $in: ids }, active: true }).select('fullName role email');
+    return UserModel.find({ _id: { $in: ids }, active: true }).select('fullName role email employeeCode department jobTitle');
   }
 
   async incrementPointsAndSetLevel(userId, pointsDelta, level) {

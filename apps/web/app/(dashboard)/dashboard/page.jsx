@@ -3,6 +3,9 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { api, assetUrl } from '../../../lib/api';
 import KpiCard from '../../../components/KpiCard';
+import { authStorage } from '../../../lib/auth';
+import { useNotifications } from '../../../lib/notifications';
+import { Permission, hasPermission } from '../../../lib/permissions';
 
 const statusLabelMap = {
   TODO: 'جديدة',
@@ -176,32 +179,63 @@ function MermaidOrgChart({ roots }) {
 }
 
 export default function DashboardPage() {
+  const currentUser = authStorage.getUser();
+  const canSeeAttendanceMonitor = hasPermission(currentUser, Permission.VIEW_ATTENDANCE_MONITOR);
+  const canSeeHierarchy = hasPermission(currentUser, Permission.VIEW_EMPLOYEES_HIERARCHY);
+  const canSeeLeaderboard = hasPermission(currentUser, Permission.VIEW_LEADERBOARD);
+  const { lastNotification, lastNotificationAt } = useNotifications();
   const [data, setData] = useState(null);
   const [me, setMe] = useState(null);
+  const [attendanceMeta, setAttendanceMeta] = useState(null);
   const [orgChart, setOrgChart] = useState(null);
   const [attendanceOverview, setAttendanceOverview] = useState(null);
   const [error, setError] = useState('');
 
-  useEffect(() => {
-    const load = async () => {
-      try {
-        const [summary, gamification, chart, attendance] = await Promise.all([
-          api.get('/dashboard/summary'),
-          api.get('/gamification/me'),
-          api.get('/auth/org-chart').catch(() => ({ roots: [], totalEmployees: 0 })),
-          api.get('/attendance/admin/overview').catch(() => null),
-        ]);
-        setData(summary);
-        setMe(gamification);
-        setOrgChart(chart);
-        setAttendanceOverview(attendance);
-      } catch (err) {
-        setError(err.message || 'تعذر تحميل لوحة التحكم');
-      }
-    };
+  const load = useCallback(async () => {
+    setError('');
+    try {
+      const [summary, gamification, selfAttendance, chart, attendance] = await Promise.all([
+        api.get('/dashboard/summary'),
+        api.get('/gamification/me'),
+        api.get('/attendance/meta').catch(() => null),
+        canSeeHierarchy
+          ? api.get('/auth/org-chart').catch(() => ({ roots: [], totalEmployees: 0 }))
+          : Promise.resolve({ roots: [], totalEmployees: 0 }),
+        canSeeAttendanceMonitor
+          ? api.get('/attendance/admin/overview').catch(() => null)
+          : Promise.resolve(null),
+      ]);
+      setData(summary);
+      setMe(gamification);
+      setAttendanceMeta(selfAttendance);
+      setOrgChart(chart);
+      setAttendanceOverview(attendance);
+    } catch (err) {
+      setError(err.message || 'تعذر تحميل لوحة التحكم');
+    }
+  }, [canSeeAttendanceMonitor, canSeeHierarchy]);
 
+  useEffect(() => {
     load();
-  }, []);
+  }, [load]);
+
+  useEffect(() => {
+    if (!lastNotificationAt || !lastNotification?.type) {
+      return;
+    }
+
+    if (['ATTENDANCE_ACTIVITY', 'WORK_REPORT_CREATED', 'OPERATION_ACTIVITY'].includes(lastNotification.type)) {
+      load();
+    }
+  }, [lastNotification?.type, lastNotificationAt, load]);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      load();
+    }, 60000);
+
+    return () => window.clearInterval(timer);
+  }, [load]);
 
   if (error) {
     return <div className="card section">{error}</div>;
@@ -220,7 +254,70 @@ export default function DashboardPage() {
         <KpiCard label="مشاريع نشطة" value={data.summary.activeProjects} hint="على مستوى الشركة" tone="warn" />
       </section>
 
-      {attendanceOverview ? (
+      {attendanceMeta ? (
+        <section className="grid-3" style={{ marginTop: 16 }}>
+          <article className="card section">
+            <h2>حالتي في الحضور اليوم</h2>
+            <p style={{ marginTop: 0, color: 'var(--text-soft)' }}>
+              {attendanceMeta.currentStatus === 'OPEN'
+                ? 'تم تسجيل الحضور والموظف داخل الدوام الآن.'
+                : attendanceMeta.currentStatus === 'CHECKED_OUT'
+                  ? 'تم تسجيل الانصراف لهذا اليوم.'
+                  : attendanceMeta.currentStatus === 'LOGGED_IN'
+                    ? 'تم تسجيل الدخول اليوم — الموظف حاضر.'
+                    : 'لا يوجد تسجيل حضور اليوم حتى الآن.'}
+            </p>
+            <p style={{ margin: '6px 0' }}>
+              الحالة:{' '}
+              <span
+                className={`status-pill ${attendanceMeta.currentStatus === 'OPEN' || attendanceMeta.currentStatus === 'LOGGED_IN' ? 'status-inprogress' : attendanceMeta.currentStatus === 'CHECKED_OUT' ? 'status-approved' : 'status-rejected'}`}
+              >
+                {attendanceMeta.currentStatus === 'OPEN' || attendanceMeta.currentStatus === 'LOGGED_IN'
+                  ? 'حاضر'
+                  : attendanceMeta.currentStatus === 'CHECKED_OUT'
+                    ? 'منصرف'
+                    : 'غائب'}
+              </span>
+            </p>
+            <p style={{ margin: '6px 0', color: 'var(--text-soft)' }}>
+              ساعات اليوم: <strong>{attendanceMeta.todayWorkedHours || 0}</strong>
+            </p>
+            <p style={{ margin: '6px 0', color: 'var(--text-soft)' }}>
+              آخر دخول:{' '}
+              <strong>{attendanceMeta.openRecord?.checkInAt ? new Date(attendanceMeta.openRecord.checkInAt).toLocaleString('ar-IQ') : attendanceMeta.lastLoginAt ? new Date(attendanceMeta.lastLoginAt).toLocaleString('ar-IQ') : '-'}</strong>
+            </p>
+          </article>
+
+          <article className="card section">
+            <h2>جلسات اليوم</h2>
+            <p style={{ marginTop: 0, color: 'var(--text-soft)' }}>
+              عدد السجلات: <strong>{attendanceMeta.todayRecords?.length || 0}</strong>
+            </p>
+            <p style={{ margin: '6px 0', color: 'var(--text-soft)' }}>
+              آخر خروج:{' '}
+              <strong>{attendanceMeta.todayRecords?.[0]?.checkOutAt ? new Date(attendanceMeta.todayRecords[0].checkOutAt).toLocaleString('ar-IQ') : '-'}</strong>
+            </p>
+            <p style={{ margin: '6px 0', color: 'var(--text-soft)' }}>
+              نمط التحقق: <strong>{attendanceMeta.policy?.mode === 'ANY_LOCATION' ? 'من أي موقع' : 'نطاق جغرافي'}</strong>
+            </p>
+          </article>
+
+          <article className="card section">
+            <h2>التحديث المباشر</h2>
+            <p style={{ marginTop: 0, color: 'var(--text-soft)' }}>
+              يتم تحديث لوحة الحضور والعمليات تلقائيًا عند وصول إشعار جديد.
+            </p>
+            <p style={{ margin: '6px 0', color: 'var(--text-soft)' }}>
+              آخر تحديث: <strong>{lastNotificationAt ? new Date(lastNotificationAt).toLocaleTimeString('ar-IQ') : '—'}</strong>
+            </p>
+            <p style={{ margin: '6px 0', color: 'var(--text-soft)' }}>
+              آخر نوع إشعار: <strong>{lastNotification?.type || '—'}</strong>
+            </p>
+          </article>
+        </section>
+      ) : null}
+
+      {canSeeAttendanceMonitor && attendanceOverview ? (
         <section className="card section" style={{ marginTop: 16 }}>
           <h2>الحضور اليومي (الإدارة)</h2>
           <p style={{ marginTop: 0, color: 'var(--text-soft)' }}>
@@ -228,9 +325,9 @@ export default function DashboardPage() {
           </p>
           <div className="grid-4">
             <KpiCard
-              label="حضور حالي"
-              value={attendanceOverview.totals?.checkedInNow || 0}
-              hint="جلسات مفتوحة الآن"
+              label="حاضرون"
+              value={(attendanceOverview.totals?.checkedInNow || 0) + (attendanceOverview.totals?.loggedInToday || 0)}
+              hint="داخل الدوام أو سجّلوا الدخول"
             />
             <KpiCard
               label="غادروا اليوم"
@@ -266,12 +363,14 @@ export default function DashboardPage() {
                 <tr key={employee.userId}>
                   <td>{employee.fullName}</td>
                   <td>
-                    <span className={`status-pill ${employee.status === 'OPEN' ? 'status-inprogress' : 'status-approved'}`}>
+                    <span className={`status-pill ${employee.status === 'OPEN' || employee.status === 'LOGGED_IN' ? 'status-inprogress' : employee.status === 'CHECKED_OUT' ? 'status-approved' : 'status-rejected'}`}>
                       {employee.status === 'OPEN'
                         ? 'داخل الدوام'
                         : employee.status === 'CHECKED_OUT'
                           ? 'منصرف'
-                          : 'غائب'}
+                          : employee.status === 'LOGGED_IN'
+                            ? 'حاضر'
+                            : 'غائب'}
                     </span>
                   </td>
                   <td>{employee.todayWorkedHours}</td>
@@ -285,7 +384,10 @@ export default function DashboardPage() {
       ) : null}
 
       <section className="grid-3" style={{ marginTop: 16 }}>
-        <article className="card section">
+        <article
+          className={`card section ${canSeeLeaderboard ? '' : 'grid-span-2'}`}
+          style={canSeeLeaderboard ? undefined : { gridColumn: '1 / -1' }}
+        >
           <h2>تقدّمك في Gamification</h2>
           <p style={{ marginTop: 0, color: 'var(--text-soft)' }}>المستوى الحالي: <strong>{me.user.level}</strong></p>
           <div className="progress" style={{ marginBottom: 8 }}>
@@ -300,31 +402,33 @@ export default function DashboardPage() {
           </div>
         </article>
 
-        <article className="card section" style={{ gridColumn: 'span 2' }}>
-          <h2>لوحة الصدارة الشهرية</h2>
-          <table className="table">
-            <thead>
-              <tr>
-                <th>الترتيب</th>
-                <th>الاسم</th>
-                <th>الدور</th>
-                <th>المستوى</th>
-                <th>النقاط</th>
-              </tr>
-            </thead>
-            <tbody>
-              {data.leaderboard.map((item) => (
-                <tr key={String(item.userId)}>
-                  <td>#{item.rank}</td>
-                  <td>{item.fullName}</td>
-                  <td>{item.role}</td>
-                  <td>{item.level}</td>
-                  <td>{item.points}</td>
+        {canSeeLeaderboard ? (
+          <article className="card section grid-span-2">
+            <h2>لوحة الصدارة الشهرية</h2>
+            <table className="table">
+              <thead>
+                <tr>
+                  <th>الترتيب</th>
+                  <th>الاسم</th>
+                  <th>الدور</th>
+                  <th>المستوى</th>
+                  <th>النقاط</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </article>
+              </thead>
+              <tbody>
+                {data.leaderboard.map((item) => (
+                  <tr key={String(item.userId)}>
+                    <td>#{item.rank}</td>
+                    <td>{item.fullName}</td>
+                    <td>{item.role}</td>
+                    <td>{item.level}</td>
+                    <td>{item.points}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </article>
+        ) : null}
       </section>
 
       <section className="split" style={{ marginTop: 16 }}>
@@ -370,19 +474,20 @@ export default function DashboardPage() {
         </article>
       </section>
 
-      <section className="card section" style={{ marginTop: 16 }}>
-        <h2>الهيكل الإداري الهرمي</h2>
-        <p style={{ color: 'var(--text-soft)', marginTop: 0 }}>
-          إجمالي الموظفين: <strong>{orgChart?.totalEmployees || 0}</strong>
-        </p>
+      {canSeeHierarchy ? (
+        <section className="card section" style={{ marginTop: 16 }}>
+          <h2>الهيكل الإداري الهرمي</h2>
+          <p style={{ color: 'var(--text-soft)', marginTop: 0 }}>
+            إجمالي الموظفين: <strong>{orgChart?.totalEmployees || 0}</strong>
+          </p>
 
-        {orgChart?.roots?.length ? (
-          <MermaidOrgChart roots={orgChart.roots} />
-        ) : (
-          <p style={{ color: 'var(--text-soft)', margin: 0 }}>لا توجد بيانات هيكل إداري حالياً.</p>
-        )}
-      </section>
+          {orgChart?.roots?.length ? (
+            <MermaidOrgChart roots={orgChart.roots} />
+          ) : (
+            <p style={{ color: 'var(--text-soft)', margin: 0 }}>لا توجد بيانات هيكل إداري حالياً.</p>
+          )}
+        </section>
+      ) : null}
     </>
   );
 }
-

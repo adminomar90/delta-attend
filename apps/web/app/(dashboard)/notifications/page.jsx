@@ -9,6 +9,9 @@ const typeIcon = {
   TASK_APPROVAL_PROGRESS: '⏳',
   TASK_APPROVED: '✅',
   GOAL_ACHIEVED: '🏆',
+  ATTENDANCE_ACTIVITY: '⏱️',
+  WORK_REPORT_CREATED: '📝',
+  OPERATION_ACTIVITY: '📌',
   SYSTEM: '🔔',
 };
 
@@ -42,6 +45,7 @@ export default function NotificationsPage() {
     browserPermission,
     requestPermission,
     debug,
+    lastNotificationAt,
     testLocalNotification,
     testBackendNotification,
     testSSE,
@@ -59,6 +63,12 @@ export default function NotificationsPage() {
   };
 
   useEffect(() => { load(); }, []);
+
+  useEffect(() => {
+    if (lastNotificationAt) {
+      load();
+    }
+  }, [lastNotificationAt]);
 
   // Auto-scroll debug log
   useEffect(() => {

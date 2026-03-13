@@ -12,7 +12,10 @@ import {
   rejectAttendance,
 } from '../controllers/attendanceController.js';
 import { requireAuth } from '../middlewares/authMiddleware.js';
-import { canApproveTasks, canViewAnalytics } from '../middlewares/authorizationMiddleware.js';
+import {
+  canApproveTasks,
+  canViewAttendanceMonitor,
+} from '../middlewares/authorizationMiddleware.js';
 
 const attendanceRoutes = Router();
 
@@ -24,8 +27,8 @@ attendanceRoutes.post('/check-out', checkOut);
 attendanceRoutes.get('/approvals/pending', canApproveTasks, attendancePendingApprovals);
 attendanceRoutes.patch('/:id/approve', canApproveTasks, approveAttendance);
 attendanceRoutes.patch('/:id/reject', canApproveTasks, rejectAttendance);
-attendanceRoutes.get('/admin/overview', canViewAnalytics, attendanceAdminOverview);
-attendanceRoutes.get('/admin/export/excel', canViewAnalytics, attendanceAdminExportExcel);
-attendanceRoutes.get('/admin/export/pdf', canViewAnalytics, attendanceAdminExportPdf);
+attendanceRoutes.get('/admin/overview', canViewAttendanceMonitor, attendanceAdminOverview);
+attendanceRoutes.get('/admin/export/excel', canViewAttendanceMonitor, attendanceAdminExportExcel);
+attendanceRoutes.get('/admin/export/pdf', canViewAttendanceMonitor, attendanceAdminExportPdf);
 
 export default attendanceRoutes;

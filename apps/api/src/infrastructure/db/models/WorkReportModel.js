@@ -31,6 +31,53 @@ const reportImageSchema = new mongoose.Schema(
   { _id: false },
 );
 
+const workReportParticipantSchema = new mongoose.Schema(
+  {
+    user: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+      required: true,
+    },
+    fullName: {
+      type: String,
+      required: true,
+      trim: true,
+    },
+    employeeCode: {
+      type: String,
+      default: '',
+      trim: true,
+      uppercase: true,
+    },
+  },
+  { _id: false },
+);
+
+const workReportPdfFileSchema = new mongoose.Schema(
+  {
+    publicUrl: {
+      type: String,
+      default: '',
+      trim: true,
+    },
+    filename: {
+      type: String,
+      default: '',
+      trim: true,
+    },
+    size: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    generatedAt: {
+      type: Date,
+      default: null,
+    },
+  },
+  { _id: false },
+);
+
 const workReportSchema = new mongoose.Schema(
   {
     user: {
@@ -111,6 +158,24 @@ const workReportSchema = new mongoose.Schema(
       type: [reportImageSchema],
       default: [],
     },
+    participantCount: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    participants: {
+      type: [workReportParticipantSchema],
+      default: [],
+    },
+    pdfFile: {
+      type: workReportPdfFileSchema,
+      default: () => ({
+        publicUrl: '',
+        filename: '',
+        size: 0,
+        generatedAt: null,
+      }),
+    },
     status: {
       type: String,
       enum: ['SUBMITTED', 'APPROVED', 'REJECTED'],
@@ -128,6 +193,21 @@ const workReportSchema = new mongoose.Schema(
       trim: true,
     },
     pointsAwarded: {
+      type: Number,
+      min: 0,
+      default: 0,
+    },
+    reporterPointsAwarded: {
+      type: Number,
+      min: 0,
+      default: 0,
+    },
+    participantPointsAwarded: {
+      type: Number,
+      min: 0,
+      default: 0,
+    },
+    participantsTotalAwarded: {
       type: Number,
       min: 0,
       default: 0,

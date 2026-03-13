@@ -12,6 +12,8 @@ const menuIcons = {
   '/materials': '🏗️',
   '/approvals': '✅',
   '/work-reports': '📝',
+  '/completed-work-reports': '📚',
+  '/approval-history': '🗂️',
   '/projects': '📁',
   '/employees': '👥',
   '/goals': '🎯',
@@ -47,12 +49,38 @@ const menu = [
       Permission.REVIEW_MATERIAL_REQUESTS,
     ],
   },
-  { href: '/work-reports', label: 'تقارير العمل' },
-  { href: '/projects', label: 'المشاريع' },
-  { href: '/employees', label: 'الموظفون', anyPermissions: [Permission.MANAGE_USERS, Permission.MANAGE_TASKS] },
+  {
+    href: '/work-reports',
+    label: 'تقارير العمل',
+    anyPermissions: [
+      Permission.VIEW_OWN_WORK_REPORTS,
+      Permission.VIEW_TEAM_WORK_REPORTS,
+      Permission.APPROVE_TASKS,
+    ],
+  },
+  {
+    href: '/completed-work-reports',
+    label: 'التقارير المنجزة',
+    anyPermissions: [Permission.VIEW_COMPLETED_WORK_REPORTS],
+  },
+  {
+    href: '/approval-history',
+    label: 'سجل الاعتمادات',
+    anyPermissions: [Permission.VIEW_APPROVAL_HISTORY],
+  },
+  { href: '/projects', label: 'المشاريع', anyPermissions: [Permission.MANAGE_PROJECTS, Permission.APPROVE_PROJECTS] },
+  {
+    href: '/employees',
+    label: 'الموظفون',
+    anyPermissions: [
+      Permission.MANAGE_USERS,
+      Permission.MANAGE_TASKS,
+      Permission.VIEW_EMPLOYEES_HIERARCHY,
+    ],
+  },
   { href: '/goals', label: 'الأهداف' },
   { href: '/notifications', label: 'الإشعارات' },
-  { href: '/leaderboard', label: 'لوحة الصدارة' },
+  { href: '/leaderboard', label: 'لوحة الصدارة', anyPermissions: [Permission.VIEW_LEADERBOARD] },
   { href: '/points-admin', label: 'إدارة النقاط', anyPermissions: [Permission.MANAGE_GAMIFICATION] },
   {
     href: '/reports',
@@ -109,7 +137,7 @@ export default function Sidebar({ mobileOpen, onClose }) {
 
         <nav>
           {visibleMenu.map((item) => {
-            const active = pathname === item.href;
+            const active = pathname === item.href || pathname.startsWith(`${item.href}/`);
             return (
               <button
                 key={item.href}
@@ -133,4 +161,3 @@ export default function Sidebar({ mobileOpen, onClose }) {
     </>
   );
 }
-

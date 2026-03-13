@@ -10,7 +10,16 @@ const notificationSchema = new mongoose.Schema(
     },
     type: {
       type: String,
-      enum: ['TASK_ASSIGNED', 'TASK_APPROVAL_PROGRESS', 'TASK_APPROVED', 'GOAL_ACHIEVED', 'SYSTEM'],
+      enum: [
+        'TASK_ASSIGNED',
+        'TASK_APPROVAL_PROGRESS',
+        'TASK_APPROVED',
+        'GOAL_ACHIEVED',
+        'ATTENDANCE_ACTIVITY',
+        'WORK_REPORT_CREATED',
+        'OPERATION_ACTIVITY',
+        'SYSTEM',
+      ],
       default: 'SYSTEM',
     },
     titleAr: {

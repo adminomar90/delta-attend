@@ -6,6 +6,10 @@ import { ApproveTaskUseCase } from '../../application/use-cases/approveTask.useC
 import { ChangeTaskStatusUseCase } from '../../application/use-cases/changeTaskStatus.useCase.js';
 import { auditService } from '../../application/services/auditService.js';
 import { notificationService } from '../../application/services/notificationService.js';
+import {
+  NotificationWatchPermission,
+  resolveNotificationAudience,
+} from '../../application/services/notificationAudienceService.js';
 import { Roles, TaskStatus } from '../../shared/constants.js';
 import {
   applyManagedScopeOnFilter,
@@ -108,6 +112,26 @@ export const createTask = asyncHandler(async (req, res) => {
     req,
   });
 
+  const operationRecipients = await resolveNotificationAudience({
+    userRepository,
+    actorId: req.user.id,
+    watchPermission: NotificationWatchPermission.OPERATION,
+    excludeUserIds: [assignee],
+  });
+  await notificationService.notifyOperationActivity(operationRecipients, {
+    titleAr: 'إنشاء مهمة',
+    actorName: req.user.name || req.user.fullName || 'مستخدم النظام',
+    actionLabel: 'إنشاء مهمة',
+    entityLabel: title,
+    occurredAt: task.createdAt || new Date(),
+    metadata: {
+      entityType: 'TASK',
+      entityId: String(task._id),
+      action: 'TASK_CREATED',
+      assigneeId: String(assignee),
+    },
+  });
+
   res.status(201).json({ task: taskWithRefs });
 });
 
@@ -193,6 +217,34 @@ export const updateTaskStatus = asyncHandler(async (req, res) => {
     await taskRepository.updateById(req.params.id, { approvalTrail: [] });
   }
 
+  const statusLabelMap = {
+    [TaskStatus.TODO]: 'إعادة المهمة إلى جديدة',
+    [TaskStatus.IN_PROGRESS]: 'بدء تنفيذ المهمة',
+    [TaskStatus.SUBMITTED]: 'إرسال المهمة للاعتماد',
+    [TaskStatus.APPROVED]: 'اعتماد المهمة',
+    [TaskStatus.REJECTED]: 'رفض المهمة',
+  };
+  const taskOperationRecipients = await resolveNotificationAudience({
+    userRepository,
+    actorId: task.assignee?._id || task.assignee || req.user.id,
+    watchPermission: NotificationWatchPermission.OPERATION,
+    excludeUserIds: [req.user.id],
+  });
+  await notificationService.notifyOperationActivity(taskOperationRecipients, {
+    titleAr: 'تحديث حالة مهمة',
+    actorName: req.user.name || req.user.fullName || 'مستخدم النظام',
+    actionLabel: statusLabelMap[status] || `تحديث حالة المهمة إلى ${status}`,
+    entityLabel: task.title || 'مهمة',
+    occurredAt: new Date(),
+    metadata: {
+      entityType: 'TASK',
+      entityId: String(task._id),
+      action: 'TASK_STATUS_UPDATED',
+      previousStatus: task.status,
+      nextStatus: status,
+    },
+  });
+
   res.json({ task: updatedTask });
 });
 
@@ -266,6 +318,27 @@ export const approveTask = asyncHandler(async (req, res) => {
       req,
     });
 
+    const stagedApprovalRecipients = await resolveNotificationAudience({
+      userRepository,
+      actorId: task.assignee?._id || task.assignee,
+      watchPermission: NotificationWatchPermission.OPERATION,
+      excludeUserIds: [req.user.id],
+    });
+    await notificationService.notifyOperationActivity(stagedApprovalRecipients, {
+      titleAr: 'اعتماد مرحلي لمهمة',
+      actorName: req.user.name || req.user.fullName || 'مستخدم النظام',
+      actionLabel: 'اعتماد مرحلي لمهمة',
+      entityLabel: task.title || 'مهمة',
+      occurredAt: trailEntry.approvedAt,
+      metadata: {
+        entityType: 'TASK',
+        entityId: String(task._id),
+        action: 'TASK_APPROVAL_STAGE_ACCEPTED',
+        approvalsCompleted: nextCount,
+        approvalsRequired: required,
+      },
+    });
+
     return res.json({
       task: stagedTask,
       message: 'Task received staged approval and is waiting for final approvals',
@@ -285,6 +358,27 @@ export const approveTask = asyncHandler(async (req, res) => {
     manualPoints,
     trailEntry,
     req,
+  });
+
+  const finalApprovalRecipients = await resolveNotificationAudience({
+    userRepository,
+    actorId: task.assignee?._id || task.assignee,
+    watchPermission: NotificationWatchPermission.OPERATION,
+    excludeUserIds: [req.user.id],
+  });
+  await notificationService.notifyOperationActivity(finalApprovalRecipients, {
+    titleAr: 'اعتماد مهمة',
+    actorName: req.user.name || req.user.fullName || 'مستخدم النظام',
+    actionLabel: 'اعتماد مهمة',
+    entityLabel: task.title || 'مهمة',
+    occurredAt: new Date(),
+    metadata: {
+      entityType: 'TASK',
+      entityId: String(task._id),
+      action: 'TASK_APPROVED',
+      qualityScore,
+      grantedPoints: result.grantedPoints || 0,
+    },
   });
 
   res.json({
@@ -307,4 +401,3 @@ export const getMyActivity = asyncHandler(async (req, res) => {
     pointsHistory: myLedger,
   });
 });
-

@@ -1,11 +1,8 @@
-import { Permission, RolePermissions } from '../../shared/constants.js';
+import { Permission } from '../../shared/constants.js';
+import { resolvePermissions } from '../../shared/permissions.js';
 import { AppError } from '../../shared/errors.js';
 
-export const resolvePermissions = (user = {}) => {
-  const rolePermissions = RolePermissions[user.role] || [];
-  const customPermissions = Array.isArray(user.customPermissions) ? user.customPermissions : [];
-  return [...new Set([...rolePermissions, ...customPermissions])];
-};
+export { resolvePermissions } from '../../shared/permissions.js';
 
 export const requirePermission = (permission) => (req, res, next) => {
   const permissions = resolvePermissions(req.user);
@@ -49,3 +46,12 @@ export const canDispatchMaterialRequests = requirePermission(Permission.DISPATCH
 export const canReconcileMaterialCustody = requirePermission(Permission.RECONCILE_MATERIAL_CUSTODY);
 export const canCloseMaterialCustody = requirePermission(Permission.CLOSE_MATERIAL_CUSTODY);
 export const canViewMaterialReports = requirePermission(Permission.VIEW_MATERIAL_REPORTS);
+export const canViewAttendanceMonitor = requirePermission(Permission.VIEW_ATTENDANCE_MONITOR);
+export const canViewEmployeesHierarchy = requirePermission(Permission.VIEW_EMPLOYEES_HIERARCHY);
+export const canViewOwnWorkReports = requirePermission(Permission.VIEW_OWN_WORK_REPORTS);
+export const canViewTeamWorkReports = requirePermission(Permission.VIEW_TEAM_WORK_REPORTS);
+export const canViewLeaderboard = requirePermission(Permission.VIEW_LEADERBOARD);
+export const canSendReportsWhatsapp = requirePermission(Permission.SEND_REPORTS_WHATSAPP);
+export const canViewCompletedWorkReports = requirePermission(Permission.VIEW_COMPLETED_WORK_REPORTS);
+export const canViewApprovalHistory = requirePermission(Permission.VIEW_APPROVAL_HISTORY);
+export const canExportApprovalHistory = requirePermission(Permission.EXPORT_APPROVAL_HISTORY);

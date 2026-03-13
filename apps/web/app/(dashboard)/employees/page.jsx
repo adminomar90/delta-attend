@@ -78,12 +78,22 @@ export default function EmployeesPage() {
   const [createForm, setCreateForm] = useState(defaultCreateForm);
   const [editForm, setEditForm] = useState(defaultEditForm);
   const [importFile, setImportFile] = useState(null);
+  const [resetPasswordTarget, setResetPasswordTarget] = useState(null);
+  const [resetPasswordValue, setResetPasswordValue] = useState('');
+  const [documentCategoryTarget, setDocumentCategoryTarget] = useState(null);
+  const [documentCategoryFile, setDocumentCategoryFile] = useState(null);
+  const [documentCategory, setDocumentCategory] = useState('OTHER');
+  const [importResult, setImportResult] = useState(null);
   const [permissionTarget, setPermissionTarget] = useState(null);
   const [selectedPermissions, setSelectedPermissions] = useState([]);
   const currentUser = authStorage.getUser();
 
   const canViewUsers = useMemo(() => {
-    return hasAnyPermission(currentUser, [Permission.MANAGE_USERS, Permission.MANAGE_TASKS]);
+    return hasAnyPermission(currentUser, [
+      Permission.MANAGE_USERS,
+      Permission.MANAGE_TASKS,
+      Permission.VIEW_EMPLOYEES_HIERARCHY,
+    ]);
   }, [currentUser?.role, currentUser?.customPermissions, currentUser?.permissions]);
 
   const canManageUsers = useMemo(() => {
@@ -209,16 +219,21 @@ export default function EmployeesPage() {
   };
 
   const resetPassword = async (user) => {
-    const newPassword = window.prompt('ادخل كلمة المرور الجديدة (أو اتركه فارغًا لتوليد كلمة مرور مؤقتة):', '');
+    if (!resetPasswordTarget) {
+      setResetPasswordTarget(user);
+      setResetPasswordValue('');
+      return;
+    }
 
     setError('');
     try {
-      const response = await api.patch(`/auth/users/${user._id || user.id}/reset-password`, {
-        newPassword: newPassword || undefined,
+      await api.patch(`/auth/users/${user._id || user.id}/reset-password`, {
+        newPassword: resetPasswordValue || undefined,
       });
-      if (response?.temporaryPassword) {
-        window.alert(`تم إعادة التعيين. كلمة المرور المؤقتة: ${response.temporaryPassword}`);
-      }
+      setResetPasswordTarget(null);
+      setResetPasswordValue('');
+      setError('');
+      setImportResult('تم إعادة تعيين كلمة المرور بنجاح — تم إرسال كلمة المرور الجديدة عبر البريد الإلكتروني.');
     } catch (err) {
       setError(err.message || 'فشل إعادة تعيين كلمة المرور');
     }
@@ -287,15 +302,23 @@ export default function EmployeesPage() {
   const uploadDocument = async (user, file) => {
     if (!file) return;
 
-    const category = window.prompt('فئة المستند: CONTRACT أو NATIONAL_ID أو CERTIFICATE أو OTHER', 'OTHER') || 'OTHER';
+    if (!documentCategoryTarget) {
+      setDocumentCategoryTarget(user);
+      setDocumentCategoryFile(file);
+      setDocumentCategory('OTHER');
+      return;
+    }
+
     const payload = new FormData();
-    payload.append('file', file);
-    payload.append('category', category);
+    payload.append('file', documentCategoryFile || file);
+    payload.append('category', documentCategory);
 
     setError('');
     try {
       await api.post(`/auth/users/${user._id || user.id}/files`, payload);
-      window.alert('تم رفع المستند بنجاح');
+      setDocumentCategoryTarget(null);
+      setDocumentCategoryFile(null);
+      setImportResult('تم رفع المستند بنجاح');
     } catch (err) {
       setError(err.message || 'فشل رفع المستند');
     }
@@ -315,7 +338,7 @@ export default function EmployeesPage() {
       payload.append('file', importFile);
       const response = await api.post('/auth/users/import', payload);
 
-      window.alert(`تمت العملية.\nتم الإنشاء: ${response.report.created}\nتم التجاوز: ${response.report.skipped}\nفشل: ${response.report.failed}`);
+      setImportResult(`تمت العملية — تم الإنشاء: ${response.report.created} | تم التجاوز: ${response.report.skipped} | فشل: ${response.report.failed}`);
       setImportFile(null);
       await load();
     } catch (err) {
@@ -388,12 +411,12 @@ export default function EmployeesPage() {
                 الفريق
                 <input className="input" value={createForm.team} onChange={(e) => setCreateForm((prev) => ({ ...prev, team: e.target.value }))} />
               </label>
-              <div style={{ alignSelf: 'end' }}>
-                <button className="btn btn-primary" type="submit" disabled={saving}>
-                  {saving ? 'جارٍ الإضافة...' : 'إضافة الموظف'}
-                </button>
-              </div>
-            </form>
+            <div className="form-actions">
+              <button className="btn btn-primary" type="submit" disabled={saving}>
+                {saving ? 'جارٍ الإضافة...' : 'إضافة الموظف'}
+              </button>
+            </div>
+          </form>
           </section>
 
           <section className="card section" style={{ marginBottom: 16 }}>
@@ -401,8 +424,8 @@ export default function EmployeesPage() {
             <p style={{ color: 'var(--text-soft)' }}>
               الأعمدة المطلوبة: <code>fullName,email,role,password</code>
             </p>
-            <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
-              <input className="input" type="file" accept=".xlsx,.xls" onChange={(e) => setImportFile(e.target.files?.[0] || null)} style={{ maxWidth: 360 }} />
+            <div className="action-row">
+              <input className="input file-input-compact" type="file" accept=".xlsx,.xls" onChange={(e) => setImportFile(e.target.files?.[0] || null)} />
               <button className="btn btn-soft" onClick={importUsers} disabled={importing} type="button">
                 {importing ? 'جارٍ الاستيراد...' : 'استيراد'}
               </button>
@@ -439,7 +462,7 @@ export default function EmployeesPage() {
               </label>
             ))}
           </div>
-          <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+          <div className="form-actions" style={{ marginTop: 12 }}>
             <button className="btn btn-primary" type="button" onClick={savePermissions} disabled={updatingPermissions}>
               {updatingPermissions ? 'جارٍ الحفظ...' : 'حفظ الصلاحيات'}
             </button>
@@ -488,15 +511,15 @@ export default function EmployeesPage() {
                 disabled
               />
             </label>
-            <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <label className="checkbox-row">
               <input type="checkbox" checked={editForm.twoFactorEnabled} onChange={(e) => setEditForm((prev) => ({ ...prev, twoFactorEnabled: e.target.checked }))} />
               تفعيل 2FA
             </label>
-            <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <label className="checkbox-row">
               <input type="checkbox" checked={editForm.forcePasswordChange} onChange={(e) => setEditForm((prev) => ({ ...prev, forcePasswordChange: e.target.checked }))} />
               إجبار تغيير كلمة المرور
             </label>
-            <div style={{ display: 'flex', gap: 8, alignSelf: 'end' }}>
+            <div className="form-actions">
               <button className="btn btn-primary" type="submit" disabled={saving}>{saving ? 'جارٍ الحفظ...' : 'حفظ التعديلات'}</button>
               <button className="btn btn-soft" type="button" onClick={() => setEditForm(defaultEditForm)}>إلغاء</button>
             </div>
@@ -615,7 +638,70 @@ export default function EmployeesPage() {
           </table>
         </section>
       ) : null}
+
+      {importResult ? (
+        <section className="card section" style={{ marginTop: 12 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10 }}>
+            <span style={{ color: '#9bc8ff' }}>{importResult}</span>
+            <button type="button" className="btn btn-soft" onClick={() => setImportResult(null)}>إغلاق</button>
+          </div>
+        </section>
+      ) : null}
+
+      {resetPasswordTarget ? (
+        <div className="modal-backdrop" onClick={() => setResetPasswordTarget(null)}>
+          <div className="modal-panel" onClick={(e) => e.stopPropagation()}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+              <h3 style={{ margin: 0 }}>إعادة تعيين كلمة المرور</h3>
+              <button type="button" className="modal-close" onClick={() => setResetPasswordTarget(null)}>&times;</button>
+            </div>
+            <p style={{ color: 'var(--text-soft)', margin: '0 0 12px' }}>
+              الموظف: {resetPasswordTarget.fullName}
+            </p>
+            <label>
+              كلمة المرور الجديدة (أو اتركه فارغًا لتوليد كلمة مرور مؤقتة)
+              <input
+                className="input"
+                type="password"
+                value={resetPasswordValue}
+                onChange={(e) => setResetPasswordValue(e.target.value)}
+                placeholder="كلمة مرور جديدة (اختياري)"
+              />
+            </label>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 16 }}>
+              <button type="button" className="btn btn-soft" onClick={() => setResetPasswordTarget(null)}>إلغاء</button>
+              <button type="button" className="btn btn-primary" onClick={() => resetPassword(resetPasswordTarget)}>تأكيد إعادة التعيين</button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {documentCategoryTarget ? (
+        <div className="modal-backdrop" onClick={() => { setDocumentCategoryTarget(null); setDocumentCategoryFile(null); }}>
+          <div className="modal-panel" onClick={(e) => e.stopPropagation()}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+              <h3 style={{ margin: 0 }}>فئة المستند</h3>
+              <button type="button" className="modal-close" onClick={() => { setDocumentCategoryTarget(null); setDocumentCategoryFile(null); }}>&times;</button>
+            </div>
+            <p style={{ color: 'var(--text-soft)', margin: '0 0 12px' }}>
+              الموظف: {documentCategoryTarget.fullName}
+            </p>
+            <label>
+              اختر فئة المستند
+              <select className="select" value={documentCategory} onChange={(e) => setDocumentCategory(e.target.value)}>
+                <option value="CONTRACT">عقد عمل</option>
+                <option value="NATIONAL_ID">هوية وطنية</option>
+                <option value="CERTIFICATE">شهادة</option>
+                <option value="OTHER">أخرى</option>
+              </select>
+            </label>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 16 }}>
+              <button type="button" className="btn btn-soft" onClick={() => { setDocumentCategoryTarget(null); setDocumentCategoryFile(null); }}>إلغاء</button>
+              <button type="button" className="btn btn-primary" onClick={() => uploadDocument(documentCategoryTarget, documentCategoryFile)}>رفع المستند</button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </>
   );
 }
-

@@ -34,6 +34,14 @@ const titleByPath = {
     title: 'تقارير العمل',
     subtitle: 'إنشاء تقارير إنجاز يومية/دورية مع صور واعتماد المدير بالنقاط',
   },
+  '/completed-work-reports': {
+    title: 'التقارير المنجزة',
+    subtitle: 'أرشيف التقارير المعتمدة مع نفس ملف PDF المحفوظ وقت إنشاء التقرير',
+  },
+  '/approval-history': {
+    title: 'سجل الاعتمادات',
+    subtitle: 'أرشيف العمليات المعتمدة بالكامل مع تفاصيل المسار والموافقات والتصدير',
+  },
   '/projects': {
     title: 'المشاريع',
     subtitle: 'إدارة المشاريع والفرق وربط المهام بالأهداف',
@@ -77,7 +85,20 @@ const routePermissionRules = {
     Permission.MANAGE_MATERIAL_CATALOG,
   ],
   '/approvals': [Permission.APPROVE_TASKS, Permission.APPROVE_PROJECTS, Permission.REVIEW_MATERIAL_REQUESTS],
-  '/employees': [Permission.MANAGE_USERS, Permission.MANAGE_TASKS],
+  '/work-reports': [
+    Permission.VIEW_OWN_WORK_REPORTS,
+    Permission.VIEW_TEAM_WORK_REPORTS,
+    Permission.APPROVE_TASKS,
+  ],
+  '/projects': [Permission.MANAGE_PROJECTS, Permission.APPROVE_PROJECTS],
+  '/employees': [
+    Permission.MANAGE_USERS,
+    Permission.MANAGE_TASKS,
+    Permission.VIEW_EMPLOYEES_HIERARCHY,
+  ],
+  '/completed-work-reports': [Permission.VIEW_COMPLETED_WORK_REPORTS],
+  '/approval-history': [Permission.VIEW_APPROVAL_HISTORY],
+  '/leaderboard': [Permission.VIEW_LEADERBOARD],
   '/reports': [
     Permission.VIEW_ANALYTICS,
     Permission.VIEW_EXECUTIVE_REPORTS,
@@ -85,6 +106,9 @@ const routePermissionRules = {
   ],
   '/audit-log': [Permission.VIEW_AUDIT_LOGS],
 };
+
+const resolveRouteValue = (pathname, config) =>
+  Object.entries(config).find(([route]) => pathname === route || pathname.startsWith(`${route}/`))?.[1] || null;
 
 export default function AppShell({ children }) {
   const pathname = usePathname();
@@ -102,7 +126,7 @@ export default function AppShell({ children }) {
       return;
     }
 
-    const requiredPermissions = routePermissionRules[pathname] || null;
+    const requiredPermissions = resolveRouteValue(pathname, routePermissionRules);
     if (requiredPermissions && !hasAnyPermission(currentUser, requiredPermissions)) {
       router.push('/dashboard');
       return;
@@ -117,11 +141,30 @@ export default function AppShell({ children }) {
     setSidebarOpen(false);
   }, [pathname]);
 
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return undefined;
+    }
+
+    const previousOverflow = document.body.style.overflow;
+    const syncOverflow = () => {
+      document.body.style.overflow = sidebarOpen && window.innerWidth < 1101 ? 'hidden' : '';
+    };
+
+    syncOverflow();
+    window.addEventListener('resize', syncOverflow);
+
+    return () => {
+      window.removeEventListener('resize', syncOverflow);
+      document.body.style.overflow = previousOverflow;
+    };
+  }, [sidebarOpen]);
+
   if (isChecking) {
     return null;
   }
 
-  const page = titleByPath[pathname] || {
+  const page = resolveRouteValue(pathname, titleByPath) || {
     title: 'Delta Plus',
     subtitle: 'Gamification Platform',
   };

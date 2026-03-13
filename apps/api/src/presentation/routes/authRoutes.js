@@ -42,7 +42,12 @@ authRoutes.post('/admin/setup', createSuperAdmin);
 
 authRoutes.get('/me', requireAuth, me);
 authRoutes.post('/me/avatar', requireAuth, uploadAvatarMiddleware.single('file'), uploadMyAvatar);
-authRoutes.get('/org-chart', requireAuth, orgChart);
+authRoutes.get(
+  '/org-chart',
+  requireAuth,
+  requireAnyPermission(Permission.MANAGE_USERS, Permission.MANAGE_TASKS, Permission.VIEW_EMPLOYEES_HIERARCHY),
+  orgChart,
+);
 authRoutes.get('/permissions', requireAuth, listAvailablePermissions);
 
 authRoutes.post('/users', requireAuth, canManageUsers, createUser);
@@ -50,7 +55,11 @@ authRoutes.post('/users/import', requireAuth, canManageUsers, uploadImportFileMi
 authRoutes.get(
   '/users',
   requireAuth,
-  requireAnyPermission(Permission.MANAGE_USERS, Permission.MANAGE_TASKS),
+  requireAnyPermission(
+    Permission.MANAGE_USERS,
+    Permission.MANAGE_TASKS,
+    Permission.VIEW_EMPLOYEES_HIERARCHY,
+  ),
   listUsers,
 );
 authRoutes.patch('/users/:id', requireAuth, canManageUsers, updateUser);
