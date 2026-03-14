@@ -416,7 +416,15 @@ export default function EmployeesPage() {
       payload.append('file', optimizedFile);
 
       setAvatarUploadingUserId(getUserId(user));
-      await api.post(`/auth/users/${user._id || user.id}/avatar`, payload);
+      const result = await api.post(`/auth/users/${user._id || user.id}/avatar`, payload);
+
+      // Update localStorage if this is the current user so header avatar refreshes
+      const uid = String(user._id || user.id);
+      if (uid === String(currentUser?.id) && result?.avatarUrl) {
+        const updated = { ...authStorage.getUser(), avatarUrl: result.avatarUrl };
+        authStorage.setUser(updated);
+      }
+
       setImportResult('تم تحديث الصورة الشخصية بنجاح');
       await load();
     } catch (err) {

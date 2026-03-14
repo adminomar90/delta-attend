@@ -42,6 +42,7 @@ export const authStorage = {
       return;
     }
     window.localStorage.setItem(USER_KEY, JSON.stringify(user));
+    window.dispatchEvent(new CustomEvent('user-updated', { detail: user }));
   },
   clearUser() {
     if (typeof window === 'undefined') {

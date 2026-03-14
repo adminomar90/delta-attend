@@ -136,6 +136,15 @@ export default function AppShell({ children }) {
     setIsChecking(false);
   }, [pathname, router]);
 
+  // Refresh user state when user data changes (e.g. avatar upload)
+  useEffect(() => {
+    const onUserUpdated = (e) => {
+      if (e.detail) setUser(e.detail);
+    };
+    window.addEventListener('user-updated', onUserUpdated);
+    return () => window.removeEventListener('user-updated', onUserUpdated);
+  }, []);
+
   // Close sidebar on route change
   useEffect(() => {
     setSidebarOpen(false);
