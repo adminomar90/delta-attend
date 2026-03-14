@@ -170,6 +170,131 @@ export const notificationService = {
     });
   },
 
+  async notifyGoalAssigned(userId, goal) {
+    return createAndPush({
+      user: userId,
+      type: 'GOAL_ASSIGNED',
+      titleAr: 'تم تعيين هدف جديد',
+      messageAr: `تم تعيين هدف جديد لك: ${goal.title}`,
+      metadata: {
+        goalId: goal._id,
+        targetPoints: goal.targetPoints,
+        targetLevel: goal.targetLevel,
+      },
+    });
+  },
+
+  async notifyGoalProgress(userId, goal, progressPercent) {
+    return createAndPush({
+      user: userId,
+      type: 'GOAL_PROGRESS',
+      titleAr: 'تقدم في الهدف',
+      messageAr: `وصلت إلى ${progressPercent}% من الهدف: ${goal.title}`,
+      metadata: {
+        goalId: goal._id,
+        progressPercent,
+        currentPoints: goal.currentPoints,
+        targetPoints: goal.targetPoints,
+      },
+    });
+  },
+
+  async notifyLevelPromoted(userId, payload = {}) {
+    return createAndPush({
+      user: userId,
+      type: 'LEVEL_PROMOTED',
+      titleAr: 'ترقية مستوى',
+      messageAr: `تمت ترقيتك من المستوى ${payload.previousLevel || '-'} إلى المستوى ${payload.nextLevel || '-'} بعد تحقيق الهدف ${payload.goal?.title || '-'}.`,
+      metadata: {
+        goalId: payload.goal?._id || null,
+        previousLevel: payload.previousLevel || null,
+        nextLevel: payload.nextLevel || null,
+      },
+    });
+  },
+
+  async notifyFinancialRequestAssigned(userIds, payload = {}) {
+    const recipients = Array.isArray(userIds) ? userIds : [userIds];
+    return createManyAndPush(recipients, {
+      type: 'FINANCIAL_REQUEST_ASSIGNED',
+      titleAr: payload.titleAr || 'طلب صرف مالي جديد',
+      messageAr: payload.messageAr || `تم تحويل طلب الصرف ${payload.requestNo || ''} إليك للمراجعة.`,
+      metadata: {
+        requestId: payload.requestId || null,
+        requestNo: payload.requestNo || '',
+        status: payload.status || '',
+        stage: payload.stage || '',
+        amount: payload.amount || 0,
+      },
+    });
+  },
+
+  async notifyFinancialRequestStatus(userIds, payload = {}) {
+    const recipients = Array.isArray(userIds) ? userIds : [userIds];
+    return createManyAndPush(recipients, {
+      type: 'FINANCIAL_REQUEST_STATUS',
+      titleAr: payload.titleAr || 'تحديث طلب صرف مالي',
+      messageAr: payload.messageAr || `تم تحديث حالة طلب الصرف ${payload.requestNo || ''}.`,
+      metadata: {
+        requestId: payload.requestId || null,
+        requestNo: payload.requestNo || '',
+        status: payload.status || '',
+        previousStatus: payload.previousStatus || '',
+        amount: payload.amount || 0,
+        action: payload.action || '',
+      },
+    });
+  },
+
+  async notifyMaintenanceReportRequest(userIds, payload = {}) {
+    const recipients = Array.isArray(userIds) ? userIds : [userIds];
+    return createManyAndPush(recipients, {
+      type: 'MAINTENANCE_REPORT_REQUEST',
+      titleAr: payload.titleAr || 'طلب تقرير صيانة جديد',
+      messageAr: payload.messageAr || `تم إنشاء طلب تقرير الصيانة ${payload.requestNo || ''}.`,
+      metadata: {
+        requestId: payload.requestId || null,
+        requestNo: payload.requestNo || '',
+        status: payload.status || '',
+        customerName: payload.customerName || '',
+        projectNumber: payload.projectNumber || '',
+      },
+    });
+  },
+
+  async notifyMaintenanceReportStatus(userIds, payload = {}) {
+    const recipients = Array.isArray(userIds) ? userIds : [userIds];
+    return createManyAndPush(recipients, {
+      type: 'MAINTENANCE_REPORT_STATUS',
+      titleAr: payload.titleAr || 'تحديث تقرير الصيانة',
+      messageAr: payload.messageAr || `تم تحديث حالة تقرير الصيانة ${payload.requestNo || ''}.`,
+      metadata: {
+        requestId: payload.requestId || null,
+        requestNo: payload.requestNo || '',
+        status: payload.status || '',
+        previousStatus: payload.previousStatus || '',
+        action: payload.action || '',
+        customerName: payload.customerName || '',
+      },
+    });
+  },
+
+  async notifyMaintenanceReportFeedback(userIds, payload = {}) {
+    const recipients = Array.isArray(userIds) ? userIds : [userIds];
+    return createManyAndPush(recipients, {
+      type: 'MAINTENANCE_REPORT_FEEDBACK',
+      titleAr: payload.titleAr || 'تقييم جديد لتقرير الصيانة',
+      messageAr: payload.messageAr || `تم استلام تقييم جديد لتقرير الصيانة ${payload.requestNo || ''}.`,
+      metadata: {
+        requestId: payload.requestId || null,
+        requestNo: payload.requestNo || '',
+        customerName: payload.customerName || '',
+        companyRating: payload.companyRating || 0,
+        employeeRating: payload.employeeRating || 0,
+      },
+    });
+  },
+
   async notifyAttendanceActivity(userIds, payload = {}) {
     const occurredAt = payload.occurredAt ? new Date(payload.occurredAt) : new Date();
     const formattedDate = occurredAt.toLocaleDateString('ar-IQ');

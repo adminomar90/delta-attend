@@ -4,12 +4,22 @@ import ExcelJS from 'exceljs';
 import { UserRepository } from '../../infrastructure/db/repositories/UserRepository.js';
 import { EmployeeFileRepository } from '../../infrastructure/db/repositories/EmployeeFileRepository.js';
 import { authTokenService } from '../../application/services/authTokenService.js';
+import { auditService } from '../../application/services/auditService.js';
 import { emailService } from '../../application/services/emailService.js';
+import { notificationService } from '../../application/services/notificationService.js';
 import { Permission, Roles } from '../../shared/constants.js';
 import { resolveManagedUserIds } from '../../shared/accessScope.js';
-import { hasAnyPermission, resolvePermissions } from '../../shared/permissions.js';
+import { hasAnyPermission, hasPermission, resolvePermissions } from '../../shared/permissions.js';
 import { AppError, asyncHandler } from '../../shared/errors.js';
 import { env } from '../../config/env.js';
+import {
+  buildUsersById,
+  isActiveHierarchyUser,
+  isSoftDeletedUser,
+  resolveEffectiveManagerId,
+  toHierarchyUserId,
+  wouldCreateManagementCycle,
+} from '../../shared/employeeHierarchy.js';
 import { generateOtpCode, hashOtp, validatePasswordStrength } from '../../shared/security.js';
 
 const userRepository = new UserRepository();
@@ -72,6 +82,164 @@ const enforcePasswordPolicy = (password) => {
   if (!result.valid) {
     throw new AppError(`Password policy mismatch: ${result.failures.join(', ')}`, 400);
   }
+};
+
+const roleLabelMap = {
+  [Roles.GENERAL_MANAGER]: 'مدير عام',
+  [Roles.HR_MANAGER]: 'مدير موارد بشرية',
+  [Roles.FINANCIAL_MANAGER]: 'مدير مالي',
+  [Roles.PROJECT_MANAGER]: 'مدير مشروع',
+  [Roles.ASSISTANT_PROJECT_MANAGER]: 'مساعد مدير مشروع',
+  [Roles.TEAM_LEAD]: 'قائد فريق',
+  [Roles.TECHNICAL_STAFF]: 'موظف تقني',
+};
+
+const serializeManagerSummary = (manager) => {
+  if (!manager) {
+    return null;
+  }
+
+  return {
+    id: toHierarchyUserId(manager),
+    fullName: manager.fullName || '',
+    role: manager.role || '',
+    jobTitle: manager.jobTitle || '',
+    active: manager.active !== false,
+  };
+};
+
+const snapshotUser = (user) => ({
+  id: toHierarchyUserId(user),
+  fullName: user?.fullName || '',
+  email: user?.email || '',
+  role: user?.role || '',
+  roleLabel: roleLabelMap[user?.role] || user?.role || '',
+  employeeCode: user?.employeeCode || '',
+  department: user?.department || '',
+  jobTitle: user?.jobTitle || '',
+  manager: serializeManagerSummary(user?.manager),
+  active: !!user?.active,
+  deletedAt: user?.deletedAt || null,
+  avatarUrl: user?.avatarUrl || '',
+  team: user?.team || '',
+});
+
+const resolveUserOperationRecipients = async ({
+  targetUser,
+  previousManagerId = '',
+  nextManagerId = '',
+  excludeUserIds = [],
+} = {}) => {
+  const recipients = new Set();
+  const users = await userRepository.listActive({ includeManager: false });
+  const usersById = buildUsersById(users);
+  const targetId = toHierarchyUserId(targetUser);
+
+  const addRecipient = (value) => {
+    const userId = toHierarchyUserId(value);
+    if (!userId || userId === targetId || !usersById.has(userId)) {
+      return;
+    }
+
+    recipients.add(userId);
+  };
+
+  addRecipient(previousManagerId);
+  addRecipient(nextManagerId);
+  addRecipient(targetUser?.manager);
+
+  const previousManager = usersById.get(toHierarchyUserId(previousManagerId));
+  const nextManager = usersById.get(toHierarchyUserId(nextManagerId));
+
+  addRecipient(previousManager?.manager);
+  addRecipient(nextManager?.manager);
+
+  users.forEach((user) => {
+    if (
+      user.role === Roles.GENERAL_MANAGER
+      || hasPermission(user, Permission.MANAGE_USERS)
+      || hasPermission(user, Permission.VIEW_OPERATION_NOTIFICATIONS)
+    ) {
+      addRecipient(user);
+    }
+  });
+
+  const excluded = new Set(excludeUserIds.map((item) => toHierarchyUserId(item)).filter(Boolean));
+
+  return [...recipients].filter((userId) => !excluded.has(userId));
+};
+
+const notifyUserOperation = async ({
+  req,
+  targetUser,
+  previousManagerId = '',
+  nextManagerId = '',
+  action,
+  actionLabel,
+  titleAr,
+  metadata = {},
+} = {}) => {
+  const recipients = await resolveUserOperationRecipients({
+    targetUser,
+    previousManagerId,
+    nextManagerId,
+    excludeUserIds: [req.user.id],
+  });
+
+  if (!recipients.length) {
+    return;
+  }
+
+  await notificationService.notifyOperationActivity(recipients, {
+    titleAr,
+    actorName: req.user.fullName || req.user.name || 'مستخدم النظام',
+    actionLabel,
+    entityLabel: targetUser?.fullName || targetUser?.email || toHierarchyUserId(targetUser),
+    occurredAt: new Date(),
+    metadata: {
+      entityType: 'USER',
+      entityId: toHierarchyUserId(targetUser),
+      action,
+      ...metadata,
+    },
+  });
+};
+
+const resolveDeletionFallbackManager = async ({ targetUser, directReports = [] } = {}) => {
+  if (!directReports.length) {
+    return null;
+  }
+
+  const users = await userRepository.listForManagement({
+    includeManager: false,
+    includeInactive: true,
+  });
+  const usersById = buildUsersById(users);
+  const targetId = toHierarchyUserId(targetUser);
+  let fallbackManagerId = resolveEffectiveManagerId({
+    user: targetUser,
+    usersById,
+    skipInactiveManagers: true,
+  });
+
+  if (!fallbackManagerId || fallbackManagerId === targetId) {
+    const fallbackManager = users.find((user) => {
+      const userId = toHierarchyUserId(user);
+      if (!userId || userId === targetId || !isActiveHierarchyUser(user)) {
+        return false;
+      }
+
+      return user.role === Roles.GENERAL_MANAGER || hasPermission(user, Permission.MANAGE_USERS);
+    });
+
+    fallbackManagerId = toHierarchyUserId(fallbackManager);
+  }
+
+  if (!fallbackManagerId) {
+    throw new AppError('No fallback manager available to reassign direct reports', 409);
+  }
+
+  return userRepository.findById(fallbackManagerId);
 };
 
 const serializeUser = (user) => ({
@@ -223,9 +391,19 @@ const prepareUserPayload = async (body, { forUpdate = false, currentUserId = '' 
     }
 
     const manager = await userRepository.findById(managerId);
-    if (!manager || !manager.active) {
+    if (!manager || !manager.active || isSoftDeletedUser(manager)) {
       throw new AppError('Manager not found', 404);
     }
+
+    if (currentUserId) {
+      const hierarchyNodes = await userRepository.listHierarchyNodes();
+      const usersById = buildUsersById(hierarchyNodes);
+
+      if (wouldCreateManagementCycle({ usersById, userId: currentUserId, managerId })) {
+        throw new AppError('Manager assignment would create an invalid hierarchy cycle', 400);
+      }
+    }
+
     payload.manager = manager._id;
   } else if (body.managerId !== undefined) {
     payload.manager = null;
@@ -387,13 +565,18 @@ export const me = asyncHandler(async (req, res) => {
 });
 
 export const listUsers = asyncHandler(async (req, res) => {
+  const includeInactive = req.query.includeInactive === '1';
+
   // ?allUsers=1 returns every active employee regardless of managed scope
   if (req.query.allUsers === '1') {
     if (!hasAnyPermission(req.user, [Permission.MANAGE_USERS, Permission.MANAGE_PERMISSIONS])) {
       throw new AppError('You cannot list all employees', 403);
     }
 
-    const users = await userRepository.listActive({ includeManager: true });
+    const users = await userRepository.listForManagement({
+      includeManager: true,
+      includeInactive,
+    });
     return res.json({ users });
   }
 
@@ -401,10 +584,12 @@ export const listUsers = asyncHandler(async (req, res) => {
     userRepository,
     actorId: req.user.id,
     actorRole: req.user.role,
+    includeInactive,
   });
 
-  const users = await userRepository.listActive({
+  const users = await userRepository.listForManagement({
     includeManager: true,
+    includeInactive,
     userIds: managedUserIds,
   });
   res.json({ users });
@@ -451,9 +636,18 @@ export const createUser = asyncHandler(async (req, res) => {
 
 export const updateUser = asyncHandler(async (req, res) => {
   const user = await userRepository.findById(req.params.id);
-  if (!user) {
+  if (!user || isSoftDeletedUser(user)) {
     throw new AppError('User not found', 404);
   }
+
+  const previousManagerId = toHierarchyUserId(user.manager);
+  const previousRole = user.role;
+
+  if (user.manager) {
+    await user.populate('manager', 'fullName role jobTitle active');
+  }
+
+  const beforeSnapshot = snapshotUser(user);
 
   const payload = await prepareUserPayload(req.body, {
     forUpdate: true,
@@ -475,24 +669,150 @@ export const updateUser = asyncHandler(async (req, res) => {
   }
 
   const updated = await userRepository.updateById(req.params.id, payload);
+  const afterSnapshot = snapshotUser(updated);
+  const nextManagerId = toHierarchyUserId(updated?.manager);
+  const managerChanged = payload.manager !== undefined && previousManagerId !== nextManagerId;
+  const roleChanged = payload.role !== undefined && previousRole !== updated?.role;
+
+  if (managerChanged) {
+    await auditService.log({
+      actorId: req.user.id,
+      action: 'USER_MANAGER_CHANGED',
+      entityType: 'USER',
+      entityId: req.params.id,
+      before: {
+        user: beforeSnapshot,
+        manager: beforeSnapshot.manager,
+      },
+      after: {
+        user: afterSnapshot,
+        manager: afterSnapshot.manager,
+      },
+      req,
+    });
+
+    await notifyUserOperation({
+      req,
+      targetUser: updated,
+      previousManagerId,
+      nextManagerId,
+      action: 'USER_MANAGER_CHANGED',
+      actionLabel: 'تغيير المدير المباشر لموظف',
+      titleAr: 'تحديث المدير المباشر',
+      metadata: {
+        previousManagerId,
+        nextManagerId,
+      },
+    });
+  }
+
+  if (roleChanged) {
+    await auditService.log({
+      actorId: req.user.id,
+      action: 'USER_ROLE_CHANGED',
+      entityType: 'USER',
+      entityId: req.params.id,
+      before: {
+        user: beforeSnapshot,
+        role: beforeSnapshot.role,
+        roleLabel: beforeSnapshot.roleLabel,
+      },
+      after: {
+        user: afterSnapshot,
+        role: afterSnapshot.role,
+        roleLabel: afterSnapshot.roleLabel,
+      },
+      req,
+    });
+
+    await notifyUserOperation({
+      req,
+      targetUser: updated,
+      previousManagerId,
+      nextManagerId,
+      action: 'USER_ROLE_CHANGED',
+      actionLabel: 'تغيير منصب موظف',
+      titleAr: 'تحديث المنصب الوظيفي',
+      metadata: {
+        previousRole,
+        nextRole: updated?.role || '',
+      },
+    });
+  }
+
+  if (!managerChanged && !roleChanged) {
+    await auditService.log({
+      actorId: req.user.id,
+      action: 'USER_UPDATED',
+      entityType: 'USER',
+      entityId: req.params.id,
+      before: beforeSnapshot,
+      after: afterSnapshot,
+      req,
+    });
+  }
 
   res.json({ user: updated });
 });
 
 export const updateUserStatus = asyncHandler(async (req, res) => {
   const { active } = req.body;
+
+  if (typeof active !== 'boolean') {
+    throw new AppError('Active status is required', 400);
+  }
+
   const target = await userRepository.findById(req.params.id);
 
   if (!target) {
     throw new AppError('User not found', 404);
   }
 
+  if (isSoftDeletedUser(target)) {
+    throw new AppError('Deleted users cannot be reactivated or updated', 400);
+  }
+
   if (String(target._id) === req.user.id && active === false) {
     throw new AppError('You cannot deactivate your own account', 400);
   }
 
+  const nextStatus = !!active;
+  const previousManagerId = toHierarchyUserId(target.manager);
+
+  if (target.manager) {
+    await target.populate('manager', 'fullName role jobTitle active');
+  }
+
+  const beforeSnapshot = snapshotUser(target);
+
   const updated = await userRepository.setActiveStatus(req.params.id, !!active, {
-    revokeSessions: !active,
+    revokeSessions: !nextStatus,
+  });
+
+  const afterSnapshot = snapshotUser(updated);
+  const action = nextStatus ? 'USER_REACTIVATED' : 'USER_DEACTIVATED';
+
+  await auditService.log({
+    actorId: req.user.id,
+    action,
+    entityType: 'USER',
+    entityId: req.params.id,
+    before: beforeSnapshot,
+    after: afterSnapshot,
+    req,
+  });
+
+  await notifyUserOperation({
+    req,
+    targetUser: updated,
+    previousManagerId,
+    nextManagerId: toHierarchyUserId(updated.manager),
+    action,
+    actionLabel: nextStatus ? 'إعادة تفعيل حساب موظف' : 'تعطيل حساب موظف',
+    titleAr: nextStatus ? 'إعادة تفعيل موظف' : 'تعطيل موظف',
+    metadata: {
+      active: nextStatus,
+    },
   });
 
   res.json({ user: updated });
@@ -548,9 +868,11 @@ export const uploadAvatar = asyncHandler(async (req, res) => {
   }
 
   const user = await userRepository.findById(req.params.id);
-  if (!user) {
+  if (!user || isSoftDeletedUser(user)) {
     throw new AppError('User not found', 404);
   }
+
+  const beforeSnapshot = snapshotUser(user);
 
   const publicUrl = `/uploads/${req.file.filename}`;
 
@@ -567,6 +889,16 @@ export const uploadAvatar = asyncHandler(async (req, res) => {
 
   const updated = await userRepository.updateById(user._id, { avatarUrl: publicUrl });
 
+  await auditService.log({
+    actorId: req.user.id,
+    action: 'USER_AVATAR_UPDATED',
+    entityType: 'USER',
+    entityId: req.params.id,
+    before: beforeSnapshot,
+    after: snapshotUser(updated),
+    req,
+  });
+
   res.json({
     user: updated,
     avatarUrl: publicUrl,
@@ -577,6 +909,13 @@ export const uploadMyAvatar = asyncHandler(async (req, res) => {
   if (!req.file) {
     throw new AppError('File is required', 400);
   }
+
+  const user = await userRepository.findById(req.user.id);
+  if (!user || isSoftDeletedUser(user)) {
+    throw new AppError('User not found', 404);
+  }
+
+  const beforeSnapshot = snapshotUser(user);
 
   const publicUrl = `/uploads/${req.file.filename}`;
 
@@ -592,6 +931,16 @@ export const uploadMyAvatar = asyncHandler(async (req, res) => {
   });
 
   const updated = await userRepository.updateById(req.user.id, { avatarUrl: publicUrl });
+
+  await auditService.log({
+    actorId: req.user.id,
+    action: 'USER_AVATAR_UPDATED',
+    entityType: 'USER',
+    entityId: req.user.id,
+    before: beforeSnapshot,
+    after: snapshotUser(updated),
+    req,
+  });
 
   res.json({
     user: updated,
@@ -638,6 +987,76 @@ export const listEmployeeFiles = asyncHandler(async (req, res) => {
 
   const files = await employeeFileRepository.listByUser(user._id);
   res.json({ files });
+});
+
+export const deleteUser = asyncHandler(async (req, res) => {
+  const target = await userRepository.findById(req.params.id);
+  if (!target || isSoftDeletedUser(target)) {
+    throw new AppError('User not found', 404);
+  }
+
+  if (String(target._id) === req.user.id) {
+    throw new AppError('You cannot delete your own account', 400);
+  }
+
+  if (target.manager) {
+    await target.populate('manager', 'fullName role jobTitle active');
+  }
+
+  const beforeSnapshot = snapshotUser(target);
+  const directReports = await userRepository.listDirectReports(target._id);
+  const fallbackManager = await resolveDeletionFallbackManager({
+    targetUser: target,
+    directReports,
+  });
+  const fallbackManagerId = toHierarchyUserId(fallbackManager);
+
+  if (directReports.length) {
+    await userRepository.reassignDirectReports(target._id, fallbackManagerId || null);
+  }
+
+  const deletedUser = await userRepository.softDeleteById(target._id, {
+    deletedBy: req.user.id,
+    revokeSessions: true,
+  });
+
+  await auditService.log({
+    actorId: req.user.id,
+    action: 'USER_DELETED',
+    entityType: 'USER',
+    entityId: req.params.id,
+    before: {
+      user: beforeSnapshot,
+      directReports: directReports.map((report) => snapshotUser(report)),
+    },
+    after: {
+      user: snapshotUser(deletedUser),
+      reassignedReportsCount: directReports.length,
+      reassignedTo: serializeManagerSummary(fallbackManager),
+    },
+    req,
+  });
+
+  await notifyUserOperation({
+    req,
+    targetUser: deletedUser,
+    previousManagerId: beforeSnapshot.manager?.id || '',
+    nextManagerId: fallbackManagerId,
+    action: 'USER_DELETED',
+    actionLabel: 'حذف موظف بشكل منطقي',
+    titleAr: 'حذف موظف',
+    metadata: {
+      reassignedReportsCount: directReports.length,
+      fallbackManagerId,
+    },
+  });
+
+  res.json({
+    message: 'User deleted successfully',
+    user: deletedUser,
+    reassignedReportsCount: directReports.length,
+    reassignedTo: serializeManagerSummary(fallbackManager),
+  });
 });
 
 export const importUsers = asyncHandler(async (req, res) => {
@@ -712,9 +1131,18 @@ export const orgChart = asyncHandler(async (req, res) => {
     actorRole: req.user.role,
   });
 
-  const users = Array.isArray(managedUserIds)
-    ? allUsers.filter((item) => managedUserIds.includes(String(item._id)))
-    : allUsers;
+  const usersById = buildUsersById(allUsers);
+  const users = allUsers.filter((item) => {
+    if (!isActiveHierarchyUser(item)) {
+      return false;
+    }
+
+    if (!Array.isArray(managedUserIds)) {
+      return true;
+    }
+
+    return managedUserIds.includes(String(item._id));
+  });
   const nodesById = new Map();
 
   users.forEach((item) => {
@@ -735,7 +1163,11 @@ export const orgChart = asyncHandler(async (req, res) => {
 
   users.forEach((item) => {
     const node = nodesById.get(String(item._id));
-    const managerId = item.manager ? String(item.manager) : '';
+    const managerId = resolveEffectiveManagerId({
+      user: item,
+      usersById,
+      skipInactiveManagers: true,
+    });
 
     if (managerId && managerId !== node.id && nodesById.has(managerId)) {
       nodesById.get(managerId).children.push(node);

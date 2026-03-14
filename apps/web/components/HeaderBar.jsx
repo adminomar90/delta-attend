@@ -1,20 +1,12 @@
 ﻿'use client';
 
 import { useRouter } from 'next/navigation';
-import { assetUrl } from '../lib/api';
 import { useNotifications } from '../lib/notifications';
+import UserAvatar from './UserAvatar';
 
 export default function HeaderBar({ title, subtitle, user, onMenuToggle }) {
   const router = useRouter();
   const { unreadCount } = useNotifications();
-
-  const initials = (user?.fullName || 'مستخدم')
-    .split(' ')
-    .filter(Boolean)
-    .slice(0, 2)
-    .map((part) => part[0])
-    .join('')
-    .toUpperCase();
 
   return (
     <header className="header card">
@@ -46,11 +38,13 @@ export default function HeaderBar({ title, subtitle, user, onMenuToggle }) {
         </button>
 
         <div className="user-chip">
-          {user?.avatarUrl ? (
-            <img className="user-chip-avatar" src={assetUrl(user.avatarUrl)} alt={user?.fullName || 'user'} />
-          ) : (
-            <span className="user-chip-avatar user-chip-avatar-fallback">{initials}</span>
-          )}
+          <UserAvatar
+            fullName={user?.fullName || 'مستخدم'}
+            avatarUrl={user?.avatarUrl || ''}
+            alt={user?.fullName || 'user'}
+            imgClassName="user-chip-avatar"
+            fallbackClassName="user-chip-avatar user-chip-avatar-fallback"
+          />
           <div className="user-chip-info">
             <span>{user?.fullName || 'مستخدم النظام'}</span>
             <small>{user?.jobTitle || user?.role || 'ROLE'}</small>
@@ -60,4 +54,3 @@ export default function HeaderBar({ title, subtitle, user, onMenuToggle }) {
     </header>
   );
 }
-

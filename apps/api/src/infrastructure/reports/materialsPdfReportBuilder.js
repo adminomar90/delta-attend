@@ -1,40 +1,12 @@
-﻿import fs from 'fs';
-import path from 'path';
-import { fileURLToPath } from 'url';
-import PDFDocument from 'pdfkit';
+/**
+ * Materials Report PDF — rebuilt on the unified template.
+ */
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const FONT_REGULAR = path.resolve(__dirname, 'fonts', 'arial.ttf');
-const FONT_BOLD = path.resolve(__dirname, 'fonts', 'arialbd.ttf');
-
-const safe = (value) => String(value ?? '-');
-
-const writeSection = (doc, { title, rows = [] }) => {
-  if (!rows.length) {
-    return;
-  }
-
-  if (doc.y > 700) {
-    doc.addPage();
-  }
-
-  doc.font('ArB').fontSize(13).fillColor('#102a5e').text(title, { align: 'right' });
-  doc.moveDown(0.3);
-
-  rows.forEach((row, index) => {
-    if (doc.y > 730) {
-      doc.addPage();
-    }
-
-    doc
-      .font('Ar')
-      .fontSize(9)
-      .fillColor('#1e272e')
-      .text(`${index + 1}. ${row}`, { align: 'right', lineGap: 2 });
-  });
-
-  doc.moveDown(0.8);
-};
+import {
+  createDoc, finalize, safe,
+  drawHeader, drawSectionTitle, drawKpiCards, drawDataTable,
+  COLORS,
+} from './pdfTemplate.js';
 
 export const buildMaterialsPdfBuffer = async ({
   generatedAt = new Date(),
@@ -44,76 +16,116 @@ export const buildMaterialsPdfBuffer = async ({
   reconciliations = [],
   movement = [],
   projectSummary = [],
-} = {}) =>
-  new Promise((resolve, reject) => {
-    const doc = new PDFDocument({ margin: 34, size: 'A4' });
-    const chunks = [];
+} = {}) => {
+  const ctx = createDoc({ title: 'تقارير إدارة المواد' });
 
-    doc.on('data', (chunk) => chunks.push(chunk));
-    doc.on('end', () => resolve(Buffer.concat(chunks)));
-    doc.on('error', reject);
-
-    if (fs.existsSync(FONT_REGULAR) && fs.existsSync(FONT_BOLD)) {
-      doc.registerFont('Ar', FONT_REGULAR);
-      doc.registerFont('ArB', FONT_BOLD);
-    } else {
-      doc.registerFont('Ar', 'Helvetica');
-      doc.registerFont('ArB', 'Helvetica-Bold');
-    }
-
-    doc.rect(0, 0, doc.page.width, 70).fill('#0d1f3c');
-    doc.font('ArB').fontSize(18).fillColor('#ffffff').text('Delta Plus - تقارير إدارة المواد', 34, 20, {
-      align: 'center',
-      width: doc.page.width - 68,
-    });
-    doc.font('Ar').fontSize(9).fillColor('#a6bfd9').text(`تاريخ الإنشاء: ${new Date(generatedAt).toLocaleString('ar-IQ')}`, 34, 48, {
-      align: 'center',
-      width: doc.page.width - 68,
-    });
-
-    doc.moveDown(3.2);
-
-    writeSection(doc, {
-      title: '1) تقرير طلبات المواد',
-      rows: requests.map((row) =>
-        `الطلب ${safe(row.requestNo)} | المشروع: ${safe(row.projectName)} | مقدم الطلب: ${safe(row.requestedBy)} | الحالة: ${safe(row.status)} | البنود: ${safe(row.itemsCount)}`,
-      ),
-    });
-
-    writeSection(doc, {
-      title: '2) تقرير التجهيز والتسليم',
-      rows: dispatches.map((row) =>
-        `السند ${safe(row.dispatchNo)} | الطلب: ${safe(row.requestNo)} | المشروع: ${safe(row.projectName)} | المستلم: ${safe(row.recipient)} | الكمية: ${safe(row.deliveredQty)} | الحالة: ${safe(row.status)}`,
-      ),
-    });
-
-    writeSection(doc, {
-      title: '3) تقرير الذمم المفتوحة',
-      rows: openCustodies.map((row) =>
-        `الذمة ${safe(row.custodyNo)} | الموظف: ${safe(row.holder)} | المشروع: ${safe(row.projectName)} | المستلم: ${safe(row.receivedQty)} | المصروف: ${safe(row.consumedQty)} | المتبقي: ${safe(row.remainingQty)} | ${safe(row.status)}`,
-      ),
-    });
-
-    writeSection(doc, {
-      title: '4) تقرير التصفية',
-      rows: reconciliations.map((row) =>
-        `التصفية ${safe(row.reconcileNo)} | الذمة: ${safe(row.custodyNo)} | المشروع: ${safe(row.projectName)} | المصروف: ${safe(row.consumedQty)} | المرجع: ${safe(row.toReturnQty)} | التالف: ${safe(row.damagedQty)} | المفقود: ${safe(row.lostQty)} | ${safe(row.status)}`,
-      ),
-    });
-
-    writeSection(doc, {
-      title: '5) تقرير حركة المادة',
-      rows: movement.map((row) =>
-        `${safe(row.date)} | المادة: ${safe(row.materialName)} | المخزن: ${safe(row.warehouse)} | ${safe(row.transactionType)} | الكمية: ${safe(row.quantity)} | المرجع: ${safe(row.referenceId)}`,
-      ),
-    });
-
-    writeSection(doc, {
-      title: '6) تقرير حسب المشروع',
-      rows: projectSummary.map((row) =>
-        `${safe(row.projectName)} | الطلبات: ${safe(row.requestsCount)} | المطلوبة: ${safe(row.requestedQty)} | المجهزة: ${safe(row.preparedQty)} | المصروفة: ${safe(row.consumedQty)} | المرجعة: ${safe(row.returnedQty)} | المتبقي: ${safe(row.remainingQty)}`,
-      ),
-    });
-
-    doc.end();
+  /* ── Header ── */
+  drawHeader(ctx, {
+    title: 'تقارير إدارة المواد',
+    date: generatedAt,
   });
+
+  /* ── KPI Cards ── */
+  drawKpiCards(ctx, [
+    { label: 'طلبات المواد',   value: `${requests.length}` },
+    { label: 'التسليمات',      value: `${dispatches.length}` },
+    { label: 'الذمم المفتوحة', value: `${openCustodies.length}` },
+    { label: 'التصفيات',       value: `${reconciliations.length}` },
+  ]);
+
+  /* ── Section 1: طلبات المواد ── */
+  drawSectionTitle(ctx, 'طلبات المواد');
+  if (requests.length) {
+    drawDataTable(ctx, {
+      headers: ['#', 'رقم الطلب', 'المشروع', 'مقدم الطلب', 'الحالة', 'البنود'],
+      colWidths: [0.05, 0.15, 0.25, 0.22, 0.18, 0.15],
+      rows: requests.map((r, i) => [
+        `${i + 1}`, safe(r.requestNo), safe(r.projectName), safe(r.requestedBy), safe(r.status), safe(r.itemsCount),
+      ]),
+    });
+  } else {
+    ctx.doc.font(ctx.F).fontSize(8.5).fillColor(COLORS.soft);
+    ctx.doc.text('لا توجد طلبات مواد.', ctx.ML, ctx.doc.y, { width: ctx.CW, align: 'right', features: ['arab'] });
+    ctx.doc.moveDown(0.5);
+  }
+
+  /* ── Section 2: التجهيز والتسليم ── */
+  ctx.doc.moveDown(0.3);
+  drawSectionTitle(ctx, 'التجهيز والتسليم');
+  if (dispatches.length) {
+    drawDataTable(ctx, {
+      headers: ['#', 'رقم السند', 'الطلب', 'المشروع', 'المستلم', 'الكمية', 'الحالة'],
+      colWidths: [0.05, 0.12, 0.12, 0.22, 0.18, 0.13, 0.18],
+      rows: dispatches.map((r, i) => [
+        `${i + 1}`, safe(r.dispatchNo), safe(r.requestNo), safe(r.projectName), safe(r.recipient), safe(r.deliveredQty), safe(r.status),
+      ]),
+    });
+  } else {
+    ctx.doc.font(ctx.F).fontSize(8.5).fillColor(COLORS.soft);
+    ctx.doc.text('لا توجد تسليمات.', ctx.ML, ctx.doc.y, { width: ctx.CW, align: 'right', features: ['arab'] });
+    ctx.doc.moveDown(0.5);
+  }
+
+  /* ── Section 3: الذمم المفتوحة ── */
+  ctx.doc.moveDown(0.3);
+  drawSectionTitle(ctx, 'الذمم المفتوحة');
+  if (openCustodies.length) {
+    drawDataTable(ctx, {
+      headers: ['#', 'رقم الذمة', 'الموظف', 'المشروع', 'المستلم', 'المصروف', 'المتبقي', 'الحالة'],
+      colWidths: [0.04, 0.10, 0.18, 0.18, 0.12, 0.12, 0.12, 0.14],
+      rows: openCustodies.map((r, i) => [
+        `${i + 1}`, safe(r.custodyNo), safe(r.holder), safe(r.projectName), safe(r.receivedQty), safe(r.consumedQty), safe(r.remainingQty), safe(r.status),
+      ]),
+    });
+  } else {
+    ctx.doc.font(ctx.F).fontSize(8.5).fillColor(COLORS.soft);
+    ctx.doc.text('لا توجد ذمم مفتوحة.', ctx.ML, ctx.doc.y, { width: ctx.CW, align: 'right', features: ['arab'] });
+    ctx.doc.moveDown(0.5);
+  }
+
+  /* ── Section 4: التصفية ── */
+  ctx.doc.moveDown(0.3);
+  drawSectionTitle(ctx, 'التصفيات');
+  if (reconciliations.length) {
+    drawDataTable(ctx, {
+      headers: ['#', 'التصفية', 'الذمة', 'المشروع', 'المصروف', 'المرجع', 'التالف', 'المفقود', 'الحالة'],
+      colWidths: [0.04, 0.10, 0.10, 0.16, 0.11, 0.11, 0.11, 0.11, 0.16],
+      rows: reconciliations.map((r, i) => [
+        `${i + 1}`, safe(r.reconcileNo), safe(r.custodyNo), safe(r.projectName), safe(r.consumedQty), safe(r.toReturnQty), safe(r.damagedQty), safe(r.lostQty), safe(r.status),
+      ]),
+    });
+  } else {
+    ctx.doc.font(ctx.F).fontSize(8.5).fillColor(COLORS.soft);
+    ctx.doc.text('لا توجد تصفيات.', ctx.ML, ctx.doc.y, { width: ctx.CW, align: 'right', features: ['arab'] });
+    ctx.doc.moveDown(0.5);
+  }
+
+  /* ── Section 5: حركة المادة ── */
+  if (movement.length) {
+    ctx.doc.moveDown(0.3);
+    drawSectionTitle(ctx, 'حركة المادة');
+    drawDataTable(ctx, {
+      headers: ['#', 'التاريخ', 'المادة', 'المخزن', 'النوع', 'الكمية', 'المرجع'],
+      colWidths: [0.04, 0.14, 0.20, 0.16, 0.16, 0.12, 0.18],
+      rows: movement.map((r, i) => [
+        `${i + 1}`, safe(r.date), safe(r.materialName), safe(r.warehouse), safe(r.transactionType), safe(r.quantity), safe(r.referenceId),
+      ]),
+    });
+  }
+
+  /* ── Section 6: حسب المشروع ── */
+  if (projectSummary.length) {
+    ctx.doc.moveDown(0.3);
+    drawSectionTitle(ctx, 'ملخص حسب المشروع');
+    drawDataTable(ctx, {
+      headers: ['المشروع', 'الطلبات', 'المطلوبة', 'المجهزة', 'المصروفة', 'المرجعة', 'المتبقي'],
+      colWidths: [0.22, 0.12, 0.12, 0.12, 0.14, 0.14, 0.14],
+      rows: projectSummary.map((r) => [
+        safe(r.projectName), safe(r.requestsCount), safe(r.requestedQty), safe(r.preparedQty), safe(r.consumedQty), safe(r.returnedQty), safe(r.remainingQty),
+      ]),
+    });
+  }
+
+  /* ── Finalize ── */
+  return finalize(ctx, { footerLabel: 'تقرير إدارة المواد' });
+};

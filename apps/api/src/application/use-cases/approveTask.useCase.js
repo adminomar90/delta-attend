@@ -2,9 +2,8 @@
 import { TaskStatus, BadgeCodes } from '../../shared/constants.js';
 import { AppError } from '../../shared/errors.js';
 import { pointsCalculator, pointsPolicy } from '../services/pointsCalculator.js';
-import { levelService } from '../services/levelService.js';
-import { badgeService } from '../services/badgeService.js';
 import { notificationService } from '../services/notificationService.js';
+import { performancePointsService } from '../services/performancePointsService.js';
 
 export class ApproveTaskUseCase {
   constructor({ taskRepository, userRepository, pointsLedgerRepository, goalRepository, auditService }) {
@@ -68,40 +67,22 @@ export class ApproveTaskUseCase {
     // never cause a 500 error that hides the successful approval from the frontend.
     try {
       if (grantedPoints > 0) {
-        await this.pointsLedgerRepository.create({
-          user: task.assignee._id,
+        await performancePointsService.awardPoints({
+          userId: task.assignee._id,
           task: task._id,
           points: grantedPoints,
           category: 'TASK_APPROVAL',
           reason: `اعتماد مهمة: ${task.title}`,
           approvedBy: approverId,
+          sourceAction: 'TASK_APPROVED',
+          metadata: {
+            taskId: String(task._id),
+            qualityScore,
+          },
+          actorId: approverId,
+          req,
+          additionalBadgeCodes: [BadgeCodes.FIRST_APPROVAL],
         });
-      }
-
-      const assigneeCurrent = await this.userRepository.findById(task.assignee._id);
-      if (assigneeCurrent) {
-        const updatedPoints = assigneeCurrent.pointsTotal + grantedPoints;
-        const nextLevel = levelService.resolveLevel(updatedPoints);
-        const updatedUser = await this.userRepository.incrementPointsAndSetLevel(task.assignee._id, grantedPoints, nextLevel);
-
-        const generatedBadges = badgeService.evaluate(updatedUser, 0);
-        if (!updatedUser.badges.includes(BadgeCodes.FIRST_APPROVAL) && grantedPoints > 0) {
-          generatedBadges.push(BadgeCodes.FIRST_APPROVAL);
-        }
-        for (const badgeCode of generatedBadges) {
-          if (!updatedUser.badges.includes(badgeCode)) {
-            await this.userRepository.attachBadge(updatedUser._id, badgeCode);
-          }
-        }
-      }
-
-      const goalUpdates = grantedPoints > 0
-        ? await this.goalRepository.incrementActiveGoals(task.assignee._id, grantedPoints)
-        : [];
-      for (const goal of goalUpdates) {
-        if (goal.achieved) {
-          await notificationService.notifyGoalAchieved(task.assignee._id, goal);
-        }
       }
 
       await notificationService.notifyTaskApproved(task.assignee._id, task, grantedPoints, task.assignee?.email);

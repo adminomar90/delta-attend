@@ -69,6 +69,31 @@ export default function ReportsPage() {
         </article>
       </section>
 
+      {summary?.financialDisbursements ? (
+        <section className="grid-4" style={{ marginBottom: 16 }}>
+          <article className="card section">
+            <p style={{ marginTop: 0, color: 'var(--text-soft)' }}>طلبات الصرف</p>
+            <h2>{summary.financialDisbursements.total ?? 0}</h2>
+          </article>
+          <article className="card section">
+            <p style={{ marginTop: 0, color: 'var(--text-soft)' }}>بانتظار الاعتماد</p>
+            <h2>
+              {(summary.financialDisbursements.pendingProjectManager || 0)
+                + (summary.financialDisbursements.pendingFinancialManager || 0)
+                + (summary.financialDisbursements.pendingGeneralManager || 0)}
+            </h2>
+          </article>
+          <article className="card section">
+            <p style={{ marginTop: 0, color: 'var(--text-soft)' }}>جاهزة للتسليم</p>
+            <h2>{summary.financialDisbursements.readyForDisbursement ?? 0}</h2>
+          </article>
+          <article className="card section">
+            <p style={{ marginTop: 0, color: 'var(--text-soft)' }}>إجمالي المغلق</p>
+            <h2>{summary.financialDisbursements.closedAmount ?? 0}</h2>
+          </article>
+        </section>
+      ) : null}
+
       {executive ? (
         <section className="grid-2" style={{ marginBottom: 16 }}>
           <article className="card section">
@@ -124,4 +149,3 @@ export default function ReportsPage() {
     </>
   );
 }
-

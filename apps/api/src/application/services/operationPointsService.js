@@ -3,6 +3,7 @@ import { PointsLedgerRepository } from '../../infrastructure/db/repositories/Poi
 import { AuditRepository } from '../../infrastructure/db/repositories/AuditRepository.js';
 import { UserRepository } from '../../infrastructure/db/repositories/UserRepository.js';
 import { levelService } from './levelService.js';
+import { performancePointsService } from './performancePointsService.js';
 import { AppError } from '../../shared/errors.js';
 
 const operationPointsRuleRepository = new OperationPointsRuleRepository();
@@ -171,10 +172,8 @@ export const operationPointsService = {
     }
 
     const actorId = String(auditLog.actor?._id || auditLog.actor);
-    const { user: updatedUser } = await applyPointsToUser({ userId: actorId, pointsDelta: points });
-
-    const ledger = await pointsLedgerRepository.create({
-      user: actorId,
+    const rewardResult = await performancePointsService.awardPoints({
+      userId: actorId,
       points,
       category: 'OPERATION_REWARD',
       reason: `نقاط عملية: ${rule.labelAr || actionKey}`,
@@ -185,13 +184,14 @@ export const operationPointsService = {
         entityType: auditLog.entityType || '',
         entityId: String(auditLog.entityId || ''),
       },
+      actorId,
     });
 
     return {
       awarded: true,
       points,
-      ledger,
-      user: updatedUser,
+      ledger: rewardResult.ledger,
+      user: rewardResult.user,
       actionKey,
     };
   },
@@ -213,17 +213,17 @@ export const operationPointsService = {
       throw new AppError('reason is required', 400);
     }
 
-    const { user: updatedUser } = await applyPointsToUser({ userId, pointsDelta: granted });
-    const ledger = await pointsLedgerRepository.create({
-      user: userId,
+    const rewardResult = await performancePointsService.awardPoints({
+      userId,
       points: granted,
       category: 'MANUAL_ADMIN_GRANT',
       reason: cleanReason,
       approvedBy: actorId,
       metadata,
+      actorId,
     });
 
-    return { ledger, user: updatedUser };
+    return { ledger: rewardResult.ledger, user: rewardResult.user };
   },
 
   async deductManualPoints({

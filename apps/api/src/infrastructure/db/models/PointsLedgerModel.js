@@ -24,6 +24,8 @@ const pointsLedgerSchema = new mongoose.Schema(
         'PROJECT_APPROVAL',
         'ATTENDANCE_APPROVAL',
         'MATERIAL_RECONCILIATION',
+        'FINANCIAL_DISBURSEMENT',
+        'MAINTENANCE_REPORT',
         'OPERATION_REWARD',
         'MANUAL_ADMIN_GRANT',
         'LEVEL_OVERRIDE_ADJUSTMENT',

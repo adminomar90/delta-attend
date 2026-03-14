@@ -1,4 +1,4 @@
-import { WorkReportRepository } from '../../infrastructure/db/repositories/WorkReportRepository.js';
+﻿import { WorkReportRepository } from '../../infrastructure/db/repositories/WorkReportRepository.js';
 import { UserRepository } from '../../infrastructure/db/repositories/UserRepository.js';
 import { ProjectRepository } from '../../infrastructure/db/repositories/ProjectRepository.js';
 import { PointsLedgerRepository } from '../../infrastructure/db/repositories/PointsLedgerRepository.js';
@@ -249,8 +249,8 @@ const grantPointsToWorkReportUser = async ({
     points: safePoints,
     category: 'WORK_REPORT_APPROVAL',
     reason: distributionRole === 'REPORT_AUTHOR'
-      ? `اعتماد تقرير عمل: ${report.title || report.projectName || 'بدون عنوان'}`
-      : `مشاركة في تقرير عمل: ${report.title || report.projectName || 'بدون عنوان'}`,
+      ? `ط§ط¹طھظ…ط§ط¯ طھظ‚ط±ظٹط± ط¹ظ…ظ„: ${report.title || report.projectName || 'ط¨ط¯ظˆظ† ط¹ظ†ظˆط§ظ†'}`
+      : `ظ…ط´ط§ط±ظƒط© ظپظٹ طھظ‚ط±ظٹط± ط¹ظ…ظ„: ${report.title || report.projectName || 'ط¨ط¯ظˆظ† ط¹ظ†ظˆط§ظ†'}`,
     approvedBy,
     sourceAction: 'WORK_REPORT_APPROVAL',
     metadata: {
@@ -379,18 +379,18 @@ const buildWorkReportWhatsappMessage = (report, pdfAbsoluteUrl) => {
   const projectName = report?.project?.name || report?.projectName || '-';
   const progress = Number(report?.progressPercent || 0);
   const participantCount = Number(report?.participantCount || report?.participants?.length || 0);
-  const participantSummaryLine = `عدد الكادر المشارك: ${participantCount}`;
+  const participantSummaryLine = `ط¹ط¯ط¯ ط§ظ„ظƒط§ط¯ط± ط§ظ„ظ…ط´ط§ط±ظƒ: ${participantCount}`;
 
   return [
-    'تقرير عمل PDF - Delta Plus',
-    `الموظف: ${employeeName}`,
-    `رمز الموظف: ${employeeCode}`,
-    `المشروع: ${projectName}`,
-    `نسبة الإنجاز: ${progress}%`,
+    'طھظ‚ط±ظٹط± ط¹ظ…ظ„ PDF - Delta Plus',
+    `ط§ظ„ظ…ظˆط¸ظپ: ${employeeName}`,
+    `ط±ظ…ط² ط§ظ„ظ…ظˆط¸ظپ: ${employeeCode}`,
+    `ط§ظ„ظ…ط´ط±ظˆط¹: ${projectName}`,
+    `ظ†ط³ط¨ط© ط§ظ„ط¥ظ†ط¬ط§ط²: ${progress}%`,
     participantSummaryLine,
-    `تاريخ التقرير: ${new Date(report?.workDate || report?.createdAt || new Date()).toLocaleDateString('ar-IQ')}`,
-    `رابط التقرير PDF: ${pdfAbsoluteUrl}`,
-    'يرجى فتح الرابط ومراجعة التقرير.',
+    `طھط§ط±ظٹط® ط§ظ„طھظ‚ط±ظٹط±: ${new Date(report?.workDate || report?.createdAt || new Date()).toLocaleDateString('ar-IQ')}`,
+    `ط±ط§ط¨ط· ط§ظ„طھظ‚ط±ظٹط± PDF: ${pdfAbsoluteUrl}`,
+    'ظٹط±ط¬ظ‰ ظپطھط­ ط§ظ„ط±ط§ط¨ط· ظˆظ…ط±ط§ط¬ط¹ط© ط§ظ„طھظ‚ط±ظٹط±.',
   ].join('\n');
 };
 
@@ -486,7 +486,7 @@ export const createWorkReport = asyncHandler(async (req, res) => {
     });
     report = storedPdf.report;
   } catch (pdfError) {
-    // Log the error but do NOT delete the report — the user's data is preserved.
+    // Log the error but do NOT delete the report â€” the user's data is preserved.
     // The PDF can be regenerated later via ensureStoredWorkReportPdf.
     console.error('PDF generation failed for work report', created._id, pdfError.message);
   }
@@ -516,7 +516,7 @@ export const createWorkReport = asyncHandler(async (req, res) => {
   });
   await notificationService.notifyWorkReportCreated(workReportRecipients, {
     employeeName: user.fullName,
-    reportTitle: report.title || report.activityType || 'بدون عنوان',
+    reportTitle: report.title || report.activityType || 'ط¨ط¯ظˆظ† ط¹ظ†ظˆط§ظ†',
     projectName: project.name || report.projectName || '-',
     occurredAt: report.createdAt || new Date(),
     metadata: {
@@ -531,10 +531,10 @@ export const createWorkReport = asyncHandler(async (req, res) => {
     watchPermission: NotificationWatchPermission.OPERATION,
   });
   await notificationService.notifyOperationActivity(operationRecipients, {
-    titleAr: 'إنشاء تقرير عمل',
+    titleAr: 'ط¥ظ†ط´ط§ط، طھظ‚ط±ظٹط± ط¹ظ…ظ„',
     actorName: user.fullName,
-    actionLabel: 'إنشاء تقرير عمل',
-    entityLabel: report.title || project.name || 'تقرير عمل',
+    actionLabel: 'ط¥ظ†ط´ط§ط، طھظ‚ط±ظٹط± ط¹ظ…ظ„',
+    entityLabel: report.title || project.name || 'طھظ‚ط±ظٹط± ط¹ظ…ظ„',
     occurredAt: report.createdAt || new Date(),
     metadata: {
       entityType: 'WORK_REPORT',
@@ -735,7 +735,7 @@ export const approveWorkReport = asyncHandler(async (req, res) => {
   );
   const authorId = report.user?._id || report.user;
   const participants = Array.isArray(report.participants) ? report.participants : [];
-  const reportLabel = report.title || report.projectName || 'بدون عنوان';
+  const reportLabel = report.title || report.projectName || 'ط¨ط¯ظˆظ† ط¹ظ†ظˆط§ظ†';
 
   const before = {
     status: report.status,
@@ -777,10 +777,10 @@ export const approveWorkReport = asyncHandler(async (req, res) => {
 
   await notificationService.notifySystem(
     authorId,
-    'اعتماد تقرير العمل',
+    'ط§ط¹طھظ…ط§ط¯ طھظ‚ط±ظٹط± ط§ظ„ط¹ظ…ظ„',
     participants.length
-      ? `تم اعتماد تقرير العمل "${reportLabel}" ومنحك ${formatPoints(distribution.reporterPoints)} نقطة ككاتب للتقرير.`
-      : `تم اعتماد تقرير العمل "${reportLabel}" ومنحك ${formatPoints(distribution.reporterPoints)} نقطة.`,
+      ? `طھظ… ط§ط¹طھظ…ط§ط¯ طھظ‚ط±ظٹط± ط§ظ„ط¹ظ…ظ„ "${reportLabel}" ظˆظ…ظ†ط­ظƒ ${formatPoints(distribution.reporterPoints)} ظ†ظ‚ط·ط© ظƒظƒط§طھط¨ ظ„ظ„طھظ‚ط±ظٹط±.`
+      : `طھظ… ط§ط¹طھظ…ط§ط¯ طھظ‚ط±ظٹط± ط§ظ„ط¹ظ…ظ„ "${reportLabel}" ظˆظ…ظ†ط­ظƒ ${formatPoints(distribution.reporterPoints)} ظ†ظ‚ط·ط©.`,
     {
       workReportId: String(report._id),
       totalPoints: distribution.totalPoints,
@@ -793,8 +793,8 @@ export const approveWorkReport = asyncHandler(async (req, res) => {
   for (const participant of participants) {
     await notificationService.notifySystem(
       participant.user?._id || participant.user,
-      'مشاركة في تقرير العمل',
-      `تم اعتماد تقرير العمل "${reportLabel}" ومنحك ${formatPoints(distribution.participantPoints)} نقطة كمشارك في التنفيذ.`,
+      'ظ…ط´ط§ط±ظƒط© ظپظٹ طھظ‚ط±ظٹط± ط§ظ„ط¹ظ…ظ„',
+      `طھظ… ط§ط¹طھظ…ط§ط¯ طھظ‚ط±ظٹط± ط§ظ„ط¹ظ…ظ„ "${reportLabel}" ظˆظ…ظ†ط­ظƒ ${formatPoints(distribution.participantPoints)} ظ†ظ‚ط·ط© ظƒظ…ط´ط§ط±ظƒ ظپظٹ ط§ظ„طھظ†ظپظٹط°.`,
       {
         workReportId: String(report._id),
         totalPoints: distribution.totalPoints,
@@ -829,9 +829,9 @@ export const approveWorkReport = asyncHandler(async (req, res) => {
     excludeUserIds: [req.user.id],
   });
   await notificationService.notifyOperationActivity(reportOperationRecipients, {
-    titleAr: 'اعتماد تقرير عمل',
-    actorName: req.user.name || req.user.fullName || 'المعتمد',
-    actionLabel: 'اعتماد تقرير عمل',
+    titleAr: 'ط§ط¹طھظ…ط§ط¯ طھظ‚ط±ظٹط± ط¹ظ…ظ„',
+    actorName: req.user.name || req.user.fullName || 'ط§ظ„ظ…ط¹طھظ…ط¯',
+    actionLabel: 'ط§ط¹طھظ…ط§ط¯ طھظ‚ط±ظٹط± ط¹ظ…ظ„',
     entityLabel: reportLabel,
     occurredAt: updated.approvedAt || new Date(),
     metadata: {
@@ -893,8 +893,8 @@ export const rejectWorkReport = asyncHandler(async (req, res) => {
 
   await notificationService.notifySystem(
     report.user?._id || report.user,
-    'رفض تقرير العمل',
-    `تم رفض تقرير العمل "${report.title || report.projectName || 'بدون عنوان'}". السبب: ${reason}`,
+    'ط±ظپط¶ طھظ‚ط±ظٹط± ط§ظ„ط¹ظ…ظ„',
+    `طھظ… ط±ظپط¶ طھظ‚ط±ظٹط± ط§ظ„ط¹ظ…ظ„ "${report.title || report.projectName || 'ط¨ط¯ظˆظ† ط¹ظ†ظˆط§ظ†'}". ط§ظ„ط³ط¨ط¨: ${reason}`,
     {
       workReportId: String(report._id),
       reason,
@@ -920,10 +920,10 @@ export const rejectWorkReport = asyncHandler(async (req, res) => {
     excludeUserIds: [req.user.id],
   });
   await notificationService.notifyOperationActivity(rejectedOperationRecipients, {
-    titleAr: 'رفض تقرير عمل',
-    actorName: req.user.name || req.user.fullName || 'المعتمد',
-    actionLabel: 'رفض تقرير عمل',
-    entityLabel: report.title || report.projectName || 'تقرير عمل',
+    titleAr: 'ط±ظپط¶ طھظ‚ط±ظٹط± ط¹ظ…ظ„',
+    actorName: req.user.name || req.user.fullName || 'ط§ظ„ظ…ط¹طھظ…ط¯',
+    actionLabel: 'ط±ظپط¶ طھظ‚ط±ظٹط± ط¹ظ…ظ„',
+    entityLabel: report.title || report.projectName || 'طھظ‚ط±ظٹط± ط¹ظ…ظ„',
     occurredAt: new Date(),
     metadata: {
       entityType: 'WORK_REPORT',
@@ -935,3 +935,4 @@ export const rejectWorkReport = asyncHandler(async (req, res) => {
 
   res.json({ report: updated });
 });
+

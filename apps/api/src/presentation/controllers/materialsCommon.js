@@ -1,4 +1,4 @@
-import dayjs from 'dayjs';
+﻿import dayjs from 'dayjs';
 import { env } from '../../config/env.js';
 import { MaterialsRepository } from '../../infrastructure/db/repositories/MaterialsRepository.js';
 import { UserRepository } from '../../infrastructure/db/repositories/UserRepository.js';
@@ -317,15 +317,15 @@ export const buildRequestWhatsappMessage = ({ request, detailsUrl }) => {
   const approvedQty = sumBy(request.items || [], (item) => item.approvedQty);
 
   return [
-    'إشعار طلب مواد - Delta Plus',
-    `رقم الطلب: ${request.requestNo}`,
-    `المشروع: ${projectName}`,
-    `المستلم: ${recipientName}`,
-    `مجهز الطلب: ${assignedPreparer}`,
-    `الكمية المطلوبة: ${roundQty(requestedQty)}`,
-    `الكمية المعتمدة: ${roundQty(approvedQty)}`,
-    `الحالة الحالية: ${request.status}`,
-    detailsUrl ? `رابط التفاصيل: ${detailsUrl}` : '',
+    'ط¥ط´ط¹ط§ط± ط·ظ„ط¨ ظ…ظˆط§ط¯ - Delta Plus',
+    `ط±ظ‚ظ… ط§ظ„ط·ظ„ط¨: ${request.requestNo}`,
+    `ط§ظ„ظ…ط´ط±ظˆط¹: ${projectName}`,
+    `ط§ظ„ظ…ط³طھظ„ظ…: ${recipientName}`,
+    `ظ…ط¬ظ‡ط² ط§ظ„ط·ظ„ط¨: ${assignedPreparer}`,
+    `ط§ظ„ظƒظ…ظٹط© ط§ظ„ظ…ط·ظ„ظˆط¨ط©: ${roundQty(requestedQty)}`,
+    `ط§ظ„ظƒظ…ظٹط© ط§ظ„ظ…ط¹طھظ…ط¯ط©: ${roundQty(approvedQty)}`,
+    `ط§ظ„ط­ط§ظ„ط© ط§ظ„ط­ط§ظ„ظٹط©: ${request.status}`,
+    detailsUrl ? `ط±ط§ط¨ط· ط§ظ„طھظپط§طµظٹظ„: ${detailsUrl}` : '',
   ]
     .filter(Boolean)
     .join('\n');
@@ -337,14 +337,14 @@ export const buildCustodyWhatsappMessage = ({ custody, detailsUrl }) => {
   const totalRemaining = sumBy(custody.items || [], (item) => item.remainingQty);
 
   return [
-    'إشعار ذمة مواد - Delta Plus',
-    `رقم الذمة: ${custody.custodyNo}`,
-    `المشروع: ${projectName}`,
-    `المستلم: ${custody.holder?.fullName || '-'}`,
-    `المستلم كميات: ${roundQty(totalReceived)}`,
-    `المتبقي: ${roundQty(totalRemaining)}`,
-    `الحالة: ${custody.status}`,
-    detailsUrl ? `رابط التفاصيل: ${detailsUrl}` : '',
+    'ط¥ط´ط¹ط§ط± ط°ظ…ط© ظ…ظˆط§ط¯ - Delta Plus',
+    `ط±ظ‚ظ… ط§ظ„ط°ظ…ط©: ${custody.custodyNo}`,
+    `ط§ظ„ظ…ط´ط±ظˆط¹: ${projectName}`,
+    `ط§ظ„ظ…ط³طھظ„ظ…: ${custody.holder?.fullName || '-'}`,
+    `ط§ظ„ظ…ط³طھظ„ظ… ظƒظ…ظٹط§طھ: ${roundQty(totalReceived)}`,
+    `ط§ظ„ظ…طھط¨ظ‚ظٹ: ${roundQty(totalRemaining)}`,
+    `ط§ظ„ط­ط§ظ„ط©: ${custody.status}`,
+    detailsUrl ? `ط±ط§ط¨ط· ط§ظ„طھظپط§طµظٹظ„: ${detailsUrl}` : '',
   ]
     .filter(Boolean)
     .join('\n');
@@ -356,14 +356,14 @@ export const buildReconciliationWhatsappMessage = ({ reconciliation, detailsUrl 
   const toReturn = sumBy(reconciliation.items || [], (item) => item.toReturnQty);
 
   return [
-    'إشعار تصفية مواد - Delta Plus',
-    `رقم التصفية: ${reconciliation.reconcileNo}`,
-    `رقم الطلب: ${reconciliation.request?.requestNo || '-'}`,
-    `المشروع: ${projectName}`,
-    `المصروف الفعلي: ${roundQty(consumed)}`,
-    `الكميات للراجع: ${roundQty(toReturn)}`,
-    `الحالة: ${reconciliation.status}`,
-    detailsUrl ? `رابط التفاصيل: ${detailsUrl}` : '',
+    'ط¥ط´ط¹ط§ط± طھطµظپظٹط© ظ…ظˆط§ط¯ - Delta Plus',
+    `ط±ظ‚ظ… ط§ظ„طھطµظپظٹط©: ${reconciliation.reconcileNo}`,
+    `ط±ظ‚ظ… ط§ظ„ط·ظ„ط¨: ${reconciliation.request?.requestNo || '-'}`,
+    `ط§ظ„ظ…ط´ط±ظˆط¹: ${projectName}`,
+    `ط§ظ„ظ…طµط±ظˆظپ ط§ظ„ظپط¹ظ„ظٹ: ${roundQty(consumed)}`,
+    `ط§ظ„ظƒظ…ظٹط§طھ ظ„ظ„ط±ط§ط¬ط¹: ${roundQty(toReturn)}`,
+    `ط§ظ„ط­ط§ظ„ط©: ${reconciliation.status}`,
+    detailsUrl ? `ط±ط§ط¨ط· ط§ظ„طھظپط§طµظٹظ„: ${detailsUrl}` : '',
   ]
     .filter(Boolean)
     .join('\n');
@@ -426,3 +426,4 @@ export const defaultReportPeriod = (query = {}) => {
 };
 
 export const appDetailsUrl = (path) => `${env.frontendOrigin[0].replace(/\/$/, '')}${path}`;
+

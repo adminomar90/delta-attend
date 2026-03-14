@@ -1,4 +1,8 @@
 import { Roles } from './constants.js';
+import {
+  buildChildrenByManager,
+  toHierarchyUserId,
+} from './employeeHierarchy.js';
 
 const HIERARCHY_SCOPED_ROLES = new Set([
   Roles.PROJECT_MANAGER,
@@ -6,7 +10,12 @@ const HIERARCHY_SCOPED_ROLES = new Set([
   Roles.TEAM_LEAD,
 ]);
 
-export const resolveManagedUserIds = async ({ userRepository, actorId, actorRole }) => {
+export const resolveManagedUserIds = async ({
+  userRepository,
+  actorId,
+  actorRole,
+  includeInactive = false,
+}) => {
   const actorIdString = String(actorId || '');
   if (!actorIdString) {
     return [];
@@ -16,30 +25,18 @@ export const resolveManagedUserIds = async ({ userRepository, actorId, actorRole
     return [actorIdString];
   }
 
-  if (actorRole === Roles.GENERAL_MANAGER) {
-    const hierarchyNodes = await userRepository.listHierarchyNodes();
-    return hierarchyNodes.map((node) => String(node._id));
-  }
-
-  if (!HIERARCHY_SCOPED_ROLES.has(actorRole)) {
+  if (actorRole !== Roles.GENERAL_MANAGER && !HIERARCHY_SCOPED_ROLES.has(actorRole)) {
     return null;
   }
 
   const hierarchyNodes = await userRepository.listHierarchyNodes();
-
-  const childrenByManager = new Map();
-  hierarchyNodes.forEach((node) => {
-    const managerId = node.manager ? String(node.manager) : '';
-    if (!managerId) {
-      return;
-    }
-
-    if (!childrenByManager.has(managerId)) {
-      childrenByManager.set(managerId, []);
-    }
-
-    childrenByManager.get(managerId).push(String(node._id));
+  const { visibleUsers, childrenByManager } = buildChildrenByManager(hierarchyNodes, {
+    includeInactive,
   });
+
+  if (actorRole === Roles.GENERAL_MANAGER) {
+    return visibleUsers.map((node) => toHierarchyUserId(node)).filter(Boolean);
+  }
 
   const managed = new Set([actorIdString]);
   const queue = [actorIdString];

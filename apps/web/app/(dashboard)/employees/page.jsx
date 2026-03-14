@@ -1,8 +1,9 @@
 ﻿'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { api, assetUrl } from '../../../lib/api';
+import { api } from '../../../lib/api';
 import { authStorage } from '../../../lib/auth';
+import UserAvatar from '../../../components/UserAvatar';
 import {
   Permission,
   hasAnyPermission,
@@ -33,6 +34,96 @@ const roleColorMap = {
   ASSISTANT_PROJECT_MANAGER: '#b288ff',
   TEAM_LEAD: '#ff8a80',
   TECHNICAL_STAFF: '#7b93c2',
+};
+
+const managerRoleValues = new Set([
+  'GENERAL_MANAGER',
+  'HR_MANAGER',
+  'FINANCIAL_MANAGER',
+  'PROJECT_MANAGER',
+  'ASSISTANT_PROJECT_MANAGER',
+  'TEAM_LEAD',
+]);
+
+const allowedAvatarTypes = new Set(['image/jpeg', 'image/png', 'image/webp']);
+
+const getUserId = (value) => String(value?._id || value?.id || value || '');
+
+const getManagerId = (user) => getUserId(user?.manager);
+
+const optimizeAvatarUpload = async (file) => {
+  if (!file) {
+    return null;
+  }
+
+  if (!allowedAvatarTypes.has(file.type)) {
+    throw new Error('يسمح فقط بصور JPG / PNG / WEBP');
+  }
+
+  if (typeof window === 'undefined') {
+    return file;
+  }
+
+  const objectUrl = URL.createObjectURL(file);
+
+  try {
+    const image = await new Promise((resolve, reject) => {
+      const img = new window.Image();
+      img.onload = () => resolve(img);
+      img.onerror = () => reject(new Error('تعذر قراءة الصورة المرفوعة'));
+      img.src = objectUrl;
+    });
+
+    const maxDimension = 720;
+    const currentMaxDimension = Math.max(image.width, image.height);
+    const scale = currentMaxDimension > maxDimension ? maxDimension / currentMaxDimension : 1;
+    const targetWidth = Math.max(1, Math.round(image.width * scale));
+    const targetHeight = Math.max(1, Math.round(image.height * scale));
+
+    if (scale === 1 && file.size <= 1024 * 1024) {
+      return file;
+    }
+
+    const canvas = document.createElement('canvas');
+    canvas.width = targetWidth;
+    canvas.height = targetHeight;
+
+    const context = canvas.getContext('2d');
+    if (!context) {
+      return file;
+    }
+
+    context.drawImage(image, 0, 0, targetWidth, targetHeight);
+
+    const outputType = file.type === 'image/png' && file.size <= 512 * 1024
+      ? 'image/png'
+      : 'image/webp';
+
+    const optimizedBlob = await new Promise((resolve, reject) => {
+      canvas.toBlob(
+        (blob) => {
+          if (!blob) {
+            reject(new Error('تعذر تجهيز الصورة للرفع'));
+            return;
+          }
+
+          resolve(blob);
+        },
+        outputType,
+        outputType === 'image/png' ? undefined : 0.86,
+      );
+    });
+
+    const extension = outputType === 'image/png' ? 'png' : 'webp';
+    const fileName = file.name.replace(/\.[^.]+$/, '') || 'employee-avatar';
+
+    return new File([optimizedBlob], `${fileName}.${extension}`, {
+      type: outputType,
+      lastModified: Date.now(),
+    });
+  } finally {
+    URL.revokeObjectURL(objectUrl);
+  }
 };
 
 const defaultCreateForm = {
@@ -75,6 +166,7 @@ export default function EmployeesPage() {
   const [saving, setSaving] = useState(false);
   const [importing, setImporting] = useState(false);
   const [updatingPermissions, setUpdatingPermissions] = useState(false);
+  const [avatarUploadingUserId, setAvatarUploadingUserId] = useState('');
   const [createForm, setCreateForm] = useState(defaultCreateForm);
   const [editForm, setEditForm] = useState(defaultEditForm);
   const [importFile, setImportFile] = useState(null);
@@ -86,6 +178,7 @@ export default function EmployeesPage() {
   const [importResult, setImportResult] = useState(null);
   const [permissionTarget, setPermissionTarget] = useState(null);
   const [selectedPermissions, setSelectedPermissions] = useState([]);
+  const [deleteTarget, setDeleteTarget] = useState(null);
   const currentUser = authStorage.getUser();
 
   const canViewUsers = useMemo(() => {
@@ -113,8 +206,25 @@ export default function EmployeesPage() {
   }, [currentUser?.role, currentUser?.customPermissions, currentUser?.permissions]);
 
   const managers = useMemo(() => {
-    const managerRoles = ['GENERAL_MANAGER', 'HR_MANAGER', 'PROJECT_MANAGER', 'ASSISTANT_PROJECT_MANAGER', 'TEAM_LEAD'];
-    return users.filter((item) => managerRoles.includes(item.role) && item.active);
+    return users.filter((item) => managerRoleValues.has(item.role) && item.active);
+  }, [users]);
+
+  const availableEditManagers = useMemo(() => {
+    return managers.filter((item) => getUserId(item) !== String(editForm.id || ''));
+  }, [managers, editForm.id]);
+
+  const editedUser = useMemo(() => {
+    return users.find((item) => getUserId(item) === String(editForm.id || '')) || null;
+  }, [users, editForm.id]);
+
+  const directReportsCountByManager = useMemo(() => {
+    return users.reduce((acc, item) => {
+      const managerId = getManagerId(item);
+      if (managerId) {
+        acc[managerId] = (acc[managerId] || 0) + 1;
+      }
+      return acc;
+    }, {});
   }, [users]);
 
   const load = async () => {
@@ -122,7 +232,7 @@ export default function EmployeesPage() {
 
     try {
       const [usersResponse, permissionsResponse] = await Promise.all([
-        api.get('/auth/users'),
+        api.get('/auth/users?includeInactive=1'),
         api.get('/auth/permissions').catch(() => ({ permissions: [] })),
       ]);
       setUsers(usersResponse.users || []);
@@ -209,9 +319,21 @@ export default function EmployeesPage() {
   const toggleStatus = async (user) => {
     setError('');
     try {
+      const nextActive = !user.active;
+      const confirmed = window.confirm(
+        nextActive
+          ? `هل تريد إعادة تفعيل الموظف ${user.fullName}؟`
+          : `هل تريد تعطيل حساب الموظف ${user.fullName}؟`,
+      );
+
+      if (!confirmed) {
+        return;
+      }
+
       await api.patch(`/auth/users/${user._id || user.id}/status`, {
-        active: !user.active,
+        active: nextActive,
       });
+      setImportResult(nextActive ? 'تمت إعادة تفعيل الموظف بنجاح' : 'تم تعطيل الموظف بنجاح');
       await load();
     } catch (err) {
       setError(err.message || 'فشل تحديث حالة الموظف');
@@ -287,15 +409,44 @@ export default function EmployeesPage() {
   const uploadAvatar = async (user, file) => {
     if (!file) return;
 
-    const payload = new FormData();
-    payload.append('file', file);
-
     setError('');
     try {
+      const optimizedFile = await optimizeAvatarUpload(file);
+      const payload = new FormData();
+      payload.append('file', optimizedFile);
+
+      setAvatarUploadingUserId(getUserId(user));
       await api.post(`/auth/users/${user._id || user.id}/avatar`, payload);
+      setImportResult('تم تحديث الصورة الشخصية بنجاح');
       await load();
     } catch (err) {
       setError(err.message || 'فشل رفع الصورة');
+    } finally {
+      setAvatarUploadingUserId('');
+    }
+  };
+
+  const confirmDeleteUser = async () => {
+    if (!deleteTarget) return;
+
+    setError('');
+    setSaving(true);
+
+    try {
+      const targetId = getUserId(deleteTarget);
+      const response = await api.delete(`/auth/users/${targetId}`);
+      setDeleteTarget(null);
+      setEditForm((current) => (String(current.id) === String(targetId) ? defaultEditForm : current));
+      setImportResult(
+        response.reassignedReportsCount
+          ? `تم حذف الموظف من الواجهة ونقل ${response.reassignedReportsCount} من الموظفين التابعين تلقائيًا.`
+          : 'تم حذف الموظف منطقيًا بنجاح.',
+      );
+      await load();
+    } catch (err) {
+      setError(err.message || 'فشل حذف الموظف');
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -492,6 +643,21 @@ export default function EmployeesPage() {
               </select>
             </label>
             <label>
+              المدير المباشر
+              <select className="select" value={editForm.managerId} onChange={(e) => setEditForm((prev) => ({ ...prev, managerId: e.target.value }))}>
+                <option value="">بدون مدير مباشر</option>
+                {availableEditManagers.map((manager) => (
+                  <option key={getUserId(manager)} value={getUserId(manager)}>
+                    {manager.fullName} - {roleLabelMap[manager.role] || manager.role}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              رمز الموظف
+              <input className="input" value={editForm.employeeCode} onChange={(e) => setEditForm((prev) => ({ ...prev, employeeCode: e.target.value }))} />
+            </label>
+            <label>
               القسم
               <input className="input" value={editForm.department} onChange={(e) => setEditForm((prev) => ({ ...prev, department: e.target.value }))} />
             </label>
@@ -504,10 +670,18 @@ export default function EmployeesPage() {
               <input className="input" value={editForm.phone} onChange={(e) => setEditForm((prev) => ({ ...prev, phone: e.target.value }))} />
             </label>
             <label>
+              البريد الشخصي
+              <input className="input" type="email" value={editForm.personalEmail} onChange={(e) => setEditForm((prev) => ({ ...prev, personalEmail: e.target.value }))} />
+            </label>
+            <label>
+              الفريق
+              <input className="input" value={editForm.team} onChange={(e) => setEditForm((prev) => ({ ...prev, team: e.target.value }))} />
+            </label>
+            <label>
               الصلاحيات الإضافية
               <input
                 className="input"
-                value={(permissions || []).map((item) => permissionLabelMap[item] || item).join('، ')}
+                value={(editedUser?.customPermissions || []).map((item) => permissionLabelMap[item] || item).join('، ') || 'افتراضية حسب الدور'}
                 disabled
               />
             </label>
@@ -544,30 +718,32 @@ export default function EmployeesPage() {
             </thead>
             <tbody>
               {users.length ? users.map((user) => {
-                const uid = user._id || user.id;
+                const uid = getUserId(user);
                 const color = roleColorMap[user.role] || '#7b93c2';
-                const initials = (user.fullName || '?')
-                  .split(' ')
-                  .filter(Boolean)
-                  .slice(0, 2)
-                  .map((part) => part[0])
-                  .join('')
-                  .toUpperCase();
+                const directReportsCount = directReportsCountByManager[uid] || 0;
 
                 return (
                 <tr key={uid}>
                   <td>
                     <div className="emp-identity">
                       <div className="emp-avatar-wrap" style={{ '--emp-accent': color }}>
-                        {user.avatarUrl ? (
-                          <img className="emp-avatar-img" src={assetUrl(user.avatarUrl)} alt={user.fullName} />
-                        ) : (
-                          <span className="emp-avatar-fallback" style={{ background: `${color}22`, color }}>{initials}</span>
-                        )}
+                        <UserAvatar
+                          fullName={user.fullName}
+                          avatarUrl={user.avatarUrl}
+                          alt={user.fullName}
+                          imgClassName="emp-avatar-img"
+                          fallbackClassName="emp-avatar-fallback"
+                          fallbackStyle={{ background: `${color}22`, color }}
+                        />
                         {canManageUsers ? (
                           <label className="emp-avatar-upload-overlay" title="تغيير الصورة">
-                            📷
-                            <input type="file" accept="image/*" style={{ display: 'none' }} onChange={(e) => uploadAvatar(user, e.target.files?.[0])} />
+                            {avatarUploadingUserId === uid ? '...' : '📷'}
+                            <input
+                              type="file"
+                              accept="image/jpeg,image/png,image/webp"
+                              style={{ display: 'none' }}
+                              onChange={(e) => uploadAvatar(user, e.target.files?.[0])}
+                            />
                           </label>
                         ) : null}
                       </div>
@@ -575,6 +751,7 @@ export default function EmployeesPage() {
                         <strong>{user.fullName}</strong>
                         <span className="emp-email">{user.email}</span>
                         {user.employeeCode ? <span className="emp-code">{user.employeeCode}</span> : null}
+                        {directReportsCount ? <span className="emp-code">تابعون مباشرون: {directReportsCount}</span> : null}
                       </div>
                     </div>
                   </td>
@@ -584,7 +761,14 @@ export default function EmployeesPage() {
                     </span>
                   </td>
                   <td>{user.department || '-'}</td>
-                  <td>{user.manager?.fullName || '-'}</td>
+                  <td>
+                    <div>{user.manager?.fullName || '-'}</div>
+                    {directReportsCount ? (
+                      <div style={{ color: 'var(--text-soft)', fontSize: 12, marginTop: 4 }}>
+                        {directReportsCount} موظف/موظفين
+                      </div>
+                    ) : null}
+                  </td>
                   <td>
                     {(user.customPermissions || []).length ? (
                       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
@@ -609,8 +793,11 @@ export default function EmployeesPage() {
                         {canManageUsers ? (
                           <button className="btn btn-soft" onClick={() => beginEdit(user)} type="button">تعديل</button>
                         ) : null}
+                        {canManageUsers ? (
+                          <button className="btn btn-soft" onClick={() => beginEdit(user)} type="button">المدير المباشر</button>
+                        ) : null}
                         {canManageStatus ? (
-                          <button className="btn btn-soft" onClick={() => toggleStatus(user)} type="button">{user.active ? 'تعطيل' : 'تفعيل'}</button>
+                          <button className="btn btn-soft" onClick={() => toggleStatus(user)} type="button">{user.active ? 'تعطيل' : 'إعادة التفعيل'}</button>
                         ) : null}
                         {canResetPasswords ? (
                           <button className="btn btn-soft" onClick={() => resetPassword(user)} type="button">إعادة كلمة المرور</button>
@@ -623,6 +810,9 @@ export default function EmployeesPage() {
                             رفع مستند
                             <input type="file" style={{ display: 'none' }} onChange={(e) => uploadDocument(user, e.target.files?.[0])} />
                           </label>
+                        ) : null}
+                        {canManageUsers ? (
+                          <button className="btn btn-soft" style={{ color: '#ff9b9b' }} onClick={() => setDeleteTarget(user)} type="button">حذف موظف</button>
                         ) : null}
                       </div>
                     ) : '-'}
@@ -698,6 +888,31 @@ export default function EmployeesPage() {
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 16 }}>
               <button type="button" className="btn btn-soft" onClick={() => { setDocumentCategoryTarget(null); setDocumentCategoryFile(null); }}>إلغاء</button>
               <button type="button" className="btn btn-primary" onClick={() => uploadDocument(documentCategoryTarget, documentCategoryFile)}>رفع المستند</button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {deleteTarget ? (
+        <div className="modal-backdrop" onClick={() => setDeleteTarget(null)}>
+          <div className="modal-panel" onClick={(e) => e.stopPropagation()}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+              <h3 style={{ margin: 0 }}>حذف موظف</h3>
+              <button type="button" className="modal-close" onClick={() => setDeleteTarget(null)}>&times;</button>
+            </div>
+            <p style={{ color: 'var(--text-soft)', margin: '0 0 12px' }}>
+              سيتم تنفيذ حذف منطقي للموظف <strong>{deleteTarget.fullName}</strong> مع الاحتفاظ بالسجلات التاريخية.
+            </p>
+            <div style={{ display: 'grid', gap: 8, color: 'var(--text-soft)', marginBottom: 16 }}>
+              <div>المدير الأعلى الحالي: <strong>{deleteTarget.manager?.fullName || 'سيتم الاعتماد على المدير العام / الجهة الإدارية الافتراضية'}</strong></div>
+              <div>عدد التابعين المباشرين: <strong>{directReportsCountByManager[getUserId(deleteTarget)] || 0}</strong></div>
+              <div>سيتم نقل التابعين المباشرين تلقائيًا قبل إخفاء الموظف من القوائم والهيكل التنظيمي.</div>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+              <button type="button" className="btn btn-soft" onClick={() => setDeleteTarget(null)} disabled={saving}>إلغاء</button>
+              <button type="button" className="btn btn-primary" onClick={confirmDeleteUser} disabled={saving}>
+                {saving ? 'جارٍ الحذف...' : 'تأكيد الحذف'}
+              </button>
             </div>
           </div>
         </div>

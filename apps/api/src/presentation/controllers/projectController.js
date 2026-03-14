@@ -1,4 +1,4 @@
-import { ProjectRepository } from '../../infrastructure/db/repositories/ProjectRepository.js';
+ï»¿import { ProjectRepository } from '../../infrastructure/db/repositories/ProjectRepository.js';
 import { UserRepository } from '../../infrastructure/db/repositories/UserRepository.js';
 import { PointsLedgerRepository } from '../../infrastructure/db/repositories/PointsLedgerRepository.js';
 import { GoalRepository } from '../../infrastructure/db/repositories/GoalRepository.js';
@@ -44,7 +44,7 @@ const awardProjectPoints = async ({ project, approverId, points }) => {
     user: ownerId,
     points,
     category: 'PROJECT_APPROVAL',
-    reason: `ÇÚÊãÇÏ ãÔÑæÚ: ${project.name}`,
+    reason: `Ø§Ø¹ØªÙ…Ø§Ø¯ Ù…Ø´Ø±ÙˆØ¹: ${project.name}`,
     approvedBy: approverId,
   });
 
@@ -73,8 +73,8 @@ const awardProjectPoints = async ({ project, approverId, points }) => {
 
   await notificationService.notifySystem(
     updatedUser._id,
-    'ÇÚÊãÇÏ ÇáãÔÑæÚ',
-    `Êã ÇÚÊãÇÏ ãÔÑæÚ "${project.name}" æÅÖÇÝÉ ${points} äÞØÉ.`,
+    'Ø§Ø¹ØªÙ…Ø§Ø¯ Ø§Ù„Ù…Ø´Ø±ÙˆØ¹',
+    `ØªÙ… Ø§Ø¹ØªÙ…Ø§Ø¯ Ù…Ø´Ø±ÙˆØ¹ "${project.name}" ÙˆØ¥Ø¶Ø§ÙØ© ${points} Ù†Ù‚Ø·Ø©.`,
     {
       projectId: String(project._id),
       points,
@@ -306,3 +306,4 @@ export const rejectProject = asyncHandler(async (req, res) => {
 
   res.json({ project: updatedProject });
 });
+

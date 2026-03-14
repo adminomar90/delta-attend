@@ -1,7 +1,7 @@
 import dayjs from 'dayjs';
 import { TaskModel } from '../../infrastructure/db/models/TaskModel.js';
 import { ProjectModel } from '../../infrastructure/db/models/ProjectModel.js';
-import { GoalModel } from '../../infrastructure/db/models/GoalModel.js';
+import { GoalModel, GoalStatus } from '../../infrastructure/db/models/GoalModel.js';
 import { NotificationModel } from '../../infrastructure/db/models/NotificationModel.js';
 import { PointsLedgerRepository } from '../../infrastructure/db/repositories/PointsLedgerRepository.js';
 import { UserRepository } from '../../infrastructure/db/repositories/UserRepository.js';
@@ -33,6 +33,9 @@ export const dashboardSummary = asyncHandler(async (req, res) => {
   if (Array.isArray(managedUserIds)) {
     goalFilter.user = { $in: managedUserIds };
   }
+
+  goalFilter.deletedAt = null;
+  goalFilter.status = { $in: [GoalStatus.ACTIVE, GoalStatus.ACHIEVED, GoalStatus.EXPIRED] };
 
   const canSeeLeaderboard = hasPermission(req.user, Permission.VIEW_LEADERBOARD);
 

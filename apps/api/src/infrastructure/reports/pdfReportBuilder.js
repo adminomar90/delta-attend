@@ -1,30 +1,56 @@
-﻿import PDFDocument from 'pdfkit';
+/**
+ * Tasks Report PDF — rebuilt on the unified template.
+ */
 
-export const buildTasksPdfBuffer = async (tasks) => {
-  return new Promise((resolve, reject) => {
-    const doc = new PDFDocument({ margin: 30, size: 'A4' });
-    const chunks = [];
+import {
+  createDoc, finalize, safe, fmtDate, fmtPoints,
+  drawHeader, drawSectionTitle, drawKpiCards, drawDataTable,
+  COLORS,
+} from './pdfTemplate.js';
 
-    doc.on('data', (chunk) => chunks.push(chunk));
-    doc.on('end', () => resolve(Buffer.concat(chunks)));
-    doc.on('error', reject);
+export const buildTasksPdfBuffer = async (tasks = []) => {
+  const ctx = createDoc({ title: 'تقرير المهام' });
 
-    doc.fontSize(18).text('Delta Plus - Tasks Report', { align: 'center' });
-    doc.moveDown();
-    doc.fontSize(11).text(`Generated at: ${new Date().toLocaleString('en-US')}`);
-    doc.moveDown();
-
-    tasks.forEach((task, index) => {
-      doc
-        .fontSize(12)
-        .text(`${index + 1}. ${task.title}`)
-        .fontSize(10)
-        .text(`Project: ${task.project?.name || '-'} | Assignee: ${task.assignee?.fullName || '-'}`)
-        .text(`Status: ${task.status} | Points: ${task.pointsAwarded}`)
-        .text(`Due: ${task.dueDate ? new Date(task.dueDate).toLocaleDateString('en-US') : '-'} | Approved: ${task.approvedAt ? new Date(task.approvedAt).toLocaleDateString('en-US') : '-'}`)
-        .moveDown(0.8);
-    });
-
-    doc.end();
+  /* ── Header ── */
+  drawHeader(ctx, {
+    title: 'تقرير المهام',
+    date: new Date(),
   });
+
+  /* ── KPI Cards ── */
+  const completed = tasks.filter((t) => t.status === 'APPROVED' || t.status === 'COMPLETED').length;
+  const totalPoints = tasks.reduce((s, t) => s + Number(t.pointsAwarded || 0), 0);
+
+  drawKpiCards(ctx, [
+    { label: 'إجمالي المهام',    value: `${tasks.length}` },
+    { label: 'المهام المنجزة',   value: `${completed}` },
+    { label: 'النقاط الممنوحة',  value: fmtPoints(totalPoints) },
+  ]);
+
+  /* ── Section: جدول المهام ── */
+  drawSectionTitle(ctx, 'قائمة المهام');
+
+  if (tasks.length) {
+    drawDataTable(ctx, {
+      headers: ['#', 'المهمة', 'المشروع', 'المكلف', 'الحالة', 'النقاط', 'الاستحقاق', 'الاعتماد'],
+      colWidths: [0.04, 0.22, 0.16, 0.14, 0.10, 0.08, 0.13, 0.13],
+      rows: tasks.map((t, i) => [
+        `${i + 1}`,
+        safe(t.title),
+        safe(t.project?.name),
+        safe(t.assignee?.fullName),
+        safe(t.status),
+        fmtPoints(t.pointsAwarded || 0),
+        fmtDate(t.dueDate),
+        fmtDate(t.approvedAt),
+      ]),
+    });
+  } else {
+    ctx.doc.font(ctx.F).fontSize(8.5).fillColor(COLORS.soft);
+    ctx.doc.text('لا توجد مهام.', ctx.ML, ctx.doc.y, { width: ctx.CW, align: 'right', features: ['arab'] });
+    ctx.doc.moveDown(0.5);
+  }
+
+  /* ── Finalize ── */
+  return finalize(ctx, { footerLabel: 'تقرير المهام' });
 };

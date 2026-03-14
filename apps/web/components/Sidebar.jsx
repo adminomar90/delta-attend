@@ -10,6 +10,8 @@ const menuIcons = {
   '/attendance': '⏱️',
   '/tasks': '📋',
   '/materials': '🏗️',
+  '/financial-disbursements': '💸',
+  '/maintenance-reports': '🛠️',
   '/approvals': '✅',
   '/work-reports': '📝',
   '/completed-work-reports': '📚',
@@ -38,6 +40,26 @@ const menu = [
       Permission.DISPATCH_MATERIAL_REQUESTS,
       Permission.RECONCILE_MATERIAL_CUSTODY,
       Permission.VIEW_MATERIAL_REPORTS,
+    ],
+  },
+  {
+    href: '/financial-disbursements',
+    label: 'الصرف المالي',
+    anyPermissions: [
+      Permission.CREATE_FINANCIAL_DISBURSEMENTS,
+      Permission.REVIEW_FINANCIAL_DISBURSEMENTS,
+      Permission.DISBURSE_FINANCIAL_FUNDS,
+      Permission.VIEW_FINANCIAL_REPORTS,
+    ],
+  },
+  {
+    href: '/maintenance-reports',
+    label: 'تقارير الصيانة',
+    anyPermissions: [
+      Permission.CREATE_MAINTENANCE_REPORT_REQUESTS,
+      Permission.HANDLE_MAINTENANCE_REPORTS,
+      Permission.REVIEW_MAINTENANCE_REPORTS,
+      Permission.VIEW_MAINTENANCE_REPORTS,
     ],
   },
   {

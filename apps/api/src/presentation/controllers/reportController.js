@@ -1,13 +1,17 @@
 import dayjs from 'dayjs';
 import { TaskRepository } from '../../infrastructure/db/repositories/TaskRepository.js';
 import { UserRepository } from '../../infrastructure/db/repositories/UserRepository.js';
+import { FinancialDisbursementRepository } from '../../infrastructure/db/repositories/FinancialDisbursementRepository.js';
 import { buildTasksExcelBuffer } from '../../infrastructure/reports/excelReportBuilder.js';
 import { buildTasksPdfBuffer } from '../../infrastructure/reports/pdfReportBuilder.js';
 import { applyManagedScopeOnFilter, resolveManagedUserIds } from '../../shared/accessScope.js';
+import { summarizeFinancialRequests } from '../../application/services/financialDisbursementService.js';
 import { asyncHandler } from '../../shared/errors.js';
+import { Roles } from '../../shared/constants.js';
 
 const taskRepository = new TaskRepository();
 const userRepository = new UserRepository();
+const financialDisbursementRepository = new FinancialDisbursementRepository();
 
 const resolveDateRange = (query) => {
   const from = query.from ? dayjs(query.from).startOf('day') : dayjs().startOf('month');
@@ -60,6 +64,21 @@ const isDelayed = (task) => {
   return dayjs().isAfter(due) && !['APPROVED', 'REJECTED'].includes(task.status);
 };
 
+const loadFinancialDisbursementsForReport = async (user) => {
+  const filter = user.role === Roles.GENERAL_MANAGER
+    ? {}
+    : {
+        $or: [
+          { employee: user.id },
+          { projectManagerReviewer: user.id },
+          { financialManagerReviewer: user.id },
+          { generalManagerReviewer: user.id },
+        ],
+      };
+
+  return financialDisbursementRepository.list(filter, { limit: 1000 });
+};
+
 export const exportExcel = asyncHandler(async (req, res) => {
   const tasks = await loadTasksForReport(req.query, req.user);
   const buffer = await buildTasksExcelBuffer(tasks);
@@ -80,6 +99,7 @@ export const exportPdf = asyncHandler(async (req, res) => {
 
 export const reportSummary = asyncHandler(async (req, res) => {
   const tasks = await loadTasksForReport(req.query, req.user);
+  const financialRequests = await loadFinancialDisbursementsForReport(req.user);
   const totalPoints = tasks.reduce((sum, task) => sum + (task.pointsAwarded || 0), 0);
 
   res.json({
@@ -89,6 +109,7 @@ export const reportSummary = asyncHandler(async (req, res) => {
     submittedTasks: tasks.filter((item) => item.status === 'SUBMITTED').length,
     rejectedTasks: tasks.filter((item) => item.status === 'REJECTED').length,
     delayedTasks: tasks.filter((item) => isDelayed(item)).length,
+    financialDisbursements: summarizeFinancialRequests(financialRequests),
   });
 });
 

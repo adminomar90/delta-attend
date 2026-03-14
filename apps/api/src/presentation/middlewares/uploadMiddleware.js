@@ -18,9 +18,11 @@ const diskStorage = multer.diskStorage({
   },
 });
 
+const allowedAvatarMimeTypes = new Set(['image/jpeg', 'image/png', 'image/webp']);
+
 const avatarFilter = (_req, file, cb) => {
-  if (!file.mimetype.startsWith('image/')) {
-    cb(new Error('Only image uploads are allowed for avatar'));
+  if (!allowedAvatarMimeTypes.has(String(file.mimetype || '').toLowerCase())) {
+    cb(new Error('Only JPG, PNG, and WEBP avatar uploads are allowed'));
     return;
   }
   cb(null, true);

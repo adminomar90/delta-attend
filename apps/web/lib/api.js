@@ -72,9 +72,10 @@ export const api = {
     });
   },
 
-  delete(path) {
+  delete(path, body) {
     return this.request(path, {
       method: 'DELETE',
+      ...(body !== undefined ? { body: body instanceof FormData ? body : JSON.stringify(body) } : {}),
     });
   },
 
@@ -90,6 +91,5 @@ export const api = {
     return response.blob();
   },
 };
-
 
 

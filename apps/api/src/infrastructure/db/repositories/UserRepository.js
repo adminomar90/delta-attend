@@ -1,5 +1,23 @@
 import { UserModel } from '../models/UserModel.js';
 
+const buildManagementFilter = ({ includeInactive = false, includeDeleted = false, userIds } = {}) => {
+  const filter = {};
+
+  if (!includeDeleted) {
+    filter.deletedAt = null;
+  }
+
+  if (!includeInactive) {
+    filter.active = true;
+  }
+
+  if (Array.isArray(userIds)) {
+    filter._id = { $in: userIds };
+  }
+
+  return filter;
+};
+
 export class UserRepository {
   async findByEmail(email) {
     return UserModel.findOne({ email }).lean(false);
@@ -24,10 +42,7 @@ export class UserRepository {
   }
 
   async listActive({ includeManager = true, userIds } = {}) {
-    const filter = { active: true };
-    if (Array.isArray(userIds)) {
-      filter._id = { $in: userIds };
-    }
+    const filter = buildManagementFilter({ includeManager, includeInactive: false, includeDeleted: false, userIds });
 
     let query = UserModel.find(filter).select('-passwordHash -otpCodeHash').sort({ fullName: 1 });
 
@@ -38,15 +53,29 @@ export class UserRepository {
     return query;
   }
 
+  async listForManagement({ includeManager = true, userIds, includeInactive = false } = {}) {
+    let query = UserModel.find(
+      buildManagementFilter({ includeInactive, includeDeleted: false, userIds }),
+    )
+      .select('-passwordHash -otpCodeHash')
+      .sort({ fullName: 1 });
+
+    if (includeManager) {
+      query = query.populate('manager', 'fullName role jobTitle active');
+    }
+
+    return query;
+  }
+
   async listHierarchyNodes() {
-    return UserModel.find({ active: true })
-      .select('_id manager department')
+    return UserModel.find({ deletedAt: null })
+      .select('_id manager department active deletedAt')
       .lean();
   }
 
   async listOrgNodes() {
-    return UserModel.find({ active: true })
-      .select('fullName role jobTitle department avatarUrl manager employeeCode team')
+    return UserModel.find({ deletedAt: null })
+      .select('fullName role jobTitle department avatarUrl manager employeeCode team active deletedAt')
       .sort({ fullName: 1 })
       .lean();
   }
@@ -84,6 +113,8 @@ export class UserRepository {
     const update = {
       $set: {
         active: !!active,
+        lockedUntil: null,
+        authFailureCount: 0,
       },
     };
 
@@ -167,15 +198,70 @@ export class UserRepository {
   }
 
   async listByIds(ids = []) {
-    return UserModel.find({ _id: { $in: ids }, active: true }).select('fullName role email employeeCode department jobTitle');
+    return UserModel.find({ _id: { $in: ids }, active: true, deletedAt: null }).select('fullName role email employeeCode department jobTitle');
+  }
+
+  async listDirectReports(managerId) {
+    return UserModel.find({
+      manager: managerId,
+      deletedAt: null,
+    })
+      .select('-passwordHash -otpCodeHash')
+      .populate('manager', 'fullName role jobTitle active')
+      .sort({ fullName: 1 });
+  }
+
+  async reassignDirectReports(managerId, nextManagerId = null) {
+    return UserModel.updateMany(
+      {
+        manager: managerId,
+        deletedAt: null,
+      },
+      {
+        $set: {
+          manager: nextManagerId || null,
+        },
+      },
+    );
+  }
+
+  async softDeleteById(userId, { deletedBy = null, revokeSessions = true } = {}) {
+    const update = {
+      $set: {
+        active: false,
+        deletedAt: new Date(),
+        deletedBy: deletedBy || null,
+        lockedUntil: null,
+        authFailureCount: 0,
+      },
+    };
+
+    if (revokeSessions) {
+      update.$inc = { sessionVersion: 1 };
+    }
+
+    return UserModel.findByIdAndUpdate(userId, update, { new: true })
+      .select('-passwordHash -otpCodeHash')
+      .populate('manager', 'fullName role jobTitle active');
   }
 
   async incrementPointsAndSetLevel(userId, pointsDelta, level) {
+    const user = await UserModel.findById(userId);
+    if (!user) {
+      return null;
+    }
+
+    const safePointsDelta = Number(pointsDelta || 0);
+    const nextPointsTotal = Math.max(0, Number(user.pointsTotal || 0) + safePointsDelta);
+    const nextLevel = Math.max(Number(user.level || 1), Number(level || 1));
+
     return UserModel.findByIdAndUpdate(
       userId,
       {
-        $inc: { pointsTotal: pointsDelta },
-        $set: { level },
+        $set: {
+          pointsTotal: nextPointsTotal,
+          level: nextLevel,
+        },
       },
       { new: true },
     );

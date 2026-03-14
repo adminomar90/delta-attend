@@ -40,6 +40,41 @@ test('resolveManagedUserIds returns hierarchy descendants for project manager', 
   assert.deepEqual([...ids].sort(), ['e1', 'e2', 'm1']);
 });
 
+test('resolveManagedUserIds keeps active descendants reachable when an intermediate manager is inactive', async () => {
+  const ids = await resolveManagedUserIds({
+    userRepository: createUserRepositoryStub({
+      actor: { _id: 'gm1', department: 'Operations' },
+      nodes: [
+        { _id: 'gm1', manager: null, department: 'Operations', active: true, deletedAt: null },
+        { _id: 'm1', manager: 'gm1', department: 'Operations', active: false, deletedAt: null },
+        { _id: 'e1', manager: 'm1', department: 'Operations', active: true, deletedAt: null },
+      ],
+    }),
+    actorId: 'gm1',
+    actorRole: Roles.PROJECT_MANAGER,
+  });
+
+  assert.deepEqual([...ids].sort(), ['e1', 'gm1']);
+});
+
+test('resolveManagedUserIds can include inactive hierarchy nodes for admin screens', async () => {
+  const ids = await resolveManagedUserIds({
+    userRepository: createUserRepositoryStub({
+      actor: { _id: 'gm1', department: 'Operations' },
+      nodes: [
+        { _id: 'gm1', manager: null, department: 'Operations', active: true, deletedAt: null },
+        { _id: 'm1', manager: 'gm1', department: 'Operations', active: false, deletedAt: null },
+        { _id: 'e1', manager: 'm1', department: 'Operations', active: true, deletedAt: null },
+      ],
+    }),
+    actorId: 'gm1',
+    actorRole: Roles.PROJECT_MANAGER,
+    includeInactive: true,
+  });
+
+  assert.deepEqual([...ids].sort(), ['e1', 'gm1', 'm1']);
+});
+
 test('resolveManagedUserIds returns all active users for general manager', async () => {
   const ids = await resolveManagedUserIds({
     userRepository: createUserRepositoryStub({

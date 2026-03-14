@@ -13,6 +13,7 @@ import {
   uploadMyAvatar,
   uploadEmployeeDocument,
   listEmployeeFiles,
+  deleteUser,
   importUsers,
   createSuperAdmin,
   orgChart,
@@ -66,6 +67,7 @@ authRoutes.patch('/users/:id', requireAuth, canManageUsers, updateUser);
 authRoutes.patch('/users/:id/status', requireAuth, canManageUserStatus, updateUserStatus);
 authRoutes.patch('/users/:id/reset-password', requireAuth, canResetUserPasswords, resetUserPassword);
 authRoutes.patch('/users/:id/permissions', requireAuth, canManagePermissions, setUserPermissions);
+authRoutes.delete('/users/:id', requireAuth, canManageUsers, deleteUser);
 authRoutes.post('/users/:id/avatar', requireAuth, canManageUsers, uploadAvatarMiddleware.single('file'), uploadAvatar);
 authRoutes.post('/users/:id/files', requireAuth, canManageUsers, uploadDocumentMiddleware.single('file'), uploadEmployeeDocument);
 authRoutes.get('/users/:id/files', requireAuth, requirePermission(Permission.MANAGE_USERS), listEmployeeFiles);
