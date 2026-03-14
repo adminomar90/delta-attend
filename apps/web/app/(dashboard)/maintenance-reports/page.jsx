@@ -26,14 +26,17 @@ const issueSeverityOptions = [
 const statusClassMap = {
   NEW: 'status-todo',
   AWAITING_ACCEPTANCE: 'status-submitted',
+  ACCEPTED: 'status-inprogress',
   IN_PROGRESS: 'status-inprogress',
   DRAFT: 'status-inprogress',
   COMPLETED: 'status-approved',
-  AWAITING_CUSTOMER_FEEDBACK: 'status-inprogress',
+  AWAITING_CUSTOMER_FEEDBACK: 'status-submitted',
+  FEEDBACK_SUBMITTED: 'status-approved',
   PENDING_MANAGER_APPROVAL: 'status-submitted',
   RETURNED_FOR_EDIT: 'status-inprogress',
   APPROVED: 'status-approved',
   REJECTED: 'status-rejected',
+  CLOSED: 'status-approved',
 };
 
 const emptyRequestForm = {
@@ -67,7 +70,7 @@ const formatDateTime = (value) => {
   if (!value) return '-';
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return '-';
-  return date.toLocaleString('ar-IQ');
+  return date.toLocaleString('ar-IQ', { timeZone: 'Asia/Baghdad' });
 };
 
 const mapReportToForm = (report) => ({
@@ -108,6 +111,15 @@ const mapReportToForm = (report) => ({
 
 const appendObjectRow = (setter, key, value) => setter((current) => ({ ...current, [key]: [...current[key], value] }));
 const appendStringRow = (setter, key) => setter((current) => ({ ...current, [key]: [...current[key], ''] }));
+
+const renderStars = (rating) => {
+  const n = Number(rating || 0);
+  return Array.from({ length: 5 }, (_, i) => i < n ? '\u2605' : '\u2606').join('');
+};
+
+const maintenanceTypeLabelMap = Object.fromEntries(maintenanceTypeOptions);
+const deviceConditionLabelMap = Object.fromEntries(deviceConditionOptions);
+const issueSeverityLabelMap = Object.fromEntries(issueSeverityOptions);
 
 export default function MaintenanceReportsPage() {
   const currentUser = authStorage.getUser();
@@ -549,7 +561,122 @@ export default function MaintenanceReportsPage() {
               <div className="form-actions">
                 <button className="btn btn-soft" type="button" disabled={saving} onClick={() => saveDraft()}>حفظ التقرير</button>
                 <button className="btn btn-primary" type="button" disabled={saving} onClick={() => saveDraft({ completeAfter: true })}>إكمال التقرير</button>
-                {selectedReport.canSendFeedbackLink ? <button className="btn btn-soft" type="button" disabled={saving} onClick={createFeedbackLink}>إرسال رابط التقييم</button> : null}
+              </div>
+            </div>
+          ) : null}
+
+          {/* ── ملخص التقرير المكتمل (للقراءة فقط) ── */}
+          {!selectedReport.canEditReport && selectedReport.visitInfo ? (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+              <div className="card section" style={{ padding: 12 }}>
+                <strong>معلومات الزيارة</strong>
+                <table className="table" style={{ marginTop: 10 }}>
+                  <tbody>
+                    <tr><td style={{ fontWeight: 600, width: '30%' }}>الموقع</td><td>{selectedReport.visitInfo.siteName || '-'}</td></tr>
+                    <tr><td style={{ fontWeight: 600 }}>العنوان</td><td>{selectedReport.visitInfo.siteAddress || '-'}</td></tr>
+                    <tr><td style={{ fontWeight: 600 }}>تاريخ الزيارة</td><td>{selectedReport.visitInfo.visitDate ? new Date(selectedReport.visitInfo.visitDate).toLocaleDateString('ar-IQ', { timeZone: 'Asia/Baghdad' }) : '-'}</td></tr>
+                    <tr><td style={{ fontWeight: 600 }}>وقت الوصول</td><td>{selectedReport.visitInfo.arrivalTime || '-'}</td></tr>
+                    <tr><td style={{ fontWeight: 600 }}>وقت المغادرة</td><td>{selectedReport.visitInfo.departureTime || '-'}</td></tr>
+                    <tr><td style={{ fontWeight: 600 }}>الفني</td><td>{selectedReport.visitInfo.technicianName || '-'}</td></tr>
+                    <tr><td style={{ fontWeight: 600 }}>القسم</td><td>{selectedReport.visitInfo.department || '-'}</td></tr>
+                  </tbody>
+                </table>
+              </div>
+
+              {selectedReport.maintenanceTypes?.length ? (
+                <div className="card section" style={{ padding: 12 }}>
+                  <strong>نوع الصيانة</strong>
+                  <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 10 }}>
+                    {selectedReport.maintenanceTypes.map((t) => (
+                      <span key={t.value || t} className="status-pill status-inprogress">{maintenanceTypeLabelMap[t.value || t] || t.value || t}</span>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+
+              {selectedReport.inspectedDevices?.length ? (
+                <div className="card section" style={{ padding: 12 }}>
+                  <strong>الأجهزة المفحوصة</strong>
+                  <table className="table" style={{ marginTop: 10 }}>
+                    <thead><tr><th>الجهاز</th><th>الموديل</th><th>الحالة</th><th>ملاحظات</th></tr></thead>
+                    <tbody>
+                      {selectedReport.inspectedDevices.map((d, i) => (
+                        <tr key={i}><td>{d.device || '-'}</td><td>{d.model || '-'}</td><td>{deviceConditionLabelMap[d.condition] || d.condition || '-'}</td><td>{d.notes || '-'}</td></tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : null}
+
+              {selectedReport.performedActions?.length ? (
+                <div className="card section" style={{ padding: 12 }}>
+                  <strong>الأعمال المنفذة</strong>
+                  <ul style={{ marginTop: 10, paddingRight: 20 }}>
+                    {selectedReport.performedActions.map((a, i) => <li key={i}>{a}</li>)}
+                  </ul>
+                </div>
+              ) : null}
+
+              {selectedReport.detectedIssues?.length ? (
+                <div className="card section" style={{ padding: 12 }}>
+                  <strong>المشاكل المكتشفة</strong>
+                  <table className="table" style={{ marginTop: 10 }}>
+                    <thead><tr><th>المشكلة</th><th>الخطورة</th><th>الحل المقترح</th></tr></thead>
+                    <tbody>
+                      {selectedReport.detectedIssues.map((issue, i) => (
+                        <tr key={i}><td>{issue.issue || '-'}</td><td>{issueSeverityLabelMap[issue.severity] || issue.severity || '-'}</td><td>{issue.proposedSolution || '-'}</td></tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : null}
+
+              {selectedReport.usedMaterials?.length ? (
+                <div className="card section" style={{ padding: 12 }}>
+                  <strong>المواد المستخدمة</strong>
+                  <table className="table" style={{ marginTop: 10 }}>
+                    <thead><tr><th>المادة</th><th>الكمية</th><th>ملاحظات</th></tr></thead>
+                    <tbody>
+                      {selectedReport.usedMaterials.map((m, i) => (
+                        <tr key={i}><td>{m.material || '-'}</td><td>{m.quantity || '-'}</td><td>{m.notes || '-'}</td></tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : null}
+
+              {selectedReport.recommendations?.length ? (
+                <div className="card section" style={{ padding: 12 }}>
+                  <strong>التوصيات</strong>
+                  <ul style={{ marginTop: 10, paddingRight: 20 }}>
+                    {selectedReport.recommendations.map((r, i) => <li key={i}>{r}</li>)}
+                  </ul>
+                </div>
+              ) : null}
+
+              {selectedReport.images?.length ? (
+                <div className="card section" style={{ padding: 12 }}>
+                  <strong>صور الصيانة</strong>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, marginTop: 10 }}>
+                    {selectedReport.images.map((image) => (
+                      <div key={image.id} style={{ textAlign: 'center' }}>
+                        <img src={assetUrl(image.url)} alt="maintenance" style={{ width: 120, height: 120, objectFit: 'cover', borderRadius: 10 }} />
+                        <div style={{ fontSize: 12, color: 'var(--text-soft)', marginTop: 4 }}>{image.comment || image.originalName || ''}</div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+
+          {/* ── إجراءات ما بعد الإكمال ── */}
+          {(selectedReport.canSendFeedbackLink || selectedReport.canSubmitForApproval) && !selectedReport.canEditReport ? (
+            <div className="card section" style={{ padding: 12, marginTop: 14, border: '2px solid var(--accent)', borderRadius: 12 }}>
+              <strong>الإجراءات المتاحة</strong>
+              <div className="form-actions" style={{ marginTop: 10 }}>
+                {selectedReport.canSendFeedbackLink ? <button className="btn btn-soft" type="button" disabled={saving} onClick={createFeedbackLink}>إرسال رابط تقييم الزبون</button> : null}
+                {selectedReport.canSubmitForApproval ? <button className="btn btn-primary" type="button" disabled={saving} onClick={submitForApproval}>طلب اعتماد من المدير</button> : null}
               </div>
             </div>
           ) : null}
@@ -579,16 +706,32 @@ export default function MaintenanceReportsPage() {
                 <button className="btn btn-soft" type="button" disabled={saving} onClick={() => managerReview('RETURN_FOR_EDIT')}>إرجاع للتعديل</button>
                 <button className="btn btn-soft" type="button" disabled={saving} style={{ color: '#ff9b9b' }} onClick={() => managerReview('REJECT')}>رفض</button>
               </div>
+              {selectedReport.canSendFeedbackLink ? (
+                <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid var(--stroke)' }}>
+                  <button className="btn btn-soft" type="button" disabled={saving} onClick={createFeedbackLink}>إرسال رابط تقييم الزبون</button>
+                </div>
+              ) : null}
             </div>
           ) : null}
 
           {selectedReport.customerFeedback?.submittedAt ? (
             <div className="card section" style={{ padding: 12, marginTop: 14 }}>
               <strong>تقييم الزبون</strong>
-              <div style={{ marginTop: 8, color: 'var(--text-soft)' }}>تقييم الشركة: {selectedReport.customerFeedback.companyRating}/5</div>
-              <div style={{ color: 'var(--text-soft)' }}>تقييم الموظف: {selectedReport.customerFeedback.employeeRating}/5</div>
-              {selectedReport.customerFeedback.notes ? <div style={{ marginTop: 8 }}>الملاحظات: {selectedReport.customerFeedback.notes}</div> : null}
-              {selectedReport.customerFeedback.suggestions ? <div style={{ marginTop: 8 }}>الاقتراحات: {selectedReport.customerFeedback.suggestions}</div> : null}
+              <div style={{ marginTop: 10 }}>
+                <div style={{ marginBottom: 8 }}>
+                  <span style={{ color: 'var(--text-soft)' }}>تقييم الشركة: </span>
+                  <span style={{ fontSize: 20, color: '#f1c40f', letterSpacing: 2 }}>{renderStars(selectedReport.customerFeedback.companyRating)}</span>
+                  <span style={{ color: 'var(--text-soft)', marginRight: 8 }}>({selectedReport.customerFeedback.companyRating}/5)</span>
+                </div>
+                <div style={{ marginBottom: 8 }}>
+                  <span style={{ color: 'var(--text-soft)' }}>تقييم الموظف: </span>
+                  <span style={{ fontSize: 20, color: '#f1c40f', letterSpacing: 2 }}>{renderStars(selectedReport.customerFeedback.employeeRating)}</span>
+                  <span style={{ color: 'var(--text-soft)', marginRight: 8 }}>({selectedReport.customerFeedback.employeeRating}/5)</span>
+                </div>
+                {selectedReport.customerFeedback.customerName ? <div style={{ marginTop: 8 }}>اسم الزبون: {selectedReport.customerFeedback.customerName}</div> : null}
+                {selectedReport.customerFeedback.notes ? <div style={{ marginTop: 8 }}>الملاحظات: {selectedReport.customerFeedback.notes}</div> : null}
+                {selectedReport.customerFeedback.suggestions ? <div style={{ marginTop: 8 }}>الاقتراحات: {selectedReport.customerFeedback.suggestions}</div> : null}
+              </div>
             </div>
           ) : null}
 
