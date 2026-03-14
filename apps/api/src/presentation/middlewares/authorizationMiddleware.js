@@ -55,6 +55,7 @@ export const canReconcileMaterialCustody = requirePermission(Permission.RECONCIL
 export const canCloseMaterialCustody = requirePermission(Permission.CLOSE_MATERIAL_CUSTODY);
 export const canViewMaterialReports = requirePermission(Permission.VIEW_MATERIAL_REPORTS);
 export const canViewAttendanceMonitor = requirePermission(Permission.VIEW_ATTENDANCE_MONITOR);
+export const canCreateInternalNotifications = requirePermission(Permission.CREATE_INTERNAL_NOTIFICATIONS);
 export const canViewEmployeesHierarchy = requirePermission(Permission.VIEW_EMPLOYEES_HIERARCHY);
 export const canViewOwnWorkReports = requirePermission(Permission.VIEW_OWN_WORK_REPORTS);
 export const canViewTeamWorkReports = requirePermission(Permission.VIEW_TEAM_WORK_REPORTS);

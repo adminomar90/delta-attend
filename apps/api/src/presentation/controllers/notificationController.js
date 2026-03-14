@@ -1,10 +1,100 @@
-﻿import { NotificationRepository } from '../../infrastructure/db/repositories/NotificationRepository.js';
+import { NotificationRepository } from '../../infrastructure/db/repositories/NotificationRepository.js';
 import { AppError, asyncHandler } from '../../shared/errors.js';
 import { addSseClient, notificationService } from '../../application/services/notificationService.js';
 import PushSubscription from '../../infrastructure/db/models/PushSubscriptionModel.js';
 import { env } from '../../config/env.js';
+import { auditService } from '../../application/services/auditService.js';
+import { UserRepository } from '../../infrastructure/db/repositories/UserRepository.js';
+import { buildChildrenByManager, toHierarchyUserId } from '../../shared/employeeHierarchy.js';
+import { Roles } from '../../shared/constants.js';
 
 const notificationRepository = new NotificationRepository();
+const userRepository = new UserRepository();
+
+const InternalNotificationKind = {
+  CIRCULAR: 'CIRCULAR',
+  BULLETIN: 'BULLETIN',
+  MEETING: 'MEETING',
+};
+
+const InternalNotificationAudience = {
+  ALL: 'ALL',
+  SPECIFIC_MANAGER: 'SPECIFIC_MANAGER',
+  MANAGER_TEAM: 'MANAGER_TEAM',
+};
+
+const managementRoles = new Set([
+  Roles.GENERAL_MANAGER,
+  Roles.HR_MANAGER,
+  Roles.FINANCIAL_MANAGER,
+  Roles.PROJECT_MANAGER,
+  Roles.ASSISTANT_PROJECT_MANAGER,
+  Roles.TEAM_LEAD,
+]);
+
+const toCleanString = (value) => {
+  if (value === undefined || value === null) {
+    return '';
+  }
+
+  return String(value).trim();
+};
+
+const resolveInternalRecipients = async ({ audienceType, managerId = '' } = {}) => {
+  const users = await userRepository.listActive({ includeManager: false });
+
+  if (audienceType === InternalNotificationAudience.ALL) {
+    return {
+      recipients: users.map((user) => String(user._id || user.id)).filter(Boolean),
+      audienceLabel: 'الجميع',
+      targetManager: null,
+    };
+  }
+
+  const manager = users.find((user) => String(user._id || user.id) === String(managerId || ''));
+  if (!manager) {
+    throw new AppError('Selected manager was not found or inactive', 404);
+  }
+
+  if (audienceType === InternalNotificationAudience.SPECIFIC_MANAGER) {
+    return {
+      recipients: [String(manager._id || manager.id)],
+      audienceLabel: `مدير محدد: ${manager.fullName}`,
+      targetManager: {
+        id: String(manager._id || manager.id),
+        fullName: manager.fullName || '',
+        role: manager.role || '',
+      },
+    };
+  }
+
+  const { childrenByManager } = buildChildrenByManager(users, { includeInactive: false });
+  const descendants = new Set();
+  const queue = [String(manager._id || manager.id)];
+
+  while (queue.length) {
+    const current = queue.shift();
+    const children = childrenByManager.get(current) || [];
+    children.forEach((childId) => {
+      const normalized = toHierarchyUserId(childId);
+      if (!normalized || descendants.has(normalized)) {
+        return;
+      }
+      descendants.add(normalized);
+      queue.push(normalized);
+    });
+  }
+
+  return {
+    recipients: [...descendants],
+    audienceLabel: `موظفو المدير: ${manager.fullName}`,
+    targetManager: {
+      id: String(manager._id || manager.id),
+      fullName: manager.fullName || '',
+      role: manager.role || '',
+    },
+  };
+};
 
 export const listNotifications = asyncHandler(async (req, res) => {
   const limit = Number(req.query.limit || 25);
@@ -34,6 +124,95 @@ export const unreadCount = asyncHandler(async (req, res) => {
   res.json({ unreadCount: count });
 });
 
+export const listNotificationManagers = asyncHandler(async (_req, res) => {
+  const users = await userRepository.listActive({ includeManager: false });
+  const { childrenByManager } = buildChildrenByManager(users, { includeInactive: false });
+
+  const managers = users
+    .filter((user) => {
+      const userId = String(user._id || user.id);
+      return managementRoles.has(user.role) || (childrenByManager.get(userId) || []).length > 0;
+    })
+    .map((user) => ({
+      id: String(user._id || user.id),
+      fullName: user.fullName || '',
+      role: user.role || '',
+      employeeCode: user.employeeCode || '',
+      directReportsCount: (childrenByManager.get(String(user._id || user.id)) || []).length,
+    }))
+    .sort((a, b) => a.fullName.localeCompare(b.fullName, 'ar'));
+
+  res.json({ managers });
+});
+
+export const createInternalNotification = asyncHandler(async (req, res) => {
+  const notificationKind = toCleanString(req.body.notificationKind).toUpperCase();
+  const audienceType = toCleanString(req.body.audienceType).toUpperCase();
+  const managerId = toCleanString(req.body.managerId);
+  const titleAr = toCleanString(req.body.titleAr || req.body.title);
+  const messageAr = toCleanString(req.body.messageAr || req.body.details);
+
+  if (!Object.values(InternalNotificationKind).includes(notificationKind)) {
+    throw new AppError('notificationKind must be CIRCULAR, BULLETIN, or MEETING', 400);
+  }
+
+  if (!Object.values(InternalNotificationAudience).includes(audienceType)) {
+    throw new AppError('audienceType must be ALL, SPECIFIC_MANAGER, or MANAGER_TEAM', 400);
+  }
+
+  if (!titleAr || !messageAr) {
+    throw new AppError('titleAr and messageAr are required', 400);
+  }
+
+  if ([InternalNotificationAudience.SPECIFIC_MANAGER, InternalNotificationAudience.MANAGER_TEAM].includes(audienceType) && !managerId) {
+    throw new AppError('managerId is required for the selected audience', 400);
+  }
+
+  const { recipients, audienceLabel, targetManager } = await resolveInternalRecipients({
+    audienceType,
+    managerId,
+  });
+
+  if (!recipients.length) {
+    throw new AppError('No recipients found for the selected audience', 409);
+  }
+
+  await notificationService.notifyInternalNotification(recipients, {
+    createdBy: req.user.id,
+    notificationKind,
+    audienceType,
+    audienceLabel,
+    creatorName: req.user.fullName || '',
+    titleAr,
+    messageAr,
+    details: messageAr,
+    targetManager,
+  });
+
+  await auditService.log({
+    actorId: req.user.id,
+    action: 'INTERNAL_NOTIFICATION_CREATED',
+    entityType: 'NOTIFICATION',
+    entityId: `${notificationKind}:${Date.now()}`,
+    after: {
+      notificationKind,
+      audienceType,
+      audienceLabel,
+      targetManager,
+      recipientsCount: recipients.length,
+      titleAr,
+      messageAr,
+    },
+    req,
+  });
+
+  res.status(201).json({
+    success: true,
+    recipientsCount: recipients.length,
+    audienceLabel,
+  });
+});
+
 export const testNotification = asyncHandler(async (req, res) => {
   await notificationService.notifySystem(
     req.user.id,
@@ -59,12 +238,10 @@ export const sseStream = (req, res) => {
   req.on('close', () => clearInterval(keepAlive));
 };
 
-/* ── VAPID public key (no auth needed) ── */
 export const getVapidPublicKey = (req, res) => {
   res.json({ publicKey: env.vapidPublicKey });
 };
 
-/* ── Push subscription management ── */
 export const subscribePush = asyncHandler(async (req, res) => {
   const { endpoint, keys } = req.body;
   if (!endpoint || !keys?.p256dh || !keys?.auth) {

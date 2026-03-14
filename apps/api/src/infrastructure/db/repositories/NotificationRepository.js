@@ -6,7 +6,10 @@ export class NotificationRepository {
   }
 
   async listForUser(userId, limit = 25) {
-    return NotificationModel.find({ user: userId }).sort({ createdAt: -1 }).limit(limit);
+    return NotificationModel.find({ user: userId })
+      .populate('createdBy', 'fullName role employeeCode')
+      .sort({ createdAt: -1 })
+      .limit(limit);
   }
 
   async unreadCount(userId) {
@@ -27,7 +30,7 @@ export class NotificationRepository {
       {
         new: true,
       },
-    );
+    ).populate('createdBy', 'fullName role employeeCode');
   }
 
   async markAllAsRead(userId) {
@@ -35,5 +38,13 @@ export class NotificationRepository {
       { user: userId, readAt: null },
       { $set: { readAt: new Date() } },
     );
+  }
+
+  async createMany(payloads = []) {
+    if (!Array.isArray(payloads) || !payloads.length) {
+      return [];
+    }
+
+    return NotificationModel.insertMany(payloads, { ordered: true });
   }
 }

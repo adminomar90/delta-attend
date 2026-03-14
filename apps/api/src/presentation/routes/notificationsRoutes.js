@@ -1,5 +1,7 @@
 ﻿import { Router } from 'express';
 import {
+  createInternalNotification,
+  listNotificationManagers,
   listNotifications,
   markNotificationRead,
   markAllRead,
@@ -11,6 +13,7 @@ import {
   unsubscribePush,
 } from '../controllers/notificationController.js';
 import { requireAuth } from '../middlewares/authMiddleware.js';
+import { canCreateInternalNotifications } from '../middlewares/authorizationMiddleware.js';
 
 const notificationsRoutes = Router();
 
@@ -21,6 +24,8 @@ notificationsRoutes.use(requireAuth);
 notificationsRoutes.get('/', listNotifications);
 notificationsRoutes.get('/unread-count', unreadCount);
 notificationsRoutes.get('/stream', sseStream);
+notificationsRoutes.get('/managers', canCreateInternalNotifications, listNotificationManagers);
+notificationsRoutes.post('/internal', canCreateInternalNotifications, createInternalNotification);
 notificationsRoutes.post('/test', testNotification);
 notificationsRoutes.post('/push-subscribe', subscribePush);
 notificationsRoutes.post('/push-unsubscribe', unsubscribePush);

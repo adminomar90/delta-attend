@@ -360,4 +360,28 @@ export const notificationService = {
       metadata,
     });
   },
+
+  async notifyInternalNotification(userIds, payload = {}) {
+    const recipients = Array.isArray(userIds) ? userIds : [userIds];
+    const typeMap = {
+      CIRCULAR: 'INTERNAL_CIRCULAR',
+      BULLETIN: 'INTERNAL_BULLETIN',
+      MEETING: 'INTERNAL_MEETING',
+    };
+
+    return createManyAndPush(recipients, {
+      createdBy: payload.createdBy || null,
+      type: typeMap[payload.notificationKind] || 'INTERNAL_BULLETIN',
+      titleAr: payload.titleAr || 'إشعار داخلي',
+      messageAr: payload.messageAr || '',
+      metadata: {
+        notificationKind: payload.notificationKind || 'BULLETIN',
+        audienceType: payload.audienceType || 'ALL',
+        audienceLabel: payload.audienceLabel || '',
+        creatorName: payload.creatorName || '',
+        details: payload.details || payload.messageAr || '',
+        targetManager: payload.targetManager || null,
+      },
+    });
+  },
 };

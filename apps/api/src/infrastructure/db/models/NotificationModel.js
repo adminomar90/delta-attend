@@ -8,6 +8,12 @@ const notificationSchema = new mongoose.Schema(
       required: true,
       index: true,
     },
+    createdBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+      default: null,
+      index: true,
+    },
     type: {
       type: String,
       enum: [
@@ -23,6 +29,9 @@ const notificationSchema = new mongoose.Schema(
         'MAINTENANCE_REPORT_REQUEST',
         'MAINTENANCE_REPORT_STATUS',
         'MAINTENANCE_REPORT_FEEDBACK',
+        'INTERNAL_CIRCULAR',
+        'INTERNAL_BULLETIN',
+        'INTERNAL_MEETING',
         'ATTENDANCE_ACTIVITY',
         'WORK_REPORT_CREATED',
         'OPERATION_ACTIVITY',
