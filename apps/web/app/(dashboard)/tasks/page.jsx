@@ -209,16 +209,6 @@ export default function TasksPage() {
             </label>
 
             <label>
-              المشروع
-              <select className="select" value={form.project} onChange={(e) => setForm((prev) => ({ ...prev, project: e.target.value }))} required>
-                <option value="">اختر مشروع</option>
-                {projects.map((project) => (
-                  <option key={project._id} value={project._id}>{project.name}</option>
-                ))}
-              </select>
-            </label>
-
-            <label>
               الموظف المكلّف
               <select className="select" value={form.assignee} onChange={(e) => setForm((prev) => ({ ...prev, assignee: e.target.value }))} required>
                 <option value="">اختر موظف</option>

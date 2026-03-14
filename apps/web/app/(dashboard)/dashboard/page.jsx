@@ -284,7 +284,7 @@ export default function DashboardPage() {
             </p>
             <p style={{ margin: '6px 0', color: 'var(--text-soft)' }}>
               آخر دخول:{' '}
-              <strong>{attendanceMeta.openRecord?.checkInAt ? new Date(attendanceMeta.openRecord.checkInAt).toLocaleString('ar-IQ') : attendanceMeta.lastLoginAt ? new Date(attendanceMeta.lastLoginAt).toLocaleString('ar-IQ') : '-'}</strong>
+              <strong>{attendanceMeta.openRecord?.checkInAt ? new Date(attendanceMeta.openRecord.checkInAt).toLocaleString('ar-IQ', { timeZone: 'Asia/Baghdad' }) : attendanceMeta.lastLoginAt ? new Date(attendanceMeta.lastLoginAt).toLocaleString('ar-IQ', { timeZone: 'Asia/Baghdad' }) : '-'}</strong>
             </p>
           </article>
 
@@ -295,7 +295,7 @@ export default function DashboardPage() {
             </p>
             <p style={{ margin: '6px 0', color: 'var(--text-soft)' }}>
               آخر خروج:{' '}
-              <strong>{attendanceMeta.todayRecords?.[0]?.checkOutAt ? new Date(attendanceMeta.todayRecords[0].checkOutAt).toLocaleString('ar-IQ') : '-'}</strong>
+              <strong>{attendanceMeta.todayRecords?.[0]?.checkOutAt ? new Date(attendanceMeta.todayRecords[0].checkOutAt).toLocaleString('ar-IQ', { timeZone: 'Asia/Baghdad' }) : '-'}</strong>
             </p>
             <p style={{ margin: '6px 0', color: 'var(--text-soft)' }}>
               نمط التحقق: <strong>{attendanceMeta.policy?.mode === 'ANY_LOCATION' ? 'من أي موقع' : 'نطاق جغرافي'}</strong>
@@ -374,8 +374,8 @@ export default function DashboardPage() {
                     </span>
                   </td>
                   <td>{employee.todayWorkedHours}</td>
-                  <td>{employee.lastCheckInAt ? new Date(employee.lastCheckInAt).toLocaleString('ar-IQ') : '-'}</td>
-                  <td>{employee.lastCheckOutAt ? new Date(employee.lastCheckOutAt).toLocaleString('ar-IQ') : '-'}</td>
+                  <td>{employee.lastCheckInAt ? new Date(employee.lastCheckInAt).toLocaleString('ar-IQ', { timeZone: 'Asia/Baghdad' }) : '-'}</td>
+                  <td>{employee.lastCheckOutAt ? new Date(employee.lastCheckOutAt).toLocaleString('ar-IQ', { timeZone: 'Asia/Baghdad' }) : '-'}</td>
                 </tr>
               ))}
             </tbody>

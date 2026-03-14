@@ -297,10 +297,11 @@ export const notificationService = {
 
   async notifyAttendanceActivity(userIds, payload = {}) {
     const occurredAt = payload.occurredAt ? new Date(payload.occurredAt) : new Date();
-    const formattedDate = occurredAt.toLocaleDateString('ar-IQ');
+    const formattedDate = occurredAt.toLocaleDateString('ar-IQ', { timeZone: 'Asia/Baghdad' });
     const formattedTime = occurredAt.toLocaleTimeString('ar-IQ', {
       hour: '2-digit',
       minute: '2-digit',
+      timeZone: 'Asia/Baghdad',
     });
     const operationLabel = payload.operationLabel || 'تسجيل الحضور';
 
@@ -317,7 +318,7 @@ export const notificationService = {
 
   async notifyWorkReportCreated(userIds, payload = {}) {
     const occurredAt = payload.occurredAt ? new Date(payload.occurredAt) : new Date();
-    const formattedDate = occurredAt.toLocaleDateString('ar-IQ');
+    const formattedDate = occurredAt.toLocaleDateString('ar-IQ', { timeZone: 'Asia/Baghdad' });
 
     return createManyAndPush(userIds, {
       type: 'WORK_REPORT_CREATED',
@@ -332,10 +333,11 @@ export const notificationService = {
 
   async notifyOperationActivity(userIds, payload = {}) {
     const occurredAt = payload.occurredAt ? new Date(payload.occurredAt) : new Date();
-    const formattedDate = occurredAt.toLocaleDateString('ar-IQ');
+    const formattedDate = occurredAt.toLocaleDateString('ar-IQ', { timeZone: 'Asia/Baghdad' });
     const formattedTime = occurredAt.toLocaleTimeString('ar-IQ', {
       hour: '2-digit',
       minute: '2-digit',
+      timeZone: 'Asia/Baghdad',
     });
 
     return createManyAndPush(userIds, {

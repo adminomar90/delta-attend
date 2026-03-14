@@ -247,7 +247,7 @@ export default function NotificationsPage() {
             <div style={{ flex: 1, minWidth: 0 }}>
               <strong>{item.titleAr}</strong>
               <p style={{ margin: '4px 0', color: 'var(--text-soft)', fontSize: 14 }}>{item.messageAr}</p>
-              <small style={{ color: 'var(--text-soft)' }}>{new Date(item.createdAt).toLocaleString('ar-IQ')}</small>
+              <small style={{ color: 'var(--text-soft)' }}>{new Date(item.createdAt).toLocaleString('ar-IQ', { timeZone: 'Asia/Baghdad' })}</small>
             </div>
             {!item.readAt ? (
               <button className="btn btn-soft btn-sm" onClick={() => markRead(item._id)}>تعليم كمقروء</button>

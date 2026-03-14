@@ -50,8 +50,8 @@ export const createTask = asyncHandler(async (req, res) => {
     requiredApprovals,
   } = req.body;
 
-  if (!title || !project || !assignee || !dueDate) {
-    throw new AppError('title, project, assignee and dueDate are required', 400);
+  if (!title || !assignee || !dueDate) {
+    throw new AppError('title, assignee and dueDate are required', 400);
   }
 
   const assigneeUser = await userRepository.findById(assignee);
