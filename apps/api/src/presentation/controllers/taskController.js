@@ -79,7 +79,7 @@ export const createTask = asyncHandler(async (req, res) => {
   const task = await taskRepository.create({
     title,
     description,
-    project,
+    project: project || null,
     assignee,
     assignedBy: req.user.id,
     dueDate,

@@ -94,6 +94,7 @@ export default function TasksPage() {
     try {
       await api.post('/tasks', {
         ...form,
+        project: form.project || undefined,
         difficulty: Number(form.difficulty),
         urgency: Number(form.urgency),
         estimatedHours: Number(form.estimatedHours),
