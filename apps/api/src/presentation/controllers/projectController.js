@@ -6,6 +6,10 @@ import { auditService } from '../../application/services/auditService.js';
 import { notificationService } from '../../application/services/notificationService.js';
 import { levelService } from '../../application/services/levelService.js';
 import { badgeService } from '../../application/services/badgeService.js';
+import {
+  NotificationWatchPermission,
+  resolveNotificationAudience,
+} from '../../application/services/notificationAudienceService.js';
 import { Roles } from '../../shared/constants.js';
 import { AppError, asyncHandler } from '../../shared/errors.js';
 
@@ -126,6 +130,28 @@ export const createProject = asyncHandler(async (req, res) => {
     },
     req,
   });
+
+  const operationRecipients = await resolveNotificationAudience({
+    userRepository,
+    actorId: req.user.id,
+    watchPermission: NotificationWatchPermission.OPERATION,
+  });
+
+  if (operationRecipients.length) {
+    await notificationService.notifyOperationActivity(operationRecipients, {
+      titleAr: 'إنشاء مشروع',
+      actorName: req.user.fullName || req.user.name || 'الموظف',
+      actionLabel: 'إنشاء مشروع',
+      entityLabel: projectFull.name || project.name || 'مشروع',
+      occurredAt: projectFull.createdAt || project.createdAt || new Date(),
+      metadata: {
+        entityType: 'PROJECT',
+        entityId: String(projectFull._id || project._id),
+        action: 'PROJECT_CREATED',
+        projectCode: projectFull.code || project.code || '',
+      },
+    });
+  }
 
   res.status(201).json({ project: projectFull });
 });

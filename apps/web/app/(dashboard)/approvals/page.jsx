@@ -78,11 +78,19 @@ export default function ApprovalsPage() {
       Permission.APPROVE_TASKS,
       Permission.APPROVE_PROJECTS,
       Permission.REVIEW_MATERIAL_REQUESTS,
+      Permission.VIEW_TEAM_WORK_REPORTS,
     ]);
   }, [currentUser?.role, currentUser?.customPermissions, currentUser?.permissions]);
 
   const canApproveTasks = useMemo(() => {
     return hasPermission(currentUser, Permission.APPROVE_TASKS);
+  }, [currentUser?.role, currentUser?.customPermissions, currentUser?.permissions]);
+
+  const canApproveWorkReports = useMemo(() => {
+    return hasAnyPermission(currentUser, [
+      Permission.APPROVE_TASKS,
+      Permission.VIEW_TEAM_WORK_REPORTS,
+    ]);
   }, [currentUser?.role, currentUser?.customPermissions, currentUser?.permissions]);
 
   const canApproveProjects = useMemo(() => {
@@ -127,7 +135,7 @@ export default function ApprovalsPage() {
 
   useEffect(() => {
     if (!canAccess) {
-      console.warn('Approvals: canAccess=false, role=', currentUser?.role, 'perms=', canApproveTasks, canApproveProjects, canApproveMaterials);
+      console.warn('Approvals: canAccess=false, role=', currentUser?.role, 'perms=', canApproveTasks, canApproveProjects, canApproveMaterials, canApproveWorkReports);
       return;
     }
     load();
@@ -733,7 +741,7 @@ export default function ApprovalsPage() {
                       value={input.points}
                       onChange={(e) => setWorkReportInput(report._id, { points: e.target.value })}
                       style={{ width: 100 }}
-                      disabled={!canApproveTasks}
+                      disabled={!canApproveWorkReports}
                     />
                     <div style={{ fontSize: 12, color: 'var(--text-soft)', marginTop: 4 }}>
                       الكاتب: {formatWorkReportPoints(previewDistribution.reporterPoints)}
@@ -747,7 +755,7 @@ export default function ApprovalsPage() {
                       className="input"
                       value={input.managerComment}
                       onChange={(e) => setWorkReportInput(report._id, { managerComment: e.target.value })}
-                      disabled={!canApproveTasks}
+                      disabled={!canApproveWorkReports}
                     />
                   </td>
                   <td>
@@ -755,18 +763,18 @@ export default function ApprovalsPage() {
                       className="input"
                       value={input.reason}
                       onChange={(e) => setWorkReportInput(report._id, { reason: e.target.value })}
-                      disabled={!canApproveTasks}
+                      disabled={!canApproveWorkReports}
                     />
                   </td>
                   <td>
-                    {canApproveTasks && !isOwnReport ? (
+                    {canApproveWorkReports && !isOwnReport ? (
                       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
                         <button type="button" className="btn btn-soft" onClick={() => approveWorkReport(report)}>اعتماد</button>
                         <button type="button" className="btn btn-soft" onClick={() => rejectWorkReport(report)}>رفض</button>
                       </div>
                     ) : isOwnReport ? (
                       <span style={{ color: 'var(--warning)', fontSize: 12 }}>لا يمكن اعتماد تقريرك الشخصي</span>
-                    ) : !canApproveTasks ? (
+                    ) : !canApproveWorkReports ? (
                       <span style={{ color: 'var(--text-soft)', fontSize: 12 }}>لا تملك صلاحية الاعتماد</span>
                     ) : '-'}
                   </td>

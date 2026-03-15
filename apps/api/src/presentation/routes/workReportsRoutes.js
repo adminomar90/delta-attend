@@ -13,7 +13,6 @@ import {
 } from '../controllers/workReportController.js';
 import { requireAuth } from '../middlewares/authMiddleware.js';
 import {
-  canApproveTasks,
   canSendReportsWhatsapp,
   canViewCompletedWorkReports,
   requireAnyPermission,
@@ -54,7 +53,7 @@ workReportsRoutes.post(
   uploadWorkReportImagesMiddleware.array('images', 10),
   createWorkReport,
 );
-workReportsRoutes.patch('/:id/approve', canApproveTasks, approveWorkReport);
-workReportsRoutes.patch('/:id/reject', canApproveTasks, rejectWorkReport);
+workReportsRoutes.patch('/:id/approve', approveWorkReport);
+workReportsRoutes.patch('/:id/reject', rejectWorkReport);
 
 export default workReportsRoutes;

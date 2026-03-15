@@ -84,7 +84,12 @@ const routePermissionRules = {
     Permission.MANAGE_MATERIAL_INVENTORY,
     Permission.MANAGE_MATERIAL_CATALOG,
   ],
-  '/approvals': [Permission.APPROVE_TASKS, Permission.APPROVE_PROJECTS, Permission.REVIEW_MATERIAL_REQUESTS],
+  '/approvals': [
+    Permission.APPROVE_TASKS,
+    Permission.APPROVE_PROJECTS,
+    Permission.REVIEW_MATERIAL_REQUESTS,
+    Permission.VIEW_TEAM_WORK_REPORTS,
+  ],
   '/work-reports': [
     Permission.VIEW_OWN_WORK_REPORTS,
     Permission.VIEW_TEAM_WORK_REPORTS,

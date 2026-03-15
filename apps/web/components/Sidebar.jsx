@@ -69,6 +69,7 @@ const menu = [
       Permission.APPROVE_TASKS,
       Permission.APPROVE_PROJECTS,
       Permission.REVIEW_MATERIAL_REQUESTS,
+      Permission.VIEW_TEAM_WORK_REPORTS,
     ],
   },
   {

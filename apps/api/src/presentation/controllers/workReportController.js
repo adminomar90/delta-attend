@@ -19,7 +19,7 @@ import {
   isUserWithinManagedScope,
   resolveManagedUserIds,
 } from '../../shared/accessScope.js';
-import { Permission } from '../../shared/constants.js';
+import { Permission, Roles } from '../../shared/constants.js';
 import { hasAnyPermission, hasPermission } from '../../shared/permissions.js';
 import { buildWhatsAppSendUrl } from '../../shared/attendanceUtils.js';
 import { AppError, asyncHandler } from '../../shared/errors.js';
@@ -32,6 +32,7 @@ const userRepository = new UserRepository();
 const projectRepository = new ProjectRepository();
 const pointsLedgerRepository = new PointsLedgerRepository();
 const goalRepository = new GoalRepository();
+const DEFAULT_WORK_REPORT_APPROVAL_POINTS = 20;
 
 const toCleanString = (value) => {
   if (value === undefined || value === null) {
@@ -44,13 +45,13 @@ const toNumberInRange = (value, { min, max, fallback, fieldName }) => {
   const parsed = Number(value);
   if (!Number.isFinite(parsed)) {
     if (fallback === undefined || Number.isNaN(fallback)) {
-      throw new AppError(`${fieldName} must be a valid number`, 400);
+      throw new AppError(`قيمة ${fieldName} غير صحيحة`, 400);
     }
     return fallback;
   }
 
   if (parsed < min || parsed > max) {
-    throw new AppError(`${fieldName} must be between ${min} and ${max}`, 400);
+    throw new AppError(`قيمة ${fieldName} يجب أن تكون بين ${min} و ${max}`, 400);
   }
 
   return parsed;
@@ -63,7 +64,7 @@ const toOptionalDate = (value) => {
   }
   const date = new Date(raw);
   if (Number.isNaN(date.getTime())) {
-    throw new AppError('Invalid workDate value', 400);
+    throw new AppError('تاريخ العمل غير صالح', 400);
   }
   return date;
 };
@@ -154,6 +155,49 @@ const hasTeamWorkReportAccess = (user = {}) =>
     Permission.VIEW_COMPLETED_WORK_REPORTS,
   ]);
 
+const workReportStatusLabelMap = {
+  SUBMITTED: 'بانتظار الاعتماد',
+  APPROVED: 'معتمد',
+  REJECTED: 'مرفوض',
+};
+
+const resolveWorkReportStatusLabel = (status) => workReportStatusLabelMap[String(status || '').toUpperCase()] || status || 'غير معروف';
+
+const canApproveOrRejectWorkReport = async ({ actor, report }) => {
+  const actorId = String(actor?.id || actor?._id || '');
+
+  if (!actorId) {
+    return false;
+  }
+
+  if (actor?.role === Roles.GENERAL_MANAGER) {
+    return true;
+  }
+
+  const ownerId = String(report?.user?._id || report?.user || '');
+  if (!ownerId) {
+    return false;
+  }
+
+  if (actor?.role === Roles.PROJECT_MANAGER) {
+    const managedUserIds = await resolveManagedUserIds({
+      userRepository,
+      actorId,
+      actorRole: actor.role,
+    });
+
+    return ownerId !== actorId && isUserWithinManagedScope({
+      managedUserIds,
+      userId: ownerId,
+    });
+  }
+
+  const owner = await userRepository.findById(ownerId);
+  const ownerManagerId = String(owner?.manager?._id || owner?.manager || '');
+
+  return ownerManagerId && ownerManagerId === actorId;
+};
+
 const resolveStoredWorkReportPdfAbsolutePath = (publicUrl) => {
   const raw = toCleanString(publicUrl);
   if (!raw.startsWith('/uploads/')) {
@@ -189,15 +233,15 @@ const resolveWorkReportParticipants = async ({ participantIds, participantCount,
   const cleanedIds = participantIds.map((item) => toCleanString(item)).filter(Boolean);
 
   if (new Set(cleanedIds).size !== cleanedIds.length) {
-    throw new AppError('Participants must be unique within the same work report', 400);
+    throw new AppError('لا يمكن تكرار نفس المشارك داخل التقرير', 400);
   }
 
   if (cleanedIds.includes(String(authorId))) {
-    throw new AppError('Report author cannot be selected as a participant', 400);
+    throw new AppError('لا يمكن اختيار كاتب التقرير ضمن المشاركين', 400);
   }
 
   if (participantCount !== cleanedIds.length) {
-    throw new AppError('participantCount must match the selected participants', 400);
+    throw new AppError('عدد المشاركين لا يطابق الأسماء المختارة', 400);
   }
 
   if (!cleanedIds.length) {
@@ -206,7 +250,7 @@ const resolveWorkReportParticipants = async ({ participantIds, participantCount,
 
   const participants = await userRepository.listByIds(cleanedIds);
   if (participants.length !== cleanedIds.length) {
-    throw new AppError('One or more selected participants are invalid or inactive', 400);
+    throw new AppError('أحد المشاركين المختارين غير صالح أو غير نشط', 400);
   }
 
   const participantMap = new Map(
@@ -216,7 +260,7 @@ const resolveWorkReportParticipants = async ({ participantIds, participantCount,
   return cleanedIds.map((id) => {
     const participant = participantMap.get(String(id));
     if (!participant) {
-      throw new AppError('One or more selected participants are invalid or inactive', 400);
+      throw new AppError('أحد المشاركين المختارين غير صالح أو غير نشط', 400);
     }
 
     return {
@@ -241,7 +285,7 @@ const grantPointsToWorkReportUser = async ({
 
   const targetUser = await userRepository.findById(userId);
   if (!targetUser) {
-    throw new AppError('Work report participant account was not found during approval', 409);
+    throw new AppError('تعذر العثور على حساب أحد المشاركين أثناء الاعتماد', 409);
   }
 
   await pointsLedgerRepository.create({
@@ -249,8 +293,8 @@ const grantPointsToWorkReportUser = async ({
     points: safePoints,
     category: 'WORK_REPORT_APPROVAL',
     reason: distributionRole === 'REPORT_AUTHOR'
-      ? `ط§ط¹طھظ…ط§ط¯ طھظ‚ط±ظٹط± ط¹ظ…ظ„: ${report.title || report.projectName || 'ط¨ط¯ظˆظ† ط¹ظ†ظˆط§ظ†'}`
-      : `ظ…ط´ط§ط±ظƒط© ظپظٹ طھظ‚ط±ظٹط± ط¹ظ…ظ„: ${report.title || report.projectName || 'ط¨ط¯ظˆظ† ط¹ظ†ظˆط§ظ†'}`,
+      ? `اعتماد تقرير عمل: ${report.title || report.projectName || 'بدون عنوان'}`
+      : `مشاركة في تقرير عمل: ${report.title || report.projectName || 'بدون عنوان'}`,
     approvedBy,
     sourceAction: 'WORK_REPORT_APPROVAL',
     metadata: {
@@ -293,7 +337,7 @@ const assertWorkReportAccess = async (req, report) => {
   }
 
   if (!hasTeamWorkReportAccess(req.user)) {
-    throw new AppError('You cannot access this work report', 403);
+    throw new AppError('ليس لديك صلاحية الوصول إلى تقرير العمل هذا', 403);
   }
 
   const managedUserIds = await resolveManagedUserIds({
@@ -303,7 +347,7 @@ const assertWorkReportAccess = async (req, report) => {
   });
 
   if (!isUserWithinManagedScope({ managedUserIds, userId: report.user?._id || report.user })) {
-    throw new AppError('You cannot access this work report', 403);
+    throw new AppError('ليس لديك صلاحية الوصول إلى تقرير العمل هذا', 403);
   }
 };
 
@@ -379,18 +423,18 @@ const buildWorkReportWhatsappMessage = (report, pdfAbsoluteUrl) => {
   const projectName = report?.project?.name || report?.projectName || '-';
   const progress = Number(report?.progressPercent || 0);
   const participantCount = Number(report?.participantCount || report?.participants?.length || 0);
-  const participantSummaryLine = `ط¹ط¯ط¯ ط§ظ„ظƒط§ط¯ط± ط§ظ„ظ…ط´ط§ط±ظƒ: ${participantCount}`;
+  const participantSummaryLine = `عدد الكادر المشارك: ${participantCount}`;
 
   return [
-    'طھظ‚ط±ظٹط± ط¹ظ…ظ„ PDF - Delta Plus',
-    `ط§ظ„ظ…ظˆط¸ظپ: ${employeeName}`,
-    `ط±ظ…ط² ط§ظ„ظ…ظˆط¸ظپ: ${employeeCode}`,
-    `ط§ظ„ظ…ط´ط±ظˆط¹: ${projectName}`,
-    `ظ†ط³ط¨ط© ط§ظ„ط¥ظ†ط¬ط§ط²: ${progress}%`,
+    'تقرير عمل PDF - Delta Plus',
+    `الموظف: ${employeeName}`,
+    `رمز الموظف: ${employeeCode}`,
+    `المشروع: ${projectName}`,
+    `نسبة الإنجاز: ${progress}%`,
     participantSummaryLine,
-    `طھط§ط±ظٹط® ط§ظ„طھظ‚ط±ظٹط±: ${new Date(report?.workDate || report?.createdAt || new Date()).toLocaleDateString('ar-IQ')}`,
-    `ط±ط§ط¨ط· ط§ظ„طھظ‚ط±ظٹط± PDF: ${pdfAbsoluteUrl}`,
-    'ظٹط±ط¬ظ‰ ظپطھط­ ط§ظ„ط±ط§ط¨ط· ظˆظ…ط±ط§ط¬ط¹ط© ط§ظ„طھظ‚ط±ظٹط±.',
+    `تاريخ التقرير: ${new Date(report?.workDate || report?.createdAt || new Date()).toLocaleDateString('ar-IQ')}`,
+    `رابط التقرير PDF: ${pdfAbsoluteUrl}`,
+    'يرجى فتح الرابط ومراجعة التقرير.',
   ].join('\n');
 };
 
@@ -403,26 +447,29 @@ export const listWorkReportEmployees = asyncHandler(async (_req, res) => {
 
 export const createWorkReport = asyncHandler(async (req, res) => {
   const projectId = toCleanString(req.body.projectId || req.body.project);
+  const manualProjectName = toCleanString(req.body.projectName);
   const details = toCleanString(req.body.details);
 
-  if (!projectId) {
-    throw new AppError('projectId is required', 400);
+  if (!projectId && !manualProjectName) {
+    throw new AppError('اسم المشروع مطلوب', 400);
   }
   if (!details) {
-    throw new AppError('details is required', 400);
+    throw new AppError('تفاصيل التقرير مطلوبة', 400);
   }
 
   const [user, project] = await Promise.all([
     userRepository.findById(req.user.id),
-    projectRepository.findById(projectId),
+    projectId ? projectRepository.findById(projectId) : Promise.resolve(null),
   ]);
 
   if (!user || !user.active) {
-    throw new AppError('User not found or inactive', 404);
+    throw new AppError('المستخدم غير موجود أو غير نشط', 404);
   }
-  if (!project) {
-    throw new AppError('Project not found', 404);
+  if (projectId && !project) {
+    throw new AppError('المشروع غير موجود', 404);
   }
+
+  const resolvedProjectName = project?.name || manualProjectName;
 
   const progressPercent = toNumberInRange(req.body.progressPercent, {
     min: 0,
@@ -456,8 +503,8 @@ export const createWorkReport = asyncHandler(async (req, res) => {
     user: req.user.id,
     employeeName: user.fullName,
     employeeCode: user.employeeCode || '',
-    project: project._id,
-    projectName: project.name || '',
+    project: project?._id || null,
+    projectName: resolvedProjectName,
     activityType: toCleanString(req.body.activityType),
     title: toCleanString(req.body.title),
     details,
@@ -497,7 +544,8 @@ export const createWorkReport = asyncHandler(async (req, res) => {
     entityType: 'WORK_REPORT',
     entityId: created._id,
     after: {
-      projectId: String(project._id),
+      projectId: project ? String(project._id) : '',
+      projectName: resolvedProjectName,
       progressPercent,
       hoursSpent,
       imagesCount: images.length,
@@ -516,12 +564,12 @@ export const createWorkReport = asyncHandler(async (req, res) => {
   });
   await notificationService.notifyWorkReportCreated(workReportRecipients, {
     employeeName: user.fullName,
-    reportTitle: report.title || report.activityType || 'ط¨ط¯ظˆظ† ط¹ظ†ظˆط§ظ†',
-    projectName: project.name || report.projectName || '-',
+    reportTitle: report.title || report.activityType || 'بدون عنوان',
+    projectName: resolvedProjectName || report.projectName || '-',
     occurredAt: report.createdAt || new Date(),
     metadata: {
       workReportId: String(report._id),
-      projectId: String(project._id),
+      ...(project ? { projectId: String(project._id) } : {}),
     },
   });
 
@@ -531,10 +579,10 @@ export const createWorkReport = asyncHandler(async (req, res) => {
     watchPermission: NotificationWatchPermission.OPERATION,
   });
   await notificationService.notifyOperationActivity(operationRecipients, {
-    titleAr: 'ط¥ظ†ط´ط§ط، طھظ‚ط±ظٹط± ط¹ظ…ظ„',
+    titleAr: 'إنشاء تقرير عمل',
     actorName: user.fullName,
-    actionLabel: 'ط¥ظ†ط´ط§ط، طھظ‚ط±ظٹط± ط¹ظ…ظ„',
-    entityLabel: report.title || project.name || 'طھظ‚ط±ظٹط± ط¹ظ…ظ„',
+    actionLabel: 'إنشاء تقرير عمل',
+    entityLabel: report.title || resolvedProjectName || 'تقرير عمل',
     occurredAt: report.createdAt || new Date(),
     metadata: {
       entityType: 'WORK_REPORT',
@@ -548,7 +596,7 @@ export const createWorkReport = asyncHandler(async (req, res) => {
 
 export const listWorkReports = asyncHandler(async (req, res) => {
   if (!hasOwnWorkReportAccess(req.user)) {
-    throw new AppError('You cannot view work reports', 403);
+    throw new AppError('ليس لديك صلاحية عرض تقارير العمل', 403);
   }
 
   const filter = {};
@@ -591,7 +639,7 @@ export const listCompletedWorkReports = asyncHandler(async (_req, res) => {
 export const getWorkReport = asyncHandler(async (req, res) => {
   const report = await workReportRepository.findById(req.params.id);
   if (!report) {
-    throw new AppError('Work report not found', 404);
+    throw new AppError('تقرير العمل غير موجود', 404);
   }
 
   await assertWorkReportAccess(req, report);
@@ -602,7 +650,7 @@ export const getWorkReport = asyncHandler(async (req, res) => {
 export const exportWorkReportPdf = asyncHandler(async (req, res) => {
   const report = await workReportRepository.findById(req.params.id);
   if (!report) {
-    throw new AppError('Work report not found', 404);
+    throw new AppError('تقرير العمل غير موجود', 404);
   }
 
   await assertWorkReportAccess(req, report);
@@ -622,7 +670,7 @@ export const exportWorkReportPdf = asyncHandler(async (req, res) => {
 export const saveWorkReportPdf = asyncHandler(async (req, res) => {
   const report = await workReportRepository.findById(req.params.id);
   if (!report) {
-    throw new AppError('Work report not found', 404);
+    throw new AppError('تقرير العمل غير موجود', 404);
   }
 
   await assertWorkReportAccess(req, report);
@@ -653,12 +701,12 @@ export const saveWorkReportPdf = asyncHandler(async (req, res) => {
 
 export const workReportWhatsappLink = asyncHandler(async (req, res) => {
   if (!hasPermission(req.user, Permission.SEND_REPORTS_WHATSAPP)) {
-    throw new AppError('You cannot send work reports to WhatsApp', 403);
+    throw new AppError('ليس لديك صلاحية إرسال تقارير العمل عبر واتساب', 403);
   }
 
   const report = await workReportRepository.findById(req.params.id);
   if (!report) {
-    throw new AppError('Work report not found', 404);
+    throw new AppError('تقرير العمل غير موجود', 404);
   }
 
   await assertWorkReportAccess(req, report);
@@ -701,33 +749,35 @@ export const workReportWhatsappLink = asyncHandler(async (req, res) => {
 export const approveWorkReport = asyncHandler(async (req, res) => {
   const report = await workReportRepository.findById(req.params.id);
   if (!report) {
-    throw new AppError('Work report not found', 404);
+    throw new AppError('تقرير العمل غير موجود', 404);
   }
 
   if (report.status !== 'SUBMITTED') {
-    throw new AppError('Only submitted work reports can be approved', 400);
+    throw new AppError(`لا يمكن اعتماد التقرير لأن حالته الحالية هي: ${resolveWorkReportStatusLabel(report.status)}`, 400);
   }
 
   if (String(report.user?._id || report.user) === req.user.id) {
-    throw new AppError('You cannot approve your own work report', 403);
+    throw new AppError('لا يمكنك اعتماد تقريرك الشخصي', 403);
   }
 
-  const managedUserIds = await resolveManagedUserIds({
-    userRepository,
-    actorId: req.user.id,
-    actorRole: req.user.role,
+  const canApprove = await canApproveOrRejectWorkReport({
+    actor: req.user,
+    report,
   });
 
-  if (!isUserWithinManagedScope({ managedUserIds, userId: report.user?._id || report.user })) {
-    throw new AppError('You can only approve reports for employees in your management scope', 403);
+  if (!canApprove) {
+    throw new AppError('الاعتماد متاح فقط للمدير المباشر أو المدير العام', 403);
   }
 
-  const points = toNumberInRange(req.body.points, {
-    min: 1,
-    max: 1000,
-    fallback: NaN,
-    fieldName: 'points',
-  });
+  const rawPoints = toCleanString(req.body.points);
+  const points = rawPoints
+    ? toNumberInRange(rawPoints, {
+        min: 1,
+        max: 1000,
+        fallback: NaN,
+        fieldName: 'points',
+      })
+    : DEFAULT_WORK_REPORT_APPROVAL_POINTS;
   const managerComment = toCleanString(req.body.managerComment);
   const distribution = workReportPointsService.calculateDistribution(
     points,
@@ -735,7 +785,7 @@ export const approveWorkReport = asyncHandler(async (req, res) => {
   );
   const authorId = report.user?._id || report.user;
   const participants = Array.isArray(report.participants) ? report.participants : [];
-  const reportLabel = report.title || report.projectName || 'ط¨ط¯ظˆظ† ط¹ظ†ظˆط§ظ†';
+  const reportLabel = report.title || report.projectName || 'بدون عنوان';
 
   const before = {
     status: report.status,
@@ -777,30 +827,34 @@ export const approveWorkReport = asyncHandler(async (req, res) => {
 
   await notificationService.notifySystem(
     authorId,
-    'ط§ط¹طھظ…ط§ط¯ طھظ‚ط±ظٹط± ط§ظ„ط¹ظ…ظ„',
+    'تم اعتماد تقرير العمل',
     participants.length
-      ? `طھظ… ط§ط¹طھظ…ط§ط¯ طھظ‚ط±ظٹط± ط§ظ„ط¹ظ…ظ„ "${reportLabel}" ظˆظ…ظ†ط­ظƒ ${formatPoints(distribution.reporterPoints)} ظ†ظ‚ط·ط© ظƒظƒط§طھط¨ ظ„ظ„طھظ‚ط±ظٹط±.`
-      : `طھظ… ط§ط¹طھظ…ط§ط¯ طھظ‚ط±ظٹط± ط§ظ„ط¹ظ…ظ„ "${reportLabel}" ظˆظ…ظ†ط­ظƒ ${formatPoints(distribution.reporterPoints)} ظ†ظ‚ط·ط©.`,
+      ? `تم اعتماد تقريرك "${reportLabel}" بنجاح. تم منحك ${formatPoints(distribution.reporterPoints)} نقطة ككاتب للتقرير، وإجمالي نقاط التقرير ${formatPoints(distribution.totalPoints)} نقطة موزعة على ${distribution.participantCount} مشارك.`
+      : `تم اعتماد تقريرك "${reportLabel}" بنجاح. تم منحك ${formatPoints(distribution.reporterPoints)} نقطة.`,
     {
       workReportId: String(report._id),
       totalPoints: distribution.totalPoints,
       reporterPoints: distribution.reporterPoints,
       participantPoints: distribution.participantPoints,
       participantCount: distribution.participantCount,
+      status: 'APPROVED',
+      approvedAt: updated.approvedAt || new Date(),
     },
   );
 
   for (const participant of participants) {
     await notificationService.notifySystem(
       participant.user?._id || participant.user,
-      'ظ…ط´ط§ط±ظƒط© ظپظٹ طھظ‚ط±ظٹط± ط§ظ„ط¹ظ…ظ„',
-      `طھظ… ط§ط¹طھظ…ط§ط¯ طھظ‚ط±ظٹط± ط§ظ„ط¹ظ…ظ„ "${reportLabel}" ظˆظ…ظ†ط­ظƒ ${formatPoints(distribution.participantPoints)} ظ†ظ‚ط·ط© ظƒظ…ط´ط§ط±ظƒ ظپظٹ ط§ظ„طھظ†ظپظٹط°.`,
+      'تم اعتماد التقرير ومكافأة المشاركة',
+      `تم اعتماد تقرير العمل "${reportLabel}"، وتم منحك ${formatPoints(distribution.participantPoints)} نقطة كمشارك في التنفيذ.`,
       {
         workReportId: String(report._id),
         totalPoints: distribution.totalPoints,
         reporterPoints: distribution.reporterPoints,
         participantPoints: distribution.participantPoints,
         participantCount: distribution.participantCount,
+        status: 'APPROVED',
+        approvedAt: updated.approvedAt || new Date(),
       },
     );
   }
@@ -829,9 +883,9 @@ export const approveWorkReport = asyncHandler(async (req, res) => {
     excludeUserIds: [req.user.id],
   });
   await notificationService.notifyOperationActivity(reportOperationRecipients, {
-    titleAr: 'ط§ط¹طھظ…ط§ط¯ طھظ‚ط±ظٹط± ط¹ظ…ظ„',
-    actorName: req.user.name || req.user.fullName || 'ط§ظ„ظ…ط¹طھظ…ط¯',
-    actionLabel: 'ط§ط¹طھظ…ط§ط¯ طھظ‚ط±ظٹط± ط¹ظ…ظ„',
+    titleAr: 'اعتماد تقرير عمل',
+    actorName: req.user.name || req.user.fullName || 'المعتمد',
+    actionLabel: 'اعتماد تقرير عمل',
     entityLabel: reportLabel,
     occurredAt: updated.approvedAt || new Date(),
     metadata: {
@@ -853,30 +907,29 @@ export const approveWorkReport = asyncHandler(async (req, res) => {
 export const rejectWorkReport = asyncHandler(async (req, res) => {
   const report = await workReportRepository.findById(req.params.id);
   if (!report) {
-    throw new AppError('Work report not found', 404);
+    throw new AppError('تقرير العمل غير موجود', 404);
   }
 
   if (report.status !== 'SUBMITTED') {
-    throw new AppError('Only submitted work reports can be rejected', 400);
+    throw new AppError(`لا يمكن رفض التقرير لأن حالته الحالية هي: ${resolveWorkReportStatusLabel(report.status)}`, 400);
   }
 
   if (String(report.user?._id || report.user) === req.user.id) {
-    throw new AppError('You cannot reject your own work report', 403);
+    throw new AppError('لا يمكنك رفض تقريرك الشخصي', 403);
   }
 
-  const managedUserIds = await resolveManagedUserIds({
-    userRepository,
-    actorId: req.user.id,
-    actorRole: req.user.role,
+  const canReject = await canApproveOrRejectWorkReport({
+    actor: req.user,
+    report,
   });
 
-  if (!isUserWithinManagedScope({ managedUserIds, userId: report.user?._id || report.user })) {
-    throw new AppError('You can only reject reports for employees in your management scope', 403);
+  if (!canReject) {
+    throw new AppError('الرفض متاح فقط للمدير المباشر أو المدير العام', 403);
   }
 
   const reason = toCleanString(req.body.reason);
   if (!reason) {
-    throw new AppError('reason is required', 400);
+    throw new AppError('سبب الرفض مطلوب', 400);
   }
 
   const updated = await workReportRepository.updateById(report._id, {
@@ -893,8 +946,8 @@ export const rejectWorkReport = asyncHandler(async (req, res) => {
 
   await notificationService.notifySystem(
     report.user?._id || report.user,
-    'ط±ظپط¶ طھظ‚ط±ظٹط± ط§ظ„ط¹ظ…ظ„',
-    `طھظ… ط±ظپط¶ طھظ‚ط±ظٹط± ط§ظ„ط¹ظ…ظ„ "${report.title || report.projectName || 'ط¨ط¯ظˆظ† ط¹ظ†ظˆط§ظ†'}". ط§ظ„ط³ط¨ط¨: ${reason}`,
+    'رفض تقرير العمل',
+    `تم رفض تقرير العمل "${report.title || report.projectName || 'بدون عنوان'}". السبب: ${reason}`,
     {
       workReportId: String(report._id),
       reason,
@@ -920,10 +973,10 @@ export const rejectWorkReport = asyncHandler(async (req, res) => {
     excludeUserIds: [req.user.id],
   });
   await notificationService.notifyOperationActivity(rejectedOperationRecipients, {
-    titleAr: 'ط±ظپط¶ طھظ‚ط±ظٹط± ط¹ظ…ظ„',
-    actorName: req.user.name || req.user.fullName || 'ط§ظ„ظ…ط¹طھظ…ط¯',
-    actionLabel: 'ط±ظپط¶ طھظ‚ط±ظٹط± ط¹ظ…ظ„',
-    entityLabel: report.title || report.projectName || 'طھظ‚ط±ظٹط± ط¹ظ…ظ„',
+    titleAr: 'رفض تقرير عمل',
+    actorName: req.user.name || req.user.fullName || 'المعتمد',
+    actionLabel: 'رفض تقرير عمل',
+    entityLabel: report.title || report.projectName || 'تقرير عمل',
     occurredAt: new Date(),
     metadata: {
       entityType: 'WORK_REPORT',

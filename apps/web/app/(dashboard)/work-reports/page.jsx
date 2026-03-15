@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { api, assetUrl } from '../../../lib/api';
 import { authStorage } from '../../../lib/auth';
-import { Permission, hasPermission } from '../../../lib/permissions';
+import { Permission, hasAnyPermission, hasPermission } from '../../../lib/permissions';
 import {
   calculateWorkReportDistribution,
   formatWorkReportPoints,
@@ -25,8 +25,21 @@ const statusClassMap = {
 
 const todayIso = () => new Date().toISOString().slice(0, 10);
 
+const resolveWorkReportDeepLink = (reportId) => {
+  const id = String(reportId || '').trim();
+  if (!id) {
+    return '/work-reports';
+  }
+
+  if (typeof window === 'undefined') {
+    return `/work-reports?reportId=${encodeURIComponent(id)}`;
+  }
+
+  return `${window.location.origin}/work-reports?reportId=${encodeURIComponent(id)}`;
+};
+
 const defaultForm = {
-  projectId: '',
+  projectName: '',
   activityType: '',
   title: '',
   details: '',
@@ -101,11 +114,15 @@ export default function WorkReportsPage() {
   const [saving, setSaving] = useState(false);
   const [approving, setApproving] = useState(false);
   const [rejecting, setRejecting] = useState(false);
+  const [directApprovingId, setDirectApprovingId] = useState('');
   const attachmentsRef = useRef([]);
 
   /* permissions */
   const canApprove = useMemo(() => {
-    return hasPermission(currentUser, Permission.APPROVE_TASKS);
+    return hasAnyPermission(currentUser, [
+      Permission.APPROVE_TASKS,
+      Permission.VIEW_TEAM_WORK_REPORTS,
+    ]);
   }, [currentUser?.role, currentUser?.customPermissions, currentUser?.permissions]);
 
   const canSendWhatsapp = useMemo(() => {
@@ -151,7 +168,8 @@ export default function WorkReportsPage() {
         const q = filters.search.toLowerCase();
         const name = (r.employeeName || r.user?.fullName || '').toLowerCase();
         const title = (r.title || '').toLowerCase();
-        if (!name.includes(q) && !title.includes(q)) return false;
+        const projectName = (r.project?.name || r.projectName || '').toLowerCase();
+        if (!name.includes(q) && !title.includes(q) && !projectName.includes(q)) return false;
       }
       return true;
     });
@@ -213,6 +231,22 @@ export default function WorkReportsPage() {
       });
     };
   }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    const reportId = new URLSearchParams(window.location.search).get('reportId');
+    if (!reportId) {
+      return;
+    }
+
+    const exists = reports.some((report) => String(report._id) === String(reportId));
+    if (exists) {
+      setSelectedReportId(String(reportId));
+    }
+  }, [reports]);
 
   /* ── Attachment Helpers ──────────────────────────────────────────────────── */
 
@@ -305,8 +339,12 @@ export default function WorkReportsPage() {
         throw new Error('لا يمكن إضافة كاتب التقرير ضمن الكادر المشارك.');
       }
 
+      if (!String(form.projectName || '').trim()) {
+        throw new Error('\u064A\u0631\u062C\u0649 \u0643\u062A\u0627\u0628\u0629 \u0627\u0633\u0645 \u0627\u0644\u0645\u0634\u0631\u0648\u0639.');
+      }
+
       const payload = new FormData();
-      payload.append('projectId', form.projectId);
+      payload.append('projectName', form.projectName);
       payload.append('activityType', form.activityType);
       payload.append('title', form.title);
       payload.append('details', form.details);
@@ -340,10 +378,15 @@ export default function WorkReportsPage() {
     setError('');
     setInfo('');
     try {
-      await api.patch(`/work-reports/${selectedReport._id}/approve`, {
-        points: Number(approvalPoints),
-        managerComment: approvalComment,
-      });
+      const payload = {};
+      if (String(approvalPoints || '').trim()) {
+        payload.points = Number(approvalPoints);
+      }
+      if (String(approvalComment || '').trim()) {
+        payload.managerComment = approvalComment;
+      }
+
+      await api.patch(`/work-reports/${selectedReport._id}/approve`, payload);
       setInfo('تم اعتماد التقرير وإضافة النقاط بنجاح.');
       setInlineAction(null);
       setApprovalPoints('');
@@ -403,24 +446,87 @@ export default function WorkReportsPage() {
     }
   };
 
-  const sendReportPdfToWhatsApp = (report) => {
-    const lines = [
+  const buildWorkReportWhatsappMessage = (report) => {
+    const reportTitle = report.title || 'بدون عنوان';
+    const employeeName = report.employeeName || report.user?.fullName || '-';
+    const projectName = report.project?.name || report.projectName || '-';
+    const statusLabel = statusLabelMap[report.status] || report.status;
+    const isSubmitted = report.status === 'SUBMITTED';
+    const reportLink = resolveWorkReportDeepLink(report._id);
+
+    if (isSubmitted) {
+      return [
+        '[ تذكير اعتماد تقرير عمل - Delta Plus ]',
+        '----------------------------------',
+        'السلام عليكم،',
+        'نرجو التفضل بمراجعة واعتماد تقرير العمل التالي:',
+        `العنوان: ${reportTitle}`,
+        `الموظف: ${employeeName}`,
+        `المشروع: ${projectName}`,
+        `نسبة الإنجاز: ${Number(report.progressPercent || 0)}%`,
+        `ساعات العمل: ${Number(report.hoursSpent || 0)}`,
+        `الحالة الحالية: ${statusLabel}`,
+        `رابط التقرير: ${reportLink}`,
+        '----------------------------------',
+        'تم إرسال هذه الرسالة للمتابعة والتذكير بالاعتماد.',
+        '[ صادر من نظام Delta Plus ]',
+      ].join('\n');
+    }
+
+    return [
       '[ تقرير عمل - Delta Plus ]',
       '----------------------------------',
-      `العنوان: ${report.title || 'بدون عنوان'}`,
-      `الموظف: ${report.employeeName || report.user?.fullName || '-'}`,
-      `المشروع: ${report.project?.name || report.projectName || '-'}`,
-      `الحالة: ${statusLabelMap[report.status] || report.status}`,
+      `العنوان: ${reportTitle}`,
+      `الموظف: ${employeeName}`,
+      `المشروع: ${projectName}`,
+      `الحالة: ${statusLabel}`,
       `نوع النشاط: ${report.activityType || '-'}`,
       `نسبة الإنجاز: ${Number(report.progressPercent || 0)}%`,
       `ساعات العمل: ${Number(report.hoursSpent || 0)}`,
+      `رابط التقرير: ${reportLink}`,
       '----------------------------------',
       'يرجى مراجعة التقرير في أقرب وقت.',
       '[ صادر من نظام Delta Plus ]',
     ].join('\n');
+  };
+
+  const sendReportPdfToWhatsApp = (report) => {
+    const lines = buildWorkReportWhatsappMessage(report);
 
     const url = `https://wa.me/?text=${encodeURIComponent(lines)}`;
     window.open(url, '_blank', 'noopener,noreferrer');
+  };
+
+  const resolveReportOwnerId = (report) => String(report?.user?._id || report?.user?.id || report?.user || '');
+
+  const isOwnReport = (report) => {
+    const ownerId = resolveReportOwnerId(report);
+    return ownerId && ownerId === currentUserId;
+  };
+
+  const canShareReportViaWhatsapp = (report) => isOwnReport(report) || canSendWhatsapp;
+
+  const directApproveReport = async (report) => {
+    if (!report || report.status !== 'SUBMITTED' || isOwnReport(report) || !canApprove) {
+      return;
+    }
+
+    setDirectApprovingId(String(report._id));
+    setError('');
+    setInfo('');
+    try {
+      await api.patch(`/work-reports/${report._id}/approve`, {});
+      setInfo('تم الاعتماد المباشر للتقرير بنجاح.');
+      setSelectedReportId(String(report._id));
+      setInlineAction(null);
+      setApprovalPoints('');
+      setApprovalComment('');
+      await load();
+    } catch (err) {
+      setError(err.message || 'فشل الاعتماد المباشر لتقرير العمل');
+    } finally {
+      setDirectApprovingId('');
+    }
   };
 
   /* ── Detail Panel Helpers ────────────────────────────────────────────────── */
@@ -436,7 +542,7 @@ export default function WorkReportsPage() {
 
   const canModerateSelected = useMemo(() => {
     if (!selectedReport || !canApprove) return false;
-    const userId = String(selectedReport.user?._id || selectedReport.user?.id || '');
+    const userId = resolveReportOwnerId(selectedReport);
     return userId !== currentUserId && selectedReport.status === 'SUBMITTED';
   }, [selectedReport, canApprove, currentUserId]);
 
@@ -514,20 +620,13 @@ export default function WorkReportsPage() {
               <input className="input" value={currentUser?.employeeCode || 'غير محدد'} disabled />
             </label>
             <label>
-              المشروع (نوع العمل)
-              <select
-                className="select"
-                value={form.projectId}
-                onChange={(e) => setForm((prev) => ({ ...prev, projectId: e.target.value }))}
+              {'\u0627\u0633\u0645 \u0627\u0644\u0645\u0634\u0631\u0648\u0639'}
+              <input
+                className="input"
+                value={form.projectName}
+                onChange={(e) => setForm((prev) => ({ ...prev, projectName: e.target.value }))}
                 required
-              >
-                <option value="">اختر المشروع</option>
-                {projectOptions.map((project) => (
-                  <option key={project._id} value={project._id}>
-                    {project.name} - {project.code}
-                  </option>
-                ))}
-              </select>
+              />
             </label>
 
             <label>
@@ -871,6 +970,8 @@ export default function WorkReportsPage() {
                 const isSelected = selectedReportId === report._id;
                 const reportParticipantCount = Number(report.participantCount || report.participants?.length || 0);
                 const pct = Number(report.progressPercent || 0);
+                const canDirectApprove = canApprove && report.status === 'SUBMITTED' && !isOwnReport(report);
+                const canWhatsapp = canShareReportViaWhatsapp(report);
 
                 return (
                   <tr
@@ -925,7 +1026,60 @@ export default function WorkReportsPage() {
                         <button className="btn btn-soft" type="button" onClick={() => openReportPdf(report)}>
                           PDF
                         </button>
+                        {canDirectApprove ? (
+                          <>
+                            <button
+                              className="btn btn-soft"
+                              type="button"
+                              onClick={() => directApproveReport(report)}
+                              disabled={directApprovingId === String(report._id)}
+                            >
+                              {directApprovingId === String(report._id) ? 'جارٍ الاعتماد...' : 'اعتماد مباشر'}
+                            </button>
+                            <button
+                              className="btn btn-soft"
+                              type="button"
+                              style={{ color: 'var(--danger)' }}
+                              onClick={() => directRejectReport(report)}
+                              disabled={directRejectingId === String(report._id)}
+                            >
+                              {directRejectingId === String(report._id) ? 'جارٍ الرفض...' : 'رفض مباشر'}
+                            </button>
+                          </>
+                        ) : null}
+                        {canWhatsapp ? (
+                          <button className="btn btn-soft" type="button" onClick={() => sendReportPdfToWhatsApp(report)}>
+                            {report.status === 'SUBMITTED' ? 'تذكير واتساب' : 'إرسال واتساب'}
+                          </button>
+                        ) : null}
                       </div>
+                      // ...existing code...
+                      const [directRejectingId, setDirectRejectingId] = useState('');
+                      // ...existing code...
+                      const directRejectReport = async (report) => {
+                        if (!report || report.status !== 'SUBMITTED' || isOwnReport(report) || !canApprove) {
+                          return;
+                        }
+                        setDirectRejectingId(String(report._id));
+                        setError('');
+                        setInfo('');
+                        try {
+                          await api.patch(`/work-reports/${report._id}/reject`, {
+                            reason: 'تم الرفض من المدير المباشر عبر زر الإجراءات',
+                            managerComment: '',
+                          });
+                          setInfo('تم رفض التقرير بنجاح.');
+                          setSelectedReportId(String(report._id));
+                          setInlineAction(null);
+                          setRejectionReason('');
+                          setRejectionComment('');
+                          await load();
+                        } catch (err) {
+                          setError(err.message || 'فشل رفض تقرير العمل');
+                        } finally {
+                          setDirectRejectingId('');
+                        }
+                      };
                     </td>
                   </tr>
                 );
@@ -964,9 +1118,9 @@ export default function WorkReportsPage() {
               <button type="button" className="btn btn-soft" onClick={() => downloadReportPdf(selectedReport)}>
                 حفظ PDF
               </button>
-              {canSendWhatsapp ? (
+              {canShareReportViaWhatsapp(selectedReport) ? (
                 <button type="button" className="btn btn-soft" onClick={() => sendReportPdfToWhatsApp(selectedReport)}>
-                  واتساب
+                  {selectedReport.status === 'SUBMITTED' ? 'تذكير واتساب' : 'واتساب'}
                 </button>
               ) : null}
               <button
@@ -1225,7 +1379,7 @@ export default function WorkReportsPage() {
                   <h3 style={{ margin: '0 0 10px' }}>اعتماد التقرير</h3>
                   <div className="grid-3" style={{ gap: 10 }}>
                     <label>
-                      إجمالي نقاط التقرير (إلزامي)
+                      إجمالي نقاط التقرير (اختياري)
                       <input
                         className="input"
                         type="number"
@@ -1257,7 +1411,7 @@ export default function WorkReportsPage() {
                     <button
                       type="button"
                       className="btn btn-primary"
-                      disabled={approving || !approvalPoints}
+                      disabled={approving}
                       onClick={submitApproval}
                     >
                       {approving ? 'جارٍ الاعتماد...' : 'تأكيد الاعتماد'}
