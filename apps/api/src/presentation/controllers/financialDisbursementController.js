@@ -314,6 +314,12 @@ const serializeRequest = (request, currentUser = null) => {
     canConfirmReceipt:
       currentUserId === employeeId
       && status === FinancialDisbursementStatus.DISBURSED,
+    canDelete:
+      currentUserId === employeeId
+      && [FinancialDisbursementStatus.DRAFT, FinancialDisbursementStatus.RETURNED_FOR_REVIEW].includes(status)
+      && !request.projectManagerApprovedAt
+      && !request.financiallyApprovedAt
+      && !request.generalManagerApprovedAt,
   };
 };
 
@@ -592,20 +598,30 @@ export const createFinancialDisbursement = asyncHandler(async (req, res) => {
         req,
       });
 
+      const skipBothCreate = reviewers.skipProjectManager && reviewers.skipFinancialManager;
+      const skipPmOnlyCreate = reviewers.skipProjectManager && !reviewers.skipFinancialManager;
+      const notifyCreateId = skipBothCreate
+        ? reviewers.generalManagerId
+        : (skipPmOnlyCreate ? reviewers.financialManagerId : reviewers.projectManagerId);
+
       await notificationService.notifyFinancialRequestAssigned(
-        [reviewers.skipProjectManager ? reviewers.generalManagerId : reviewers.projectManagerId, req.user.id],
+        [notifyCreateId, req.user.id],
         {
           requestId: String(request._id),
           requestNo: request.requestNo,
           status: request.status,
-          stage: reviewers.skipProjectManager ? 'GENERAL_MANAGER' : 'PROJECT_MANAGER',
+          stage: skipBothCreate ? 'GENERAL_MANAGER' : (skipPmOnlyCreate ? 'FINANCIAL_MANAGER' : 'PROJECT_MANAGER'),
           amount: request.amount,
-          titleAr: reviewers.skipProjectManager
+          titleAr: skipBothCreate
             ? 'طلب صرف بانتظار اعتماد المدير العام'
-            : 'طلب صرف بانتظار اعتماد مدير المشاريع',
-          messageAr: reviewers.skipProjectManager
+            : (skipPmOnlyCreate
+              ? 'طلب صرف بانتظار اعتماد المدير المالي'
+              : 'طلب صرف بانتظار اعتماد مدير المشاريع'),
+          messageAr: skipBothCreate
             ? `تم إرسال طلب الصرف ${request.requestNo} مباشرة إلى المدير العام للاعتماد.`
-            : `تم إرسال طلب الصرف ${request.requestNo} وبات بانتظار اعتماد مدير المشاريع.`,
+            : (skipPmOnlyCreate
+              ? `تم إرسال طلب الصرف ${request.requestNo} إلى المدير المالي للاعتماد.`
+              : `تم إرسال طلب الصرف ${request.requestNo} وبات بانتظار اعتماد مدير المشاريع.`),
         },
       );
     }
@@ -743,7 +759,7 @@ export const submitFinancialDisbursement = asyncHandler(async (req, res) => {
     generalManagerReviewer: reviewers.generalManagerId || null,
     employeeRole: req.user.role,
     projectManagerStepSkipped: !!reviewers.skipProjectManager,
-    requiresGeneralManagerApproval: reviewers.skipProjectManager
+    requiresGeneralManagerApproval: (reviewers.skipProjectManager && reviewers.skipFinancialManager)
       ? true
       : shouldRequireGeneralManagerApproval({
         amount: request.amount,
@@ -772,20 +788,30 @@ export const submitFinancialDisbursement = asyncHandler(async (req, res) => {
     req,
   });
 
+  const skipBoth = reviewers.skipProjectManager && reviewers.skipFinancialManager;
+  const skipPmOnly = reviewers.skipProjectManager && !reviewers.skipFinancialManager;
+  const notifyReviewerId = skipBoth
+    ? reviewers.generalManagerId
+    : (skipPmOnly ? reviewers.financialManagerId : reviewers.projectManagerId);
+
   await notificationService.notifyFinancialRequestAssigned(
-    [reviewers.skipProjectManager ? reviewers.generalManagerId : reviewers.projectManagerId, req.user.id],
+    [notifyReviewerId, req.user.id],
     {
       requestId: String(updatedRequest._id),
       requestNo: updatedRequest.requestNo,
       status: updatedRequest.status,
-      stage: reviewers.skipProjectManager ? 'GENERAL_MANAGER' : 'PROJECT_MANAGER',
+      stage: skipBoth ? 'GENERAL_MANAGER' : (skipPmOnly ? 'FINANCIAL_MANAGER' : 'PROJECT_MANAGER'),
       amount: updatedRequest.amount,
-      titleAr: reviewers.skipProjectManager
+      titleAr: skipBoth
         ? 'طلب صرف بانتظار اعتماد المدير العام'
-        : 'تم إرسال طلب صرف مالي',
-      messageAr: reviewers.skipProjectManager
+        : (skipPmOnly
+          ? 'طلب صرف بانتظار اعتماد المدير المالي'
+          : 'تم إرسال طلب صرف مالي'),
+      messageAr: skipBoth
         ? `تم إرسال طلب الصرف ${updatedRequest.requestNo} مباشرة إلى المدير العام للاعتماد.`
-        : `تم إرسال طلب الصرف ${updatedRequest.requestNo} إلى مدير المشاريع للمراجعة.`,
+        : (skipPmOnly
+          ? `تم إرسال طلب الصرف ${updatedRequest.requestNo} إلى المدير المالي للاعتماد.`
+          : `تم إرسال طلب الصرف ${updatedRequest.requestNo} إلى مدير المشاريع للمراجعة.`),
     },
   );
 
@@ -1405,6 +1431,42 @@ export const getFinancialDisbursement = asyncHandler(async (req, res) => {
 
   ensureReadableRequest(req, request);
   res.json({ request: serializeRequest(request, req.user) });
+});
+
+export const deleteFinancialDisbursement = asyncHandler(async (req, res) => {
+  const request = await financialDisbursementRepository.findById(req.params.id);
+  if (!request) {
+    throw new AppError('Financial request not found', 404);
+  }
+
+  ensureReadableRequest(req, request);
+
+  if (String(request.employee?._id || request.employee) !== String(req.user.id)) {
+    throw new AppError('Only request owner can delete this request', 403);
+  }
+
+  if (!canEditRequest(req, request)) {
+    throw new AppError('Cannot delete a request that has been approved or is in review', 409);
+  }
+
+  await financialDisbursementRepository.deleteById(request._id);
+
+  await auditService.log({
+    actorId: req.user.id,
+    action: 'FINANCIAL_REQUEST_DELETED',
+    entityType: 'FINANCIAL_DISBURSEMENT',
+    entityId: request._id,
+    before: {
+      requestNo: request.requestNo,
+      status: request.status,
+      amount: request.amount,
+      requestType: request.requestType,
+    },
+    after: null,
+    req,
+  });
+
+  res.json({ message: 'تم مسح المعاملة بنجاح' });
 });
 
 export const exportFinancialDisbursementPdf = asyncHandler(async (req, res) => {

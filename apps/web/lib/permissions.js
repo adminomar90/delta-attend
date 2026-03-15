@@ -162,6 +162,12 @@ const RolePermissions = {
     Permission.VIEW_OWN_WORK_REPORTS,
     Permission.SEND_REPORTS_WHATSAPP,
   ],
+  SERVICE_STAFF: [
+    Permission.CREATE_FINANCIAL_DISBURSEMENTS,
+    Permission.HANDLE_MAINTENANCE_REPORTS,
+    Permission.VIEW_MAINTENANCE_REPORTS,
+    Permission.VIEW_OWN_WORK_REPORTS,
+  ],
 };
 
 export const permissionLabelMap = {

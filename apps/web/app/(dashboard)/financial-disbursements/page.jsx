@@ -372,6 +372,47 @@ export default function FinancialDisbursementsPage() {
     }
   };
 
+  const deleteRequest = async (request) => {
+    if (!window.confirm(`هل أنت متأكد من مسح الطلب ${request.requestNo}؟ لا يمكن التراجع عن هذا الإجراء.`)) {
+      return;
+    }
+
+    setSaving(true);
+    setError('');
+    setInfo('');
+    try {
+      await api.delete(`/financial-disbursements/${request.id}`);
+      setInfo('تم مسح المعاملة بنجاح.');
+      if (form.id === request.id) {
+        resetForm();
+      }
+      await load();
+    } catch (err) {
+      setError(err.message || 'فشل مسح المعاملة');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const sendWhatsappReminder = (request) => {
+    const lines = [
+      '[ تذكير - طلب صرف مالي - Delta Plus ]',
+      '----------------------------------',
+      `رقم الطلب: ${request.requestNo}`,
+      `نوع الصرف: ${typeLabelMap[request.requestType] || request.requestType}`,
+      `المبلغ: ${request.amount} ${request.currency}`,
+      `الحالة: ${request.statusLabel || request.status}`,
+      `الموظف: ${request.employee?.fullName || '-'}`,
+      request.description ? `الوصف: ${request.description}` : '',
+      '----------------------------------',
+      'يرجى متابعة الطلب في أقرب وقت.',
+      '[ صادر من نظام Delta Plus ]',
+    ].filter(Boolean).join('\n');
+
+    const url = `https://wa.me/?text=${encodeURIComponent(lines)}`;
+    window.open(url, '_blank', 'noopener,noreferrer');
+  };
+
   const showTransactionDetails = (request) => {
     setSelectedRequest(request);
     setInfo('تم فتح تفاصيل المعاملة.');
@@ -394,19 +435,23 @@ export default function FinancialDisbursementsPage() {
     }
   };
 
-  const sendWhatsapp = async (requestId) => {
-    setError('');
-    try {
-      const r = await api.post(`/financial-disbursements/${requestId}/whatsapp-link`, {});
-      const url = r?.whatsapp?.url || '';
-      if (!url) {
-        setError('تعذر توليد رابط واتساب');
-        return;
-      }
-      window.open(url, '_blank', 'noopener,noreferrer');
-    } catch (err) {
-      setError(err.message || 'فشل فتح واتساب');
-    }
+  const sendWhatsapp = (request) => {
+    const lines = [
+      '[ طلب صرف مالي - Delta Plus ]',
+      '----------------------------------',
+      `رقم الطلب: ${request.requestNo}`,
+      `نوع الصرف: ${typeLabelMap[request.requestType] || request.requestType}`,
+      `المبلغ: ${request.amount} ${request.currency}`,
+      `الحالة: ${request.statusLabel || request.status}`,
+      `الموظف: ${request.employee?.fullName || '-'}`,
+      request.description ? `الوصف: ${request.description}` : '',
+      '----------------------------------',
+      'يرجى متابعة الطلب في أقرب وقت.',
+      '[ صادر من نظام Delta Plus ]',
+    ].filter(Boolean).join('\n');
+
+    const url = `https://wa.me/?text=${encodeURIComponent(lines)}`;
+    window.open(url, '_blank', 'noopener,noreferrer');
   };
 
   const renderAttachments = (request) => {
@@ -604,7 +649,7 @@ export default function FinancialDisbursementsPage() {
             <button className="btn btn-primary" type="button" onClick={() => downloadTransactionPdf(selectedRequest)}>
               تحميل مستند الصرف PDF
             </button>
-            <button className="btn btn-soft" type="button" onClick={() => sendWhatsapp(selectedRequest.id)}>
+            <button className="btn btn-soft" type="button" onClick={() => sendWhatsapp(selectedRequest)}>
               مشاركة عبر واتساب
             </button>
           </div>
@@ -694,7 +739,7 @@ export default function FinancialDisbursementsPage() {
                       {request.status !== 'DISBURSED' && request.status !== 'CLOSED' ? (
                         <button className="btn btn-soft" type="button" onClick={() => downloadTransactionPdf(request)}>PDF</button>
                       ) : null}
-                      <button className="btn btn-soft" type="button" onClick={() => sendWhatsapp(request.id)}>واتساب</button>
+                      <button className="btn btn-soft" type="button" onClick={() => sendWhatsapp(request)}>واتساب</button>
                       {request.canEdit ? <button className="btn btn-soft" type="button" onClick={() => beginEdit(request)}>تعديل</button> : null}
                       {request.canSubmit ? <button className="btn btn-primary" type="button" onClick={() => submitExistingRequest(request)}>إرسال</button> : null}
                       {request.canReviewAsProjectManager ? <button className="btn btn-primary" type="button" onClick={() => runAction(request, 'projectManager', 'APPROVE')}>اعتماد مدير المشاريع</button> : null}
@@ -712,6 +757,8 @@ export default function FinancialDisbursementsPage() {
 
                       {request.canDeliverFunds ? <button className="btn btn-primary" type="button" onClick={() => deliverRequest(request)}>تسليم المبلغ</button> : null}
                       {request.canConfirmReceipt ? <button className="btn btn-primary" type="button" onClick={() => confirmReceipt(request)}>تم استلام المبلغ</button> : null}
+                      {request.canDelete ? <button className="btn btn-soft" type="button" style={{ color: '#ff9b9b' }} onClick={() => deleteRequest(request)}>مسح</button> : null}
+                      <button className="btn btn-soft" type="button" onClick={() => sendWhatsappReminder(request)}>تذكير واتساب</button>
                     </div>
                   </div>
                 </td>

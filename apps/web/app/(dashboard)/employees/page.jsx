@@ -19,6 +19,7 @@ const roleOptions = [
   { value: 'ASSISTANT_PROJECT_MANAGER', label: 'مساعد مدير مشروع' },
   { value: 'TEAM_LEAD', label: 'قائد فريق' },
   { value: 'TECHNICAL_STAFF', label: 'موظف تقني' },
+  { value: 'SERVICE_STAFF', label: 'موظف خدمات' },
 ];
 
 const roleLabelMap = roleOptions.reduce((acc, item) => {
@@ -34,6 +35,7 @@ const roleColorMap = {
   ASSISTANT_PROJECT_MANAGER: '#b288ff',
   TEAM_LEAD: '#ff8a80',
   TECHNICAL_STAFF: '#7b93c2',
+  SERVICE_STAFF: '#e091c9',
 };
 
 const managerRoleValues = new Set([
@@ -133,6 +135,7 @@ const defaultCreateForm = {
   role: 'TECHNICAL_STAFF',
   employeeCode: '',
   jobTitle: '',
+  specialization: '',
   department: '',
   managerId: '',
   hireDate: '',
@@ -150,6 +153,7 @@ const defaultEditForm = {
   role: '',
   employeeCode: '',
   jobTitle: '',
+  specialization: '',
   department: '',
   managerId: '',
   phone: '',
@@ -284,6 +288,7 @@ export default function EmployeesPage() {
       role: user.role || 'TECHNICAL_STAFF',
       employeeCode: user.employeeCode || '',
       jobTitle: user.jobTitle || '',
+      specialization: user.specialization || '',
       department: user.department || '',
       managerId: user.manager?.id || user.manager?._id || '',
       phone: user.phone || '',
@@ -563,6 +568,10 @@ export default function EmployeesPage() {
                 <input className="input" value={createForm.jobTitle} onChange={(e) => setCreateForm((prev) => ({ ...prev, jobTitle: e.target.value }))} />
               </label>
               <label>
+                التخصص
+                <input className="input" value={createForm.specialization} onChange={(e) => setCreateForm((prev) => ({ ...prev, specialization: e.target.value }))} placeholder="مثال: كهرباء، سباكة، تكييف..." />
+              </label>
+              <label>
                 الهاتف
                 <input className="input" value={createForm.phone} onChange={(e) => setCreateForm((prev) => ({ ...prev, phone: e.target.value }))} />
               </label>
@@ -672,6 +681,10 @@ export default function EmployeesPage() {
             <label>
               المسمى الوظيفي
               <input className="input" value={editForm.jobTitle} onChange={(e) => setEditForm((prev) => ({ ...prev, jobTitle: e.target.value }))} />
+            </label>
+            <label>
+              التخصص
+              <input className="input" value={editForm.specialization} onChange={(e) => setEditForm((prev) => ({ ...prev, specialization: e.target.value }))} placeholder="مثال: كهرباء، سباكة، تكييف..." />
             </label>
             <label>
               الهاتف

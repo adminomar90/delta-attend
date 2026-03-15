@@ -403,21 +403,24 @@ export default function WorkReportsPage() {
     }
   };
 
-  const sendReportPdfToWhatsApp = async (report) => {
-    setError('');
-    setInfo('');
-    try {
-      const response = await api.post(`/work-reports/${report._id}/whatsapp-link`, {});
-      const whatsappUrl = response?.whatsapp?.url || '';
-      if (!whatsappUrl) {
-        setError('تعذر تجهيز رابط واتساب للتقرير');
-        return;
-      }
-      window.open(whatsappUrl, '_blank', 'noopener,noreferrer');
-      setInfo('تم فتح واتساب لإرسال تقرير PDF.');
-    } catch (err) {
-      setError(err.message || 'تعذر إرسال التقرير PDF عبر واتساب');
-    }
+  const sendReportPdfToWhatsApp = (report) => {
+    const lines = [
+      '[ تقرير عمل - Delta Plus ]',
+      '----------------------------------',
+      `العنوان: ${report.title || 'بدون عنوان'}`,
+      `الموظف: ${report.employeeName || report.user?.fullName || '-'}`,
+      `المشروع: ${report.project?.name || report.projectName || '-'}`,
+      `الحالة: ${statusLabelMap[report.status] || report.status}`,
+      `نوع النشاط: ${report.activityType || '-'}`,
+      `نسبة الإنجاز: ${Number(report.progressPercent || 0)}%`,
+      `ساعات العمل: ${Number(report.hoursSpent || 0)}`,
+      '----------------------------------',
+      'يرجى مراجعة التقرير في أقرب وقت.',
+      '[ صادر من نظام Delta Plus ]',
+    ].join('\n');
+
+    const url = `https://wa.me/?text=${encodeURIComponent(lines)}`;
+    window.open(url, '_blank', 'noopener,noreferrer');
   };
 
   /* ── Detail Panel Helpers ────────────────────────────────────────────────── */

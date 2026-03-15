@@ -123,6 +123,11 @@ const userSchema = new mongoose.Schema(
       default: '',
       trim: true,
     },
+    specialization: {
+      type: String,
+      default: '',
+      trim: true,
+    },
     manager: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'User',

@@ -46,6 +46,10 @@ export class FinancialDisbursementRepository {
     ).populate(populatePipeline);
   }
 
+  async deleteById(id) {
+    return FinancialDisbursementModel.findByIdAndDelete(id);
+  }
+
   async addPointsEvent(id, payload = {}) {
     return FinancialDisbursementModel.findByIdAndUpdate(
       id,

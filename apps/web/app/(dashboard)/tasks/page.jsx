@@ -3,7 +3,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../../../lib/api';
 import { authStorage } from '../../../lib/auth';
-import { buildWhatsAppSendUrl } from '../../../lib/whatsapp';
 
 const statusMap = {
   TODO: 'جديدة',
@@ -160,9 +159,9 @@ export default function TasksPage() {
     const awardedPoints = task.pointsAwarded || 0;
 
     const message = [
+      '[ مهمة - Delta Plus ]',
+      '----------------------------------',
       `السلام عليكم ${assigneeName}،`,
-      '',
-      'يرجى التكرم بالاطلاع على تفاصيل المهمة التالية:',
       '',
       'تفاصيل المهمة:',
       `- العنوان: ${task.title || '-'}`,
@@ -176,23 +175,12 @@ export default function TasksPage() {
       `- النقاط المخصصة: ${plannedPoints}`,
       `- النقاط المكتسبة حتى الآن: ${awardedPoints}`,
       `- الوصف: ${task.description || '-'}`,
-      '',
-      'الإجراء المطلوب:',
+      '----------------------------------',
       'يرجى تأكيد استلام المهمة والبدء بالتنفيذ حسب الخطة.',
-      '',
-      'مع التقدير.',
+      '[ صادر من نظام Delta Plus ]',
     ].join('\n');
 
-    const url = buildWhatsAppSendUrl({
-      phone: task.assignee?.phone,
-      message,
-    });
-
-    if (!url) {
-      setError('لا يمكن الإرسال عبر واتساب لأن رقم هاتف الموظف غير موجود أو غير صالح.');
-      return;
-    }
-
+    const url = `https://wa.me/?text=${encodeURIComponent(message)}`;
     window.open(url, '_blank', 'noopener,noreferrer');
   };
 

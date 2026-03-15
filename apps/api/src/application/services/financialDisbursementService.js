@@ -287,12 +287,19 @@ export const resolveApprovalChain = ({
 
   const generalManagerId = findRoleReviewerId({ employeeId, users: activeUsers, role: Roles.GENERAL_MANAGER });
 
-  if (employeeRole === Roles.PROJECT_MANAGER || employeeRole === Roles.FINANCIAL_MANAGER) {
+  if (employeeRole === Roles.FINANCIAL_MANAGER) {
     chain.generalManagerId = generalManagerId;
     chain.skipProjectManager = true;
     chain.skipFinancialManager = true;
     chain.initialStatus = FinancialDisbursementStatus.PENDING_GENERAL_MANAGER_APPROVAL;
     chain.initialReviewerRole = Roles.GENERAL_MANAGER;
+  } else if (employeeRole === Roles.PROJECT_MANAGER) {
+    chain.financialManagerId = findRoleReviewerId({ employeeId, users: activeUsers, role: Roles.FINANCIAL_MANAGER });
+    chain.generalManagerId = generalManagerId;
+    chain.skipProjectManager = true;
+    chain.skipFinancialManager = false;
+    chain.initialStatus = FinancialDisbursementStatus.PENDING_FINANCIAL_MANAGER_APPROVAL;
+    chain.initialReviewerRole = Roles.FINANCIAL_MANAGER;
   } else {
     chain.projectManagerId = findNearestProjectManagerId({ employeeId, users: activeUsers });
     chain.financialManagerId = findRoleReviewerId({ employeeId, users: activeUsers, role: Roles.FINANCIAL_MANAGER });

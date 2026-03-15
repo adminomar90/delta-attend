@@ -23,6 +23,7 @@ const roleLabelMap = {
   ASSISTANT_PROJECT_MANAGER: 'مساعد مدير مشروع',
   TEAM_LEAD: 'قائد فريق',
   TECHNICAL_STAFF: 'موظف تقني',
+  SERVICE_STAFF: 'موظف خدمات',
 };
 
 const roleStyleMap = {
@@ -33,6 +34,7 @@ const roleStyleMap = {
   ASSISTANT_PROJECT_MANAGER: 'fill:#1a1030,stroke:#b288ff,stroke-width:2px,color:#e2e8f0',
   TEAM_LEAD: 'fill:#1a1015,stroke:#ff8a80,stroke-width:2px,color:#e2e8f0',
   TECHNICAL_STAFF: 'fill:#0d1d3e,stroke:#7a92bb,stroke-width:1px,color:#e2e8f0',
+  SERVICE_STAFF: 'fill:#1a102a,stroke:#e091c9,stroke-width:1px,color:#e2e8f0',
 };
 
 const roleColorMap = {
@@ -43,6 +45,7 @@ const roleColorMap = {
   ASSISTANT_PROJECT_MANAGER: '#b288ff',
   TEAM_LEAD: '#ff8a80',
   TECHNICAL_STAFF: '#7a92bb',
+  SERVICE_STAFF: '#e091c9',
 };
 
 const formatDuration = (minutes) => {

@@ -3,7 +3,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { api } from '../../../lib/api';
 import { authStorage } from '../../../lib/auth';
-import { buildWhatsAppSendUrl } from '../../../lib/whatsapp';
 
 const roleOptions = [
   { value: 'FINANCIAL_MANAGER', label: 'موافقة المالية' },
@@ -34,6 +33,7 @@ const roleLabelMap = {
   ASSISTANT_PROJECT_MANAGER: 'مساعد مدير مشروع',
   TEAM_LEAD: 'قائد فريق',
   TECHNICAL_STAFF: 'موظف تقني',
+  SERVICE_STAFF: 'موظف خدمات',
   HR_MANAGER: 'مدير موارد بشرية',
 };
 
@@ -163,9 +163,9 @@ export default function ProjectsPage() {
       .join('، ');
 
     const message = [
+      '[ مشروع - Delta Plus ]',
+      '----------------------------------',
       `السلام عليكم ${ownerName}،`,
-      '',
-      'يرجى التكرم بالاطلاع على تفاصيل المشروع التالية:',
       '',
       'تفاصيل المشروع:',
       `- اسم المشروع: ${project.name || '-'}`,
@@ -176,23 +176,12 @@ export default function ProjectsPage() {
       `- تاريخ النهاية: ${endDate}`,
       `- الأدوار المطلوبة للاعتماد: ${requiredApprovals || '-'}`,
       `- الوصف: ${project.description || '-'}`,
-      '',
-      'الإجراء المطلوب:',
+      '----------------------------------',
       'يرجى مراجعة التفاصيل وتأكيد الاستلام.',
-      '',
-      'مع التقدير.',
+      '[ صادر من نظام Delta Plus ]',
     ].join('\n');
 
-    const url = buildWhatsAppSendUrl({
-      phone: project.owner?.phone,
-      message,
-    });
-
-    if (!url) {
-      setError('لا يمكن إرسال تفاصيل المشروع عبر واتساب لأن رقم هاتف المالك غير موجود أو غير صالح.');
-      return;
-    }
-
+    const url = `https://wa.me/?text=${encodeURIComponent(message)}`;
     window.open(url, '_blank', 'noopener,noreferrer');
   };
 

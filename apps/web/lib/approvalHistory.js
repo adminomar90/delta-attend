@@ -34,7 +34,8 @@ export const roleLabelMap = {
   PROJECT_MANAGER: 'مدير مشروع',
   ASSISTANT_PROJECT_MANAGER: 'مساعد مدير مشروع',
   TEAM_LEAD: 'قائد فريق',
-  TECHNICAL_STAFF: 'موظف فني',
+  TECHNICAL_STAFF: 'موظف تقني',
+  SERVICE_STAFF: 'موظف خدمات',
 };
 
 export const permissionLabelMap = {

@@ -11,6 +11,7 @@ import { uploadDocumentMiddleware } from '../middlewares/uploadMiddleware.js';
 import {
   confirmFinancialDisbursementReceipt,
   createFinancialDisbursement,
+  deleteFinancialDisbursement,
   deliverFinancialDisbursement,
   financialDisbursementSummary,
   financialDisbursementWhatsappLink,
@@ -41,6 +42,7 @@ financialDisbursementsRoutes.post('/', canCreateFinancialDisbursements, uploadDo
 financialDisbursementsRoutes.get('/:id/pdf', exportFinancialDisbursementPdf);
 financialDisbursementsRoutes.post('/:id/whatsapp-link', financialDisbursementWhatsappLink);
 financialDisbursementsRoutes.get('/:id', getFinancialDisbursement);
+financialDisbursementsRoutes.delete('/:id', canCreateFinancialDisbursements, deleteFinancialDisbursement);
 financialDisbursementsRoutes.patch('/:id', canCreateFinancialDisbursements, uploadDocumentMiddleware.array('attachments', 10), updateFinancialDisbursement);
 financialDisbursementsRoutes.patch('/:id/submit', canCreateFinancialDisbursements, submitFinancialDisbursement);
 financialDisbursementsRoutes.patch('/:id/project-manager-review', canReviewFinancialDisbursements, reviewFinancialDisbursementAsProjectManager);

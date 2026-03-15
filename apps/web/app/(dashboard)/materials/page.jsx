@@ -163,14 +163,63 @@ export default function MaterialsPage() {
   useEffect(() => { if (canAccess) load(); }, [canAccess, load]);
 
   /* helpers */
-  const sendWhatsapp = async (path) => {
-    setError('');
-    try {
-      const r = await api.post(path, {});
-      const url = r?.whatsapp?.url || '';
-      if (!url) { setError('تعذر توليد رابط واتساب'); return; }
-      window.open(url, '_blank', 'noopener,noreferrer');
-    } catch (err) { setError(err.message || 'فشل فتح واتساب'); }
+  const openWhatsapp = (lines) => {
+    const url = `https://wa.me/?text=${encodeURIComponent(lines.filter(Boolean).join('\n'))}`;
+    window.open(url, '_blank', 'noopener,noreferrer');
+  };
+
+  const sendRequestWhatsapp = (req) => {
+    openWhatsapp([
+      '[ طلب مواد - Delta Plus ]',
+      '----------------------------------',
+      `رقم الطلب: ${req.requestNo}`,
+      `المشروع: ${req.project?.name || '-'}`,
+      `الطالب: ${req.requestedFor?.fullName || req.requestedBy?.fullName || '-'}`,
+      `المجهز: ${req.assignedPreparer?.fullName || 'غير معين'}`,
+      `عدد البنود: ${(req.items || []).length}`,
+      '----------------------------------',
+      'يرجى متابعة الطلب.',
+      '[ صادر من نظام Delta Plus ]',
+    ]);
+  };
+
+  const sendCustodyWhatsapp = (cu) => {
+    openWhatsapp([
+      '[ ذمة مواد - Delta Plus ]',
+      '----------------------------------',
+      `رقم الذمة: ${cu.custodyNo}`,
+      `المستلم: ${cu.holder?.fullName || '-'}`,
+      `المشروع: ${cu.project?.name || '-'}`,
+      `عدد البنود: ${(cu.items || []).length}`,
+      '----------------------------------',
+      'يرجى متابعة الذمة.',
+      '[ صادر من نظام Delta Plus ]',
+    ]);
+  };
+
+  const sendReconciliationWhatsapp = (rc) => {
+    openWhatsapp([
+      '[ تصفية مواد - Delta Plus ]',
+      '----------------------------------',
+      `رقم التصفية: ${rc.reconcileNo}`,
+      `الذمة: ${rc.custody?.custodyNo || '-'}`,
+      '----------------------------------',
+      'يرجى متابعة التصفية.',
+      '[ صادر من نظام Delta Plus ]',
+    ]);
+  };
+
+  const sendReportsWhatsapp = () => {
+    const totals = summary?.totals || {};
+    openWhatsapp([
+      '[ تقارير المواد - Delta Plus ]',
+      '----------------------------------',
+      `إجمالي الطلبات: ${totals.totalRequests || 0}`,
+      `إجمالي الذمم: ${totals.totalCustodies || 0}`,
+      `إجمالي التصفيات: ${totals.totalReconciliations || 0}`,
+      '----------------------------------',
+      '[ صادر من نظام Delta Plus ]',
+    ]);
   };
 
   const doAction = async (fn) => {
@@ -386,7 +435,7 @@ export default function MaterialsPage() {
                       <td>{(req.items || []).length}</td>
                       <td>
                         <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-                          <button className="btn btn-soft" style={{ fontSize: 11, padding: '3px 8px' }} type="button" onClick={() => sendWhatsapp(`/materials/requests/${req._id}/whatsapp-link`)}>واتساب</button>
+                          <button className="btn btn-soft" style={{ fontSize: 11, padding: '3px 8px' }} type="button" onClick={() => sendRequestWhatsapp(req)}>واتساب</button>
                           {isMyPreparer(req) && ['NEW', 'UNDER_REVIEW'].includes(req.status) && <button className="btn btn-soft" style={{ fontSize: 11, padding: '3px 8px', color: '#81c784' }} type="button" disabled={!!busy} onClick={() => openReview(req)}>مراجعة</button>}
                           {isMyPreparer(req) && ['APPROVED', 'PREPARING'].includes(req.status) && <button className="btn btn-soft" style={{ fontSize: 11, padding: '3px 8px', color: '#ffb74d' }} type="button" disabled={!!busy} onClick={() => openPrepare(req)}>تجهيز</button>}
                           {isMyPreparer(req) && ['PREPARED', 'PREPARING'].includes(req.status) && <button className="btn btn-soft" style={{ fontSize: 11, padding: '3px 8px', color: '#64b5f6' }} type="button" disabled={!!busy} onClick={() => openDispatch(req)}>تسليم</button>}
@@ -419,7 +468,7 @@ export default function MaterialsPage() {
                       <td>{(cu.items || []).length}</td>
                       <td>
                         <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-                          <button className="btn btn-soft" style={{ fontSize: 11, padding: '3px 8px' }} type="button" onClick={() => sendWhatsapp(`/materials/custodies/${cu._id}/whatsapp-link`)}>واتساب</button>
+                          <button className="btn btn-soft" style={{ fontSize: 11, padding: '3px 8px' }} type="button" onClick={() => sendCustodyWhatsapp(cu)}>واتساب</button>
                           {(() => { const pid = cu.request?.assignedPreparer; return (!pid && isGM) || pid === myId || isGM; })() && ['OPEN', 'PARTIALLY_RECONCILED'].includes(cu.status) && (
                             <button className="btn btn-soft" style={{ fontSize: 11, padding: '3px 8px', color: '#ffd54f' }} type="button" disabled={!!busy} onClick={() => openReconcile(cu)}>تصفية الذمة</button>
                           )}
@@ -448,7 +497,7 @@ export default function MaterialsPage() {
                       <td><Badge status={rc.status} /></td>
                       <td>
                         <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-                          <button className="btn btn-soft" style={{ fontSize: 11, padding: '3px 8px' }} type="button" onClick={() => sendWhatsapp(`/materials/reconciliations/${rc._id}/whatsapp-link`)}>واتساب</button>
+                          <button className="btn btn-soft" style={{ fontSize: 11, padding: '3px 8px' }} type="button" onClick={() => sendReconciliationWhatsapp(rc)}>واتساب</button>
                           {(() => { const pid = rc.request?.assignedPreparer; return (!pid && isGM) || pid === myId || isGM; })() && rc.status === 'SUBMITTED' && (
                             <button className="btn btn-soft" style={{ fontSize: 11, padding: '3px 8px', color: '#81c784' }} type="button" disabled={!!busy} onClick={async () => { setBusy('approve-recon'); await doAction(async () => { await api.patch(`/materials/reconciliations/${rc._id}/review`, { action: 'APPROVE', points: 100 }); setInfo('تم اعتماد التصفية'); }); }}>اعتماد التصفية</button>
                           )}
@@ -476,7 +525,7 @@ export default function MaterialsPage() {
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>
             <button className="btn btn-primary" type="button" onClick={async () => { try { const blob = await api.get('/materials/reports/excel'); downloadBlob(blob, 'materials-report.xlsx'); } catch { setError('فشل تصدير Excel'); } }}>تصدير Excel</button>
             <button className="btn btn-soft" type="button" onClick={async () => { try { const blob = await api.get('/materials/reports/pdf'); downloadBlob(blob, 'materials-report.pdf'); } catch { setError('فشل تصدير PDF'); } }}>تصدير PDF</button>
-            <button className="btn btn-soft" type="button" onClick={() => sendWhatsapp('/materials/reports/whatsapp-link')}>واتساب</button>
+            <button className="btn btn-soft" type="button" onClick={() => sendReportsWhatsapp()}>واتساب</button>
           </div>
           {summary?.totals && (
             <div className="grid-3">

@@ -357,15 +357,73 @@ export default function MaintenanceReportsPage() {
     }
   };
 
-  const openWhatsapp = async (report) => {
-    try {
-      const response = await api.post(`/maintenance-reports/${report.id}/whatsapp-link`, {});
-      const url = response?.whatsapp?.url || '';
-      if (!url) throw new Error('تعذر توليد رابط واتساب');
-      window.open(url, '_blank', 'noopener,noreferrer');
-    } catch (err) {
-      setError(err.message || 'تعذر فتح واتساب');
+  const openWhatsapp = (report) => {
+    const statusText = report.statusLabel || report.status || '-';
+    const devicesCount = (report.inspectedDevices || []).length;
+    const issuesCount = (report.detectedIssues || []).length;
+    const materialsCount = (report.usedMaterials || []).length;
+
+    const lines = [
+      `[ تقرير الصيانة الدورية - Delta Plus ]`,
+      `----------------------------------`,
+      `(i) رقم التقرير  : ${report.requestNo || '-'}`,
+      `(i) اسم الزبون   : ${report.customerName || '-'}`,
+      `(i) رقم المشروع  : ${report.projectNumber || '-'}`,
+      `(i) الموقع        : ${report.siteLocation || '-'}`,
+      `----------------------------------`,
+      `(*) الفني المسؤول : ${report.assignedEmployee?.fullName || 'غير معيّن'}`,
+      `(*) الحالة        : ${statusText}`,
+      `(*) النقاط        : ${report.points || 0}`,
+      `----------------------------------`,
+    ];
+
+    if (report.visitInfo) {
+      lines.push(
+        `(+) تاريخ الزيارة : ${report.visitInfo.visitDate ? formatDateTime(report.visitInfo.visitDate) : '-'}`,
+        `(+) وقت الوصول    : ${report.visitInfo.arrivalTime || '-'}`,
+        `(+) وقت المغادرة  : ${report.visitInfo.departureTime || '-'}`,
+        `----------------------------------`,
+      );
     }
+
+    lines.push(
+      `الأجهزة المفحوصة : ${devicesCount}`,
+      `المشاكل المكتشفة : ${issuesCount}`,
+      `المواد المستخدمة  : ${materialsCount}`,
+    );
+
+    if (devicesCount) {
+      lines.push('', 'الأجهزة:');
+      report.inspectedDevices.forEach((d, i) => {
+        lines.push(`  ${i + 1}. ${d.device || '-'} (${d.model || '-'}) - ${d.condition || '-'}`);
+      });
+    }
+
+    if (issuesCount) {
+      lines.push('', 'المشاكل:');
+      report.detectedIssues.forEach((d, i) => {
+        lines.push(`  ${i + 1}. ${d.issue || '-'} [${d.severity || '-'}]`);
+      });
+    }
+
+    if (report.customerFeedback?.submittedAt) {
+      lines.push(
+        `----------------------------------`,
+        `تقييم الشركة  : ${report.customerFeedback.companyRating || '-'}/5`,
+        `تقييم الموظف  : ${report.customerFeedback.employeeRating || '-'}/5`,
+      );
+      if (report.customerFeedback.notes) {
+        lines.push(`ملاحظات الزبون: ${report.customerFeedback.notes}`);
+      }
+    }
+
+    lines.push(
+      `----------------------------------`,
+      `[ صادر تلقائيًا من نظام Delta Plus ]`,
+    );
+
+    const url = `https://wa.me/?text=${encodeURIComponent(lines.join('\n'))}`;
+    window.open(url, '_blank', 'noopener,noreferrer');
   };
 
   if (loading) {
@@ -685,7 +743,7 @@ export default function MaintenanceReportsPage() {
             <div className="card section" style={{ padding: 12, marginTop: 14 }}>
               <strong>رابط تقييم الزبون</strong>
               <div style={{ marginTop: 8, wordBreak: 'break-all' }}>{feedbackResult.url}</div>
-              {feedbackResult.whatsappUrl ? <button className="btn btn-soft" type="button" style={{ marginTop: 10 }} onClick={() => window.open(feedbackResult.whatsappUrl, '_blank', 'noopener,noreferrer')}>إرساله عبر واتساب</button> : null}
+              {feedbackResult.whatsappUrl ? <button className="btn btn-soft" type="button" style={{ marginTop: 10 }} onClick={() => { const url = `https://wa.me/?text=${encodeURIComponent(feedbackResult.url || feedbackResult.whatsappUrl)}`; window.open(url, '_blank', 'noopener,noreferrer'); }}>إرساله عبر واتساب</button> : null}
             </div>
           ) : null}
 

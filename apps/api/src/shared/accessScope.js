@@ -21,7 +21,7 @@ export const resolveManagedUserIds = async ({
     return [];
   }
 
-  if (actorRole === Roles.TECHNICAL_STAFF) {
+  if (actorRole === Roles.TECHNICAL_STAFF || actorRole === Roles.SERVICE_STAFF) {
     return [actorIdString];
   }
 

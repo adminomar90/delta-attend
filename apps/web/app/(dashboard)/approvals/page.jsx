@@ -18,6 +18,7 @@ const roleLabelMap = {
   ASSISTANT_PROJECT_MANAGER: 'مساعد مدير مشروع',
   TEAM_LEAD: 'قائد فريق',
   TECHNICAL_STAFF: 'موظف تقني',
+  SERVICE_STAFF: 'موظف خدمات',
 };
 
 const projectStatusLabelMap = {

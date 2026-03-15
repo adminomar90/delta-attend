@@ -849,6 +849,8 @@ const createStoredMaintenanceReportPdf = async ({ report, req }) => {
   const buffer = await buildMaintenanceReportPdfBuffer({
     report: serializeMaintenanceReport(report, req.user),
     generatedAt: new Date(),
+    uploadRootDir,
+    publicBaseUrl: resolvePublicBaseUrl(req),
   });
 
   if (!fs.existsSync(storedMaintenanceReportsDir)) {
@@ -867,22 +869,12 @@ const createStoredMaintenanceReportPdf = async ({ report, req }) => {
 };
 
 const ensureStoredMaintenanceReportPdf = async ({ report, req }) => {
-  const existingPublicUrl = toCleanString(report?.pdfFile?.publicUrl);
-  const existingFilename = toCleanString(report?.pdfFile?.filename);
-  const existingAbsolutePath = resolveStoredMaintenanceReportPdfAbsolutePath(existingPublicUrl);
-
-  if (existingPublicUrl && existingFilename && existingAbsolutePath && fs.existsSync(existingAbsolutePath)) {
-    return {
-      report,
-      pdfFile: {
-        publicUrl: existingPublicUrl,
-        filename: existingFilename,
-        size: Number(report?.pdfFile?.size || fs.statSync(existingAbsolutePath).size || 0),
-        generatedAt: report?.pdfFile?.generatedAt || null,
-      },
-      absolutePath: existingAbsolutePath,
-      createdNew: false,
-    };
+  // Delete old cached PDF so the latest template is always used
+  const existingAbsolutePath = resolveStoredMaintenanceReportPdfAbsolutePath(
+    toCleanString(report?.pdfFile?.publicUrl),
+  );
+  if (existingAbsolutePath && fs.existsSync(existingAbsolutePath)) {
+    try { fs.unlinkSync(existingAbsolutePath); } catch { /* ignore */ }
   }
 
   const stored = await createStoredMaintenanceReportPdf({ report, req });

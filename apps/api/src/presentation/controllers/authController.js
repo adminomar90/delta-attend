@@ -92,6 +92,7 @@ const roleLabelMap = {
   [Roles.ASSISTANT_PROJECT_MANAGER]: 'مساعد مدير مشروع',
   [Roles.TEAM_LEAD]: 'قائد فريق',
   [Roles.TECHNICAL_STAFF]: 'موظف تقني',
+  [Roles.SERVICE_STAFF]: 'موظف خدمات',
 };
 
 const serializeManagerSummary = (manager) => {
@@ -117,6 +118,7 @@ const snapshotUser = (user) => ({
   employeeCode: user?.employeeCode || '',
   department: user?.department || '',
   jobTitle: user?.jobTitle || '',
+  specialization: user?.specialization || '',
   manager: serializeManagerSummary(user?.manager),
   active: !!user?.active,
   deletedAt: user?.deletedAt || null,
@@ -262,6 +264,7 @@ const serializeUser = (user) => ({
   employmentType: user.employmentType,
   department: user.department,
   jobTitle: user.jobTitle,
+  specialization: user.specialization || '',
   manager: user.manager
     ? {
         id: String(user.manager._id || user.manager.id || user.manager),
@@ -369,6 +372,7 @@ const prepareUserPayload = async (body, { forUpdate = false, currentUserId = '' 
   setField('employmentType', toCleanString(body.employmentType) || undefined);
   setField('department', toCleanString(body.department) || 'General');
   setField('jobTitle', toCleanString(body.jobTitle));
+  setField('specialization', toCleanString(body.specialization));
   setField('team', toCleanString(body.team) || 'Delta Plus');
 
   if (body.customPermissions !== undefined) {
