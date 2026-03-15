@@ -130,7 +130,7 @@ const sumPointEvents = (request = {}) =>
   (request.pointsEvents || []).reduce((sum, entry) => sum + Number(entry.points || 0), 0);
 
 const buildAccessibleFilter = (req) => {
-  if (req.user?.role === Roles.GENERAL_MANAGER) {
+  if ([Roles.GENERAL_MANAGER, Roles.FINANCIAL_MANAGER].includes(req.user?.role)) {
     return {};
   }
 
@@ -162,6 +162,33 @@ const canReadRequest = (req, request) => {
   ].map((item) => String(item || ''));
 
   return candidates.includes(userId);
+};
+
+const buildInitialAssignmentMeta = (reviewers = {}) => {
+  if (reviewers.initialReviewerRole === Roles.GENERAL_MANAGER) {
+    return {
+      reviewerId: reviewers.generalManagerId,
+      stage: 'GENERAL_MANAGER',
+      titleAr: 'طلب صرف بانتظار اعتماد المدير العام',
+      messageArForCreate: (requestNo) => `تم إرسال طلب الصرف ${requestNo} إلى المدير العام للاعتماد.`,
+    };
+  }
+
+  if (reviewers.initialReviewerRole === Roles.FINANCIAL_MANAGER) {
+    return {
+      reviewerId: reviewers.financialManagerId,
+      stage: 'FINANCIAL_MANAGER',
+      titleAr: 'طلب صرف بانتظار اعتماد المدير المالي',
+      messageArForCreate: (requestNo) => `تم إرسال طلب الصرف ${requestNo} إلى المدير المالي للاعتماد.`,
+    };
+  }
+
+  return {
+    reviewerId: reviewers.projectManagerId,
+    stage: 'PROJECT_MANAGER',
+    titleAr: 'طلب صرف بانتظار اعتماد مدير المشاريع',
+    messageArForCreate: (requestNo) => `تم إرسال طلب الصرف ${requestNo} وبات بانتظار اعتماد مدير المشاريع.`,
+  };
 };
 
 const ensureReadableRequest = (req, request) => {
@@ -339,7 +366,7 @@ const resolveCurrentReviewers = async (employeeId, employeeRole) => {
     throw new AppError('No active financial manager found for this request', 409);
   }
 
-  if (chain.skipProjectManager && chain.skipFinancialManager && !chain.generalManagerId) {
+  if (chain.initialReviewerRole === Roles.GENERAL_MANAGER && !chain.generalManagerId) {
     throw new AppError('No active general manager found for this request', 409);
   }
 
@@ -557,6 +584,8 @@ export const createFinancialDisbursement = asyncHandler(async (req, res) => {
     const requiresGeneralManagerApproval = shouldRequireGeneralManagerApproval({
       amount: payload.amount,
       requestType: payload.requestType,
+      employeeRole: req.user.role,
+      forceGeneralManagerApproval: submitNow && reviewers.initialReviewerRole === Roles.GENERAL_MANAGER,
     });
 
     let request = await financialDisbursementRepository.create({
@@ -598,30 +627,18 @@ export const createFinancialDisbursement = asyncHandler(async (req, res) => {
         req,
       });
 
-      const skipBothCreate = reviewers.skipProjectManager && reviewers.skipFinancialManager;
-      const skipPmOnlyCreate = reviewers.skipProjectManager && !reviewers.skipFinancialManager;
-      const notifyCreateId = skipBothCreate
-        ? reviewers.generalManagerId
-        : (skipPmOnlyCreate ? reviewers.financialManagerId : reviewers.projectManagerId);
+      const assignment = buildInitialAssignmentMeta(reviewers);
 
       await notificationService.notifyFinancialRequestAssigned(
-        [notifyCreateId, req.user.id],
+        [assignment.reviewerId, req.user.id],
         {
           requestId: String(request._id),
           requestNo: request.requestNo,
           status: request.status,
-          stage: skipBothCreate ? 'GENERAL_MANAGER' : (skipPmOnlyCreate ? 'FINANCIAL_MANAGER' : 'PROJECT_MANAGER'),
+          stage: assignment.stage,
           amount: request.amount,
-          titleAr: skipBothCreate
-            ? 'طلب صرف بانتظار اعتماد المدير العام'
-            : (skipPmOnlyCreate
-              ? 'طلب صرف بانتظار اعتماد المدير المالي'
-              : 'طلب صرف بانتظار اعتماد مدير المشاريع'),
-          messageAr: skipBothCreate
-            ? `تم إرسال طلب الصرف ${request.requestNo} مباشرة إلى المدير العام للاعتماد.`
-            : (skipPmOnlyCreate
-              ? `تم إرسال طلب الصرف ${request.requestNo} إلى المدير المالي للاعتماد.`
-              : `تم إرسال طلب الصرف ${request.requestNo} وبات بانتظار اعتماد مدير المشاريع.`),
+          titleAr: assignment.titleAr,
+          messageAr: assignment.messageArForCreate(request.requestNo),
         },
       );
     }
@@ -694,6 +711,7 @@ export const updateFinancialDisbursement = asyncHandler(async (req, res) => {
   const requiresGeneralManagerApproval = shouldRequireGeneralManagerApproval({
     amount: payload.amount,
     requestType: payload.requestType,
+    employeeRole: req.user.role,
   });
 
   const updatedRequest = await financialDisbursementRepository.updateById(request._id, {
@@ -760,10 +778,12 @@ export const submitFinancialDisbursement = asyncHandler(async (req, res) => {
     employeeRole: req.user.role,
     projectManagerStepSkipped: !!reviewers.skipProjectManager,
     requiresGeneralManagerApproval: (reviewers.skipProjectManager && reviewers.skipFinancialManager)
+      || reviewers.initialReviewerRole === Roles.GENERAL_MANAGER
       ? true
       : shouldRequireGeneralManagerApproval({
         amount: request.amount,
         requestType: request.requestType,
+        employeeRole: req.user.role,
       }),
     submittedAt: request.submittedAt || new Date(),
     $push: {
@@ -788,30 +808,18 @@ export const submitFinancialDisbursement = asyncHandler(async (req, res) => {
     req,
   });
 
-  const skipBoth = reviewers.skipProjectManager && reviewers.skipFinancialManager;
-  const skipPmOnly = reviewers.skipProjectManager && !reviewers.skipFinancialManager;
-  const notifyReviewerId = skipBoth
-    ? reviewers.generalManagerId
-    : (skipPmOnly ? reviewers.financialManagerId : reviewers.projectManagerId);
+  const assignment = buildInitialAssignmentMeta(reviewers);
 
   await notificationService.notifyFinancialRequestAssigned(
-    [notifyReviewerId, req.user.id],
+    [assignment.reviewerId, req.user.id],
     {
       requestId: String(updatedRequest._id),
       requestNo: updatedRequest.requestNo,
       status: updatedRequest.status,
-      stage: skipBoth ? 'GENERAL_MANAGER' : (skipPmOnly ? 'FINANCIAL_MANAGER' : 'PROJECT_MANAGER'),
+      stage: assignment.stage,
       amount: updatedRequest.amount,
-      titleAr: skipBoth
-        ? 'طلب صرف بانتظار اعتماد المدير العام'
-        : (skipPmOnly
-          ? 'طلب صرف بانتظار اعتماد المدير المالي'
-          : 'تم إرسال طلب صرف مالي'),
-      messageAr: skipBoth
-        ? `تم إرسال طلب الصرف ${updatedRequest.requestNo} مباشرة إلى المدير العام للاعتماد.`
-        : (skipPmOnly
-          ? `تم إرسال طلب الصرف ${updatedRequest.requestNo} إلى المدير المالي للاعتماد.`
-          : `تم إرسال طلب الصرف ${updatedRequest.requestNo} إلى مدير المشاريع للمراجعة.`),
+      titleAr: assignment.titleAr,
+      messageAr: assignment.messageArForCreate(updatedRequest.requestNo),
     },
   );
 
@@ -998,9 +1006,10 @@ export const reviewFinancialDisbursementAsFinancialManager = asyncHandler(async 
   const approvedAmount = (action === FinancialWorkflowAction.APPROVE || action === FinancialWorkflowAction.REQUEST_GENERAL_MANAGER_APPROVAL)
     ? parseApprovedAmount(req.body.approvedAmount, request.amount)
     : null;
-  const mustEscalate = shouldRequireGeneralManagerApproval({
+  const mustEscalate = !request.generalManagerApprovedAt && shouldRequireGeneralManagerApproval({
     amount: request.amount,
     requestType: request.requestType,
+    employeeRole: request.employeeRole,
     forceGeneralManagerApproval: toBoolean(req.body.forceGeneralManagerApproval),
   });
 
@@ -1182,7 +1191,9 @@ export const reviewFinancialDisbursementAsGeneralManager = asyncHandler(async (r
 
   const nextStatus =
     action === FinancialWorkflowAction.APPROVE
-      ? FinancialDisbursementStatus.READY_FOR_DISBURSEMENT
+      ? (request.employeeRole === Roles.FINANCIAL_MANAGER
+        ? FinancialDisbursementStatus.READY_FOR_DISBURSEMENT
+        : FinancialDisbursementStatus.PENDING_FINANCIAL_MANAGER_APPROVAL)
       : action === FinancialWorkflowAction.REJECT
         ? FinancialDisbursementStatus.REJECTED_BY_GENERAL_MANAGER
         : FinancialDisbursementStatus.RETURNED_FOR_REVIEW;
@@ -1247,7 +1258,9 @@ export const reviewFinancialDisbursementAsGeneralManager = asyncHandler(async (r
           : 'إعادة طلب الصرف للمراجعة',
     messageAr:
       action === FinancialWorkflowAction.APPROVE
-        ? `تم اعتماد طلب الصرف ${updatedRequest.requestNo} من المدير العام وعاد إلى المدير المالي لإكمال التسليم.`
+        ? (updatedRequest.employeeRole === Roles.FINANCIAL_MANAGER
+          ? `تم اعتماد طلب الصرف ${updatedRequest.requestNo} من المدير العام وهو الآن جاهز للتسليم من المدير المالي.`
+          : `تم اعتماد طلب الصرف ${updatedRequest.requestNo} من المدير العام وتحويله إلى المدير المالي لاستكمال الاعتماد ثم التسليم.`)
         : action === FinancialWorkflowAction.REJECT
           ? `تم رفض طلب الصرف ${updatedRequest.requestNo} من المدير العام.`
           : `تمت إعادة طلب الصرف ${updatedRequest.requestNo} للمراجعة من المدير العام.`,

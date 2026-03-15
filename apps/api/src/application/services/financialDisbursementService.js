@@ -109,14 +109,21 @@ export const getFinancialStatusLabel = (status) => ({
 export const shouldRequireGeneralManagerApproval = ({
   amount,
   requestType,
+  employeeRole,
   forceGeneralManagerApproval = false,
   policy = financialDisbursementPolicy,
 } = {}) => {
+  const safeAmount = Math.max(0, Number(amount || 0));
+
+  // Technical staff requests below threshold should complete at PM -> FM -> disbursement.
+  if (employeeRole === Roles.TECHNICAL_STAFF && safeAmount < Number(policy.generalManagerApprovalAmount || 0)) {
+    return false;
+  }
+
   if (forceGeneralManagerApproval) {
     return true;
   }
 
-  const safeAmount = Math.max(0, Number(amount || 0));
   if (safeAmount >= Number(policy.generalManagerApprovalAmount || 0)) {
     return true;
   }
@@ -288,6 +295,7 @@ export const resolveApprovalChain = ({
   const generalManagerId = findRoleReviewerId({ employeeId, users: activeUsers, role: Roles.GENERAL_MANAGER });
 
   if (employeeRole === Roles.FINANCIAL_MANAGER) {
+    chain.financialManagerId = toHierarchyUserId(employeeId);
     chain.generalManagerId = generalManagerId;
     chain.skipProjectManager = true;
     chain.skipFinancialManager = true;
@@ -298,8 +306,8 @@ export const resolveApprovalChain = ({
     chain.generalManagerId = generalManagerId;
     chain.skipProjectManager = true;
     chain.skipFinancialManager = false;
-    chain.initialStatus = FinancialDisbursementStatus.PENDING_FINANCIAL_MANAGER_APPROVAL;
-    chain.initialReviewerRole = Roles.FINANCIAL_MANAGER;
+    chain.initialStatus = FinancialDisbursementStatus.PENDING_GENERAL_MANAGER_APPROVAL;
+    chain.initialReviewerRole = Roles.GENERAL_MANAGER;
   } else {
     chain.projectManagerId = findNearestProjectManagerId({ employeeId, users: activeUsers });
     chain.financialManagerId = findRoleReviewerId({ employeeId, users: activeUsers, role: Roles.FINANCIAL_MANAGER });

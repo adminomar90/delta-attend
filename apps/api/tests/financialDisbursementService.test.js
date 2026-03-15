@@ -4,6 +4,7 @@ import {
   buildSubmissionPointEvents,
   FinancialDisbursementStatus,
   FinancialDisbursementType,
+  resolveApprovalChain,
   resolveFinancialReviewers,
   shouldRequireGeneralManagerApproval,
   summarizeFinancialRequests,
@@ -30,6 +31,15 @@ test('shouldRequireGeneralManagerApproval detects threshold and special request 
     shouldRequireGeneralManagerApproval({
       amount: 1000,
       requestType: FinancialDisbursementType.BUSINESS_EXPENSE,
+    }),
+    false,
+  );
+
+  assert.equal(
+    shouldRequireGeneralManagerApproval({
+      amount: 500000,
+      requestType: FinancialDisbursementType.SALARY_ADVANCE,
+      employeeRole: 'TECHNICAL_STAFF',
     }),
     false,
   );
@@ -65,6 +75,55 @@ test('resolveFinancialReviewers climbs the hierarchy to nearest project manager 
       projectManagerId: 'pm-1',
       financialManagerId: 'fm-1',
       generalManagerId: 'gm-1',
+    },
+  );
+});
+
+test('resolveApprovalChain routes project manager requests to general manager first then financial manager', () => {
+  const users = [
+    { _id: 'gm-1', role: 'GENERAL_MANAGER', active: true, manager: null },
+    { _id: 'fm-1', role: 'FINANCIAL_MANAGER', active: true, manager: 'gm-1' },
+    { _id: 'pm-1', role: 'PROJECT_MANAGER', active: true, manager: 'gm-1' },
+  ];
+
+  assert.deepEqual(
+    resolveApprovalChain({
+      employeeId: 'pm-1',
+      employeeRole: 'PROJECT_MANAGER',
+      users,
+    }),
+    {
+      projectManagerId: null,
+      financialManagerId: 'fm-1',
+      generalManagerId: 'gm-1',
+      skipProjectManager: true,
+      skipFinancialManager: false,
+      initialStatus: FinancialDisbursementStatus.PENDING_GENERAL_MANAGER_APPROVAL,
+      initialReviewerRole: 'GENERAL_MANAGER',
+    },
+  );
+});
+
+test('resolveApprovalChain keeps financial manager as disburser for own requests', () => {
+  const users = [
+    { _id: 'gm-1', role: 'GENERAL_MANAGER', active: true, manager: null },
+    { _id: 'fm-1', role: 'FINANCIAL_MANAGER', active: true, manager: 'gm-1' },
+  ];
+
+  assert.deepEqual(
+    resolveApprovalChain({
+      employeeId: 'fm-1',
+      employeeRole: 'FINANCIAL_MANAGER',
+      users,
+    }),
+    {
+      projectManagerId: null,
+      financialManagerId: 'fm-1',
+      generalManagerId: 'gm-1',
+      skipProjectManager: true,
+      skipFinancialManager: true,
+      initialStatus: FinancialDisbursementStatus.PENDING_GENERAL_MANAGER_APPROVAL,
+      initialReviewerRole: 'GENERAL_MANAGER',
     },
   );
 });
