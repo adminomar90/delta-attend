@@ -115,6 +115,7 @@ export default function WorkReportsPage() {
   const [approving, setApproving] = useState(false);
   const [rejecting, setRejecting] = useState(false);
   const [directApprovingId, setDirectApprovingId] = useState('');
+  const [directRejectingId, setDirectRejectingId] = useState('');
   const attachmentsRef = useRef([]);
 
   /* permissions */
@@ -526,6 +527,31 @@ export default function WorkReportsPage() {
       setError(err.message || 'فشل الاعتماد المباشر لتقرير العمل');
     } finally {
       setDirectApprovingId('');
+    }
+  };
+
+  const directRejectReport = async (report) => {
+    if (!report || report.status !== 'SUBMITTED' || isOwnReport(report) || !canApprove) {
+      return;
+    }
+    setDirectRejectingId(String(report._id));
+    setError('');
+    setInfo('');
+    try {
+      await api.patch(`/work-reports/${report._id}/reject`, {
+        reason: 'تم الرفض من المدير المباشر عبر زر الإجراءات',
+        managerComment: '',
+      });
+      setInfo('تم رفض التقرير بنجاح.');
+      setSelectedReportId(String(report._id));
+      setInlineAction(null);
+      setRejectionReason('');
+      setRejectionComment('');
+      await load();
+    } catch (err) {
+      setError(err.message || 'فشل رفض تقرير العمل');
+    } finally {
+      setDirectRejectingId('');
     }
   };
 
@@ -1053,33 +1079,6 @@ export default function WorkReportsPage() {
                           </button>
                         ) : null}
                       </div>
-                      // ...existing code...
-                      const [directRejectingId, setDirectRejectingId] = useState('');
-                      // ...existing code...
-                      const directRejectReport = async (report) => {
-                        if (!report || report.status !== 'SUBMITTED' || isOwnReport(report) || !canApprove) {
-                          return;
-                        }
-                        setDirectRejectingId(String(report._id));
-                        setError('');
-                        setInfo('');
-                        try {
-                          await api.patch(`/work-reports/${report._id}/reject`, {
-                            reason: 'تم الرفض من المدير المباشر عبر زر الإجراءات',
-                            managerComment: '',
-                          });
-                          setInfo('تم رفض التقرير بنجاح.');
-                          setSelectedReportId(String(report._id));
-                          setInlineAction(null);
-                          setRejectionReason('');
-                          setRejectionComment('');
-                          await load();
-                        } catch (err) {
-                          setError(err.message || 'فشل رفض تقرير العمل');
-                        } finally {
-                          setDirectRejectingId('');
-                        }
-                      };
                     </td>
                   </tr>
                 );
