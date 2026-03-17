@@ -4,6 +4,8 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { api, assetUrl } from '../../../lib/api';
 import { authStorage } from '../../../lib/auth';
 import { Permission, hasAnyPermission, hasPermission } from '../../../lib/permissions';
+import { useSort } from '../../../lib/useSort';
+import SortableHeader from '../../../components/SortableHeader';
 import {
   calculateWorkReportDistribution,
   formatWorkReportPoints,
@@ -175,6 +177,8 @@ export default function WorkReportsPage() {
       return true;
     });
   }, [reports, filters]);
+
+  const { sortedData: sortedReports, sortKey: repSK, sortDirection: repSD, requestSort: repSort } = useSort(filteredReports);
 
   const selectedReport = useMemo(() => {
     return reports.find((r) => r._id === selectedReportId) || null;
@@ -980,19 +984,19 @@ export default function WorkReportsPage() {
             <thead>
               <tr>
                 <th>#</th>
-                <th>الموظف</th>
-                <th>المشروع</th>
-                <th>العنوان</th>
-                <th>تاريخ العمل</th>
-                <th>الإنجاز</th>
-                <th>الكادر</th>
-                <th>الحالة</th>
-                <th>النقاط</th>
-                <th>إجراءات</th>
+                <SortableHeader label="الموظف" sortKey="employee" accessor={(r) => r.employeeName || r.user?.fullName || ''} activeSortKey={repSK} sortDirection={repSD} onSort={repSort} />
+                <SortableHeader label="المشروع" sortKey="project" accessor={(r) => r.project?.name || r.projectName || ''} activeSortKey={repSK} sortDirection={repSD} onSort={repSort} />
+                <SortableHeader label="العنوان" sortKey="title" accessor={(r) => r.title || ''} activeSortKey={repSK} sortDirection={repSD} onSort={repSort} />
+                <SortableHeader label="تاريخ العمل" sortKey="workDate" accessor={(r) => r.workDate || r.createdAt || ''} activeSortKey={repSK} sortDirection={repSD} onSort={repSort} />
+                <SortableHeader label="الإنجاز" sortKey="progress" accessor={(r) => Number(r.progressPercent || 0)} activeSortKey={repSK} sortDirection={repSD} onSort={repSort} />
+                <SortableHeader label="الكادر" sortKey="participants" accessor={(r) => Number(r.participantCount || r.participants?.length || 0)} activeSortKey={repSK} sortDirection={repSD} onSort={repSort} />
+                <SortableHeader label="الحالة" sortKey="status" accessor={(r) => r.status} activeSortKey={repSK} sortDirection={repSD} onSort={repSort} />
+                <SortableHeader label="النقاط" sortKey="points" accessor={(r) => Number(r.pointsAwarded || 0)} activeSortKey={repSK} sortDirection={repSD} onSort={repSort} />
+                <SortableHeader label="إجراءات" disabled />
               </tr>
             </thead>
             <tbody>
-              {filteredReports.length ? filteredReports.map((report, idx) => {
+              {sortedReports.length ? sortedReports.map((report, idx) => {
                 const isSelected = selectedReportId === report._id;
                 const reportParticipantCount = Number(report.participantCount || report.participants?.length || 0);
                 const pct = Number(report.progressPercent || 0);

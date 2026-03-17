@@ -37,6 +37,22 @@ const canAccessFinancialDisbursementsModule = requireAnyPermission(
 financialDisbursementsRoutes.use(requireAuth, canAccessFinancialDisbursementsModule);
 
 financialDisbursementsRoutes.get('/summary', financialDisbursementSummary);
+// Endpoint جديد لجلب جميع الطلبات حسب transactionNo
+financialDisbursementsRoutes.get('/by-transaction/:transactionNo', async (req, res, next) => {
+  try {
+    const { transactionNo } = req.params;
+    // فلتر الصلاحيات
+    const filter = { ...buildAccessibleFilter(req), transactionNo };
+    const requests = await req.app
+      .get('financialDisbursementRepository')
+      ?.list(filter) || await (new (require('../controllers/financialDisbursementController.js').FinancialDisbursementRepository)()).list(filter);
+    // serialize مع req.user
+    const { serializeRequest } = require('../controllers/financialDisbursementController.js');
+    res.json({ requests: requests.map((r) => serializeRequest(r, req.user)) });
+  } catch (err) {
+    next(err);
+  }
+});
 financialDisbursementsRoutes.get('/', listFinancialDisbursements);
 financialDisbursementsRoutes.post('/', canCreateFinancialDisbursements, uploadDocumentMiddleware.array('attachments', 10), createFinancialDisbursement);
 financialDisbursementsRoutes.get('/:id/pdf', exportFinancialDisbursementPdf);

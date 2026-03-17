@@ -178,7 +178,8 @@ const materialRequestSchema = new mongoose.Schema(
     project: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'Project',
-      required: true,
+      required: false,
+      default: null,
       index: true,
     },
     projectName: {

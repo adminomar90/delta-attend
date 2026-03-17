@@ -1482,31 +1482,38 @@ export const deleteFinancialDisbursement = asyncHandler(async (req, res) => {
   res.json({ message: 'تم مسح المعاملة بنجاح' });
 });
 
-export const exportFinancialDisbursementPdf = asyncHandler(async (req, res) => {
-  const request = await financialDisbursementRepository.findById(req.params.id);
-  if (!request) {
-    throw new AppError('Financial request not found', 404);
+// تعديل: جعل الدالة تقبل فلتر خارجي (للاستخدام الداخلي)
+export const listFinancialDisbursements = async (filter = {}, user = null) => {
+  const requests = await financialDisbursementRepository.list(filter);
+  return requests.map((r) => serializeRequest(r, user));
+};
+
+// النسخة الأصلية للراوتر (للاستدعاء من endpoint)
+export const listFinancialDisbursementsHandler = asyncHandler(async (req, res) => {
+  const filter = buildAccessibleFilter(req);
+  if (req.query.employee) {
+    filter.employee = req.query.employee;
   }
-
-  ensureReadableRequest(req, request);
-
-  const serialized = serializeRequest(request, req.user);
-  const buffer = await buildFinancialDisbursementPdfBuffer({
-    request: serialized,
-    generatedAt: new Date(),
-  });
-
-  const filename = `financial-disbursement-${serialized.requestNo || req.params.id}.pdf`;
-  const disposition = req.query.download === '1' ? 'attachment' : 'inline';
-
-  res.setHeader('Content-Type', 'application/pdf');
-  res.setHeader('Content-Disposition', `${disposition}; filename="${filename}"`);
-  res.send(buffer);
+  if (req.query.requestNo) {
+    filter.requestNo = req.query.requestNo;
+  }
+  if (req.query.type) {
+    filter.requestType = req.query.type;
+  }
+  if (req.query.status) {
+    filter.status = req.query.status;
+  }
+  if (req.query.from) {
+    filter.transactionDate = filter.transactionDate || {};
+    filter.transactionDate.$gte = new Date(req.query.from);
+  }
+  if (req.query.to) {
+    filter.transactionDate = filter.transactionDate || {};
+    filter.transactionDate.$lte = new Date(req.query.to);
+  }
+  const requests = await financialDisbursementRepository.list(filter);
+  res.json({ requests: requests.map((r) => serializeRequest(r, req.user)) });
 });
-
-const buildFinancialDisbursementWhatsappMessage = ({ request, detailsUrl }) => {
-  const employeeName = request.employee?.fullName || '-';
-  const typeLabel = request.requestType || '-';
   const approvedAmt = request.approvedAmount != null ? request.approvedAmount : request.amount;
 
   return [

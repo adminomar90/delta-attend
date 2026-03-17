@@ -4,6 +4,8 @@ import { useEffect, useMemo, useState } from 'react';
 import { api } from '../../../lib/api';
 import { authStorage } from '../../../lib/auth';
 import { Permission, hasPermission } from '../../../lib/permissions';
+import { useSort } from '../../../lib/useSort';
+import SortableHeader from '../../../components/SortableHeader';
 
 const formatDateTime = (value) => {
   if (!value) {
@@ -173,6 +175,9 @@ export default function AttendancePage() {
   const [verifyCode, setVerifyCode] = useState('');
   const [verifyResult, setVerifyResult] = useState(null);
   const [verifyError, setVerifyError] = useState('');
+
+  const { sortedData: sortedHistory, sortKey: histSK, sortDirection: histSD, requestSort: histSort } = useSort(history);
+  const { sortedData: sortedAdminEmps, sortKey: admSK, sortDirection: admSD, requestSort: admSort } = useSort(adminOverview?.employees || []);
 
   const load = async () => {
     setError('');

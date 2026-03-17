@@ -4,6 +4,8 @@ import { useEffect, useMemo, useState } from 'react';
 import { api, assetUrl } from '../../../lib/api';
 import { authStorage } from '../../../lib/auth';
 import { Permission, hasPermission } from '../../../lib/permissions';
+import { useSort } from '../../../lib/useSort';
+import SortableHeader from '../../../components/SortableHeader';
 
 const emptyForm = {
   id: '',
@@ -76,10 +78,44 @@ export default function FinancialDisbursementsPage() {
 
   const [requests, setRequests] = useState([]);
   const [summary, setSummary] = useState(null);
+  // التقارير المالية
+  const [reportFilter, setReportFilter] = useState({ employee: '', requestNo: '', type: '', from: '', to: '' });
+    const [reportStatus, setReportStatus] = useState('');
+    const [pendingFilter, setPendingFilter] = useState({ ...reportFilter, status: '' });
+  const [filteredReports, setFilteredReports] = useState([]);
+
+  // تحليل البيانات المالية
+  const analyzeReports = () => {
+    let data = requests;
+    if (reportFilter.employee) {
+      data = data.filter(r => (r.employee?.fullName || '').toLowerCase().includes(reportFilter.employee.toLowerCase()));
+    }
+    if (reportFilter.requestNo) {
+      data = data.filter(r => String(r.requestNo || '').includes(reportFilter.requestNo));
+    }
+    if (reportFilter.type) {
+      data = data.filter(r => r.requestType === reportFilter.type);
+    }
+    if (reportFilter.status) {
+      data = data.filter(r => r.status === reportFilter.status);
+    }
+    if (reportFilter.from) {
+      data = data.filter(r => new Date(r.transactionDate || r.createdAt) >= new Date(reportFilter.from));
+    }
+    if (reportFilter.to) {
+      data = data.filter(r => new Date(r.transactionDate || r.createdAt) <= new Date(reportFilter.to));
+    }
+    setFilteredReports(data);
+  };
+
+  useEffect(() => {
+    analyzeReports();
+  }, [requests, reportFilter]);
   const [form, setForm] = useState(emptyForm);
   const [rowNotes, setRowNotes] = useState({});
   const [rowApprovedAmounts, setRowApprovedAmounts] = useState({});
   const [selectedRequest, setSelectedRequest] = useState(null);
+  const [relatedRequests, setRelatedRequests] = useState([]);
   const [saving, setSaving] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -89,6 +125,8 @@ export default function FinancialDisbursementsPage() {
     () => requests.filter((request) => String(request.employee?.id || '') === String(currentUser?.id || '')),
     [requests, currentUser?.id],
   );
+
+  const { sortedData: sortedRequests, sortKey: finSK, sortDirection: finSD, requestSort: finSort } = useSort(requests);
 
   const load = async () => {
     setLoading(true);
@@ -413,10 +451,40 @@ export default function FinancialDisbursementsPage() {
     window.open(url, '_blank', 'noopener,noreferrer');
   };
 
-  const showTransactionDetails = (request) => {
+  const showTransactionDetails = async (request) => {
     setSelectedRequest(request);
     setInfo('تم فتح تفاصيل المعاملة.');
     setError('');
+    // إذا كان للطلب رقم معاملة، جلب كل الطلبات المرتبطة من السيرفر
+    if (request.transactionNo) {
+      try {
+        const res = await api.get(`/financial-disbursements/by-transaction/${request.transactionNo}`);
+        if (Array.isArray(res.requests) && res.requests.length) {
+          // ترتيب الطلبات حسب رقم الطلب تصاعدياً
+          const sorted = [...res.requests].sort((a, b) => {
+            if (!a.requestNo || !b.requestNo) return 0;
+            return String(a.requestNo).localeCompare(String(b.requestNo), 'ar', { numeric: true });
+          });
+          setRelatedRequests(sorted);
+        } else {
+          setRelatedRequests([request]);
+        }
+      } catch (err) {
+        setRelatedRequests([request]);
+      }
+    } else {
+      // إذا لم يكن للطلب transactionNo (طلبات قديمة)، جلب كل الطلبات من نفس requests المحلي لها نفس transactionNo أو نفس id
+      const related = requests.filter(r => (r.transactionNo && r.transactionNo === request.transactionNo) || r.id === request.id);
+      if (related.length > 1) {
+        const sorted = [...related].sort((a, b) => {
+          if (!a.requestNo || !b.requestNo) return 0;
+          return String(a.requestNo).localeCompare(String(b.requestNo), 'ar', { numeric: true });
+        });
+        setRelatedRequests(sorted);
+      } else {
+        setRelatedRequests([request]);
+      }
+    }
   };
 
   const downloadTransactionPdf = async (request) => {
@@ -485,6 +553,107 @@ export default function FinancialDisbursementsPage() {
 
   return (
     <>
+      {/* خانة التقارير المالية */}
+      <section className="card section" style={{ marginBottom: 16 }}>
+        <h2>التقارير المالية وتحليل البيانات</h2>
+        <div className="grid-6" style={{ gap: 12 }}>
+          <label>
+            الموظف
+            <input className="input" value={pendingFilter.employee} onChange={e => setPendingFilter(f => ({ ...f, employee: e.target.value }))} placeholder="بحث باسم الموظف" />
+          </label>
+          <label>
+            رقم الطلب
+            <input className="input" value={pendingFilter.requestNo} onChange={e => setPendingFilter(f => ({ ...f, requestNo: e.target.value }))} placeholder="بحث برقم الطلب" />
+          </label>
+          <label>
+            نوع الصرف
+            <select className="select" value={pendingFilter.type} onChange={e => setPendingFilter(f => ({ ...f, type: e.target.value }))}>
+              <option value="">كل الأنواع</option>
+              {typeOptions.map(([value, label]) => (
+                <option key={value} value={value}>{label}</option>
+              ))}
+            </select>
+          </label>
+          <label>
+            الحالة
+            <select className="select" value={pendingFilter.status || ''} onChange={e => setPendingFilter(f => ({ ...f, status: e.target.value }))}>
+              <option value="">كل الحالات</option>
+              <option value="DRAFT">مسودة</option>
+              <option value="PENDING_PROJECT_MANAGER_APPROVAL">بانتظار مدير المشاريع</option>
+              <option value="PENDING_FINANCIAL_MANAGER_APPROVAL">بانتظار المدير المالي</option>
+              <option value="PENDING_GENERAL_MANAGER_APPROVAL">بانتظار المدير العام</option>
+              <option value="READY_FOR_DISBURSEMENT">جاهزة للتسليم</option>
+              <option value="DISBURSED">تم الصرف</option>
+              <option value="CLOSED">مغلقة</option>
+              <option value="RETURNED_FOR_REVIEW">معادة للمراجعة</option>
+              <option value="REJECTED_BY_PROJECT_MANAGER">مرفوضة من مدير المشاريع</option>
+              <option value="REJECTED_BY_FINANCIAL_MANAGER">مرفوضة من المدير المالي</option>
+              <option value="REJECTED_BY_GENERAL_MANAGER">مرفوضة من المدير العام</option>
+            </select>
+          </label>
+          <label>
+            من تاريخ
+            <input className="input" type="date" value={pendingFilter.from} onChange={e => setPendingFilter(f => ({ ...f, from: e.target.value }))} />
+          </label>
+          <label>
+            إلى تاريخ
+            <input className="input" type="date" value={pendingFilter.to} onChange={e => setPendingFilter(f => ({ ...f, to: e.target.value }))} />
+          </label>
+        </div>
+        <div style={{ marginTop: 12 }}>
+          <button className="btn btn-primary" type="button" onClick={() => setReportFilter(pendingFilter)}>بحث</button>
+        </div>
+        <div style={{ marginTop: 16 }}>
+          <strong>عدد الطلبات المطابقة:</strong> {filteredReports.length}
+          <br />
+          <strong>إجمالي المبالغ:</strong> {filteredReports.reduce((sum, r) => sum + Number(r.amount || 0), 0)} IQD
+          <br />
+          <strong>إجمالي المعاملة:</strong> {filteredReports.reduce((sum, r) => sum + Number(r.transactionTotalAmount || r.amount || 0), 0)} IQD
+          <br />
+          <strong>تحليل حسب النوع:</strong>
+          <ul>
+            {typeOptions.map(([value, label]) => {
+              const count = filteredReports.filter(r => r.requestType === value).length;
+              const total = filteredReports.filter(r => r.requestType === value).reduce((sum, r) => sum + Number(r.amount || 0), 0);
+              return count ? <li key={value}>{label}: {count} طلب، مجموع {total} IQD</li> : null;
+            })}
+          </ul>
+        </div>
+        {/* زر تحميل PDF وزر واتساب */}
+        {filteredReports.length > 0 && (
+          <div style={{ marginTop: 16, display: 'flex', gap: 12 }}>
+            <button className="btn btn-primary" type="button" onClick={async () => {
+              // تحميل أول تقرير PDF باستخدام api.downloadBlob
+              const first = filteredReports[0];
+              if (!first) return;
+              try {
+                const blob = await api.downloadBlob(`/financial-disbursements/${first.id}/pdf?download=1`);
+                const link = document.createElement('a');
+                link.href = URL.createObjectURL(blob);
+                link.download = `financial-disbursement-${first.requestNo || first.id}.pdf`;
+                document.body.appendChild(link);
+                link.click();
+                link.remove();
+                URL.revokeObjectURL(link.href);
+              } catch (err) {
+                alert('فشل تحميل ملف PDF: ' + (err.message || 'خطأ غير معروف'));
+              }
+            }}>تحميل تقرير PDF</button>
+            <button className="btn btn-soft" type="button" onClick={async () => {
+              // إرسال تقرير عبر واتساب
+              const first = filteredReports[0];
+              if (!first) return;
+              const res = await fetch(`/api/financial-disbursements/${first.id}/whatsapp-link`, { method: 'POST' });
+              const data = await res.json();
+              if (data.whatsapp?.url) {
+                window.open(data.whatsapp.url, '_blank', 'noopener,noreferrer');
+              } else {
+                alert('تعذر توليد رابط واتساب');
+              }
+            }}>إرسال عبر واتساب</button>
+          </div>
+        )}
+      </section>
       {error ? <section className="card section" style={{ color: 'var(--danger)' }}>{error}</section> : null}
       {info ? <section className="card section" style={{ color: 'var(--accent)' }}>{info}</section> : null}
 
@@ -605,54 +774,58 @@ export default function FinancialDisbursementsPage() {
             <h2 style={{ margin: 0 }}>تفاصيل المعاملة قبل الصرف</h2>
             <button className="btn btn-soft" type="button" onClick={() => setSelectedRequest(null)}>إغلاق</button>
           </div>
-
-          <div className="grid-3" style={{ marginTop: 12 }}>
-            <div><strong>رقم الطلب:</strong> {selectedRequest.requestNo}</div>
-            <div><strong>رقم المعاملة:</strong> {selectedRequest.transactionNo || '-'}</div>
-            <div><strong>تاريخ المعاملة:</strong> {formatDateTime(selectedRequest.transactionDate || selectedRequest.createdAt)}</div>
-            <div><strong>نوع الصرف:</strong> {typeLabelMap[selectedRequest.requestType] || selectedRequest.requestType}</div>
-            <div><strong>المبلغ المطلوب:</strong> {selectedRequest.amount} {selectedRequest.currency}</div>
-            <div>
-              <strong>المبلغ المعتمد:</strong>{' '}
-              {selectedRequest.approvedAmount != null
-                ? `${selectedRequest.approvedAmount} ${selectedRequest.currency}`
-                : 'لم يحدد بعد'}
+          {relatedRequests.length > 1 ? (
+            <div style={{ margin: '12px 0' }}>
+              <strong>عدد الطلبات في نفس المعاملة:</strong> {relatedRequests.length}
             </div>
-            <div><strong>إجمالي المعاملة:</strong> {selectedRequest.transactionTotalAmount || selectedRequest.amount} {selectedRequest.currency}</div>
-          </div>
-
-          <div style={{ marginTop: 10 }}>
-            <strong>الوصف:</strong>
-            <p style={{ marginTop: 6 }}>{selectedRequest.description || '-'}</p>
-          </div>
-
-          <div style={{ marginTop: 10 }}>
-            <strong>سجل الإجراءات:</strong>
-            {(selectedRequest.workflowTrail || []).length ? (
-              <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 6 }}>
-                {selectedRequest.workflowTrail.map((entry) => (
-                  <div key={entry.id || `${entry.action}-${entry.occurredAt}`} style={{ border: '1px solid var(--stroke)', borderRadius: 8, padding: 8 }}>
-                    <div><strong>{entry.action}</strong> - {entry.actor?.fullName || '-'} - {formatDateTime(entry.occurredAt)}</div>
-                    <div style={{ color: 'var(--text-soft)', fontSize: 12 }}>
-                      {entry.beforeStatusLabel || entry.beforeStatus || '-'} {' -> '} {entry.afterStatusLabel || entry.afterStatus || '-'}
-                    </div>
-                    {entry.notes ? <div style={{ marginTop: 4 }}>{entry.notes}</div> : null}
-                  </div>
-                ))}
+          ) : null}
+          {relatedRequests.map((req, idx) => (
+            <div key={req.id} style={{ border: '1px solid var(--stroke)', borderRadius: 8, padding: 12, marginBottom: 12 }}>
+              <div className="grid-3">
+                <div><strong>رقم الطلب:</strong> {req.requestNo}</div>
+                <div><strong>رقم المعاملة:</strong> {req.transactionNo || '-'}</div>
+                <div><strong>تاريخ المعاملة:</strong> {formatDateTime(req.transactionDate || req.createdAt)}</div>
+                <div><strong>نوع الصرف:</strong> {typeLabelMap[req.requestType] || req.requestType}</div>
+                <div><strong>المبلغ المطلوب:</strong> {req.amount} {req.currency}</div>
+                <div>
+                  <strong>المبلغ المعتمد:</strong>{' '}
+                  {req.approvedAmount != null ? `${req.approvedAmount} ${req.currency}` : 'لم يحدد بعد'}
+                </div>
+                <div><strong>إجمالي المعاملة:</strong> {req.transactionTotalAmount || req.amount} {req.currency}</div>
               </div>
-            ) : (
-              <p style={{ color: 'var(--text-soft)', marginTop: 6 }}>لا يوجد سجل إجراءات بعد.</p>
-            )}
-          </div>
-
-          <div className="form-actions" style={{ marginTop: 12 }}>
-            <button className="btn btn-primary" type="button" onClick={() => downloadTransactionPdf(selectedRequest)}>
-              تحميل مستند الصرف PDF
-            </button>
-            <button className="btn btn-soft" type="button" onClick={() => sendWhatsapp(selectedRequest)}>
-              مشاركة عبر واتساب
-            </button>
-          </div>
+              <div style={{ marginTop: 10 }}>
+                <strong>الوصف:</strong>
+                <p style={{ marginTop: 6 }}>{req.description || '-'}</p>
+              </div>
+              <div style={{ marginTop: 10 }}>
+                <strong>سجل الإجراءات:</strong>
+                {(req.workflowTrail || []).length ? (
+                  <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    {req.workflowTrail.map((entry) => (
+                      <div key={entry.id || `${entry.action}-${entry.occurredAt}`} style={{ border: '1px solid var(--stroke)', borderRadius: 8, padding: 8 }}>
+                        <div><strong>{entry.action}</strong> - {entry.actor?.fullName || '-'} - {formatDateTime(entry.occurredAt)}</div>
+                        <div style={{ color: 'var(--text-soft)', fontSize: 12 }}>
+                          {entry.beforeStatusLabel || entry.beforeStatus || '-'} {' -> '} {entry.afterStatusLabel || entry.afterStatus || '-'}
+                        </div>
+                        {entry.notes ? <div style={{ marginTop: 4 }}>{entry.notes}</div> : null}
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p style={{ color: 'var(--text-soft)', marginTop: 6 }}>لا يوجد سجل إجراءات بعد.</p>
+                )}
+              </div>
+              <div className="form-actions" style={{ marginTop: 12 }}>
+                <button className="btn btn-primary" type="button" onClick={() => downloadTransactionPdf(req)}>
+                  تحميل مستند الصرف PDF
+                </button>
+                <button className="btn btn-soft" type="button" onClick={() => sendWhatsapp(req)}>
+                  مشاركة عبر واتساب
+                </button>
+              </div>
+              {idx !== relatedRequests.length - 1 && <hr style={{ margin: '18px 0' }} />}
+            </div>
+          ))}
         </section>
       ) : null}
 
@@ -661,19 +834,19 @@ export default function FinancialDisbursementsPage() {
         <table className="table">
           <thead>
             <tr>
-              <th>الطلب</th>
-              <th>تاريخ المعاملة</th>
-              <th>الموظف</th>
-              <th>القيمة</th>
-              <th>إجمالي المعاملة</th>
-              <th>الحالة</th>
-              <th>المرفقات</th>
-              <th>النقاط</th>
-              <th>الإجراءات</th>
+              <SortableHeader label="الطلب" sortKey="requestNo" accessor={(r) => r.requestNo} activeSortKey={finSK} sortDirection={finSD} onSort={finSort} />
+              <SortableHeader label="تاريخ المعاملة" sortKey="transactionDate" accessor={(r) => r.transactionDate || r.createdAt || ''} activeSortKey={finSK} sortDirection={finSD} onSort={finSort} />
+              <SortableHeader label="الموظف" sortKey="employee" accessor={(r) => r.employee?.fullName || ''} activeSortKey={finSK} sortDirection={finSD} onSort={finSort} />
+              <SortableHeader label="القيمة" sortKey="amount" accessor={(r) => Number(r.amount || 0)} activeSortKey={finSK} sortDirection={finSD} onSort={finSort} />
+              <SortableHeader label="إجمالي المعاملة" sortKey="totalAmount" accessor={(r) => Number(r.transactionTotalAmount || r.amount || 0)} activeSortKey={finSK} sortDirection={finSD} onSort={finSort} />
+              <SortableHeader label="الحالة" sortKey="status" accessor={(r) => r.status} activeSortKey={finSK} sortDirection={finSD} onSort={finSort} />
+              <SortableHeader label="المرفقات" sortKey="attachments" accessor={(r) => (r.attachments || []).length} activeSortKey={finSK} sortDirection={finSD} onSort={finSort} />
+              <SortableHeader label="النقاط" sortKey="points" accessor={(r) => Number(r.pointsImpact || 0)} activeSortKey={finSK} sortDirection={finSD} onSort={finSort} />
+              <SortableHeader label="الإجراءات" disabled />
             </tr>
           </thead>
           <tbody>
-            {requests.length ? requests.map((request) => (
+            {sortedRequests.length ? sortedRequests.map((request) => (
               <tr key={request.id}>
                 <td>
                   <strong>{request.requestNo}</strong>

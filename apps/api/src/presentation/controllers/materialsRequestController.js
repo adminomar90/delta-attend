@@ -60,18 +60,25 @@ export const listMaterialEmployees = asyncHandler(async (_req, res) => {
 
 export const createMaterialRequest = asyncHandler(async (req, res) => {
   const projectId = toCleanString(req.body.projectId || req.body.project);
+  const manualProjectName = toCleanString(req.body.manualProjectName);
   const clientName = toCleanString(req.body.clientName || req.body.client);
   const requestedForId = toCleanString(req.body.requestedForId || req.body.requestedFor);
   const assignedPreparerId = toCleanString(req.body.assignedPreparerId || req.body.assignedPreparer);
   const warehouse = await ensureWarehouseOptional(req.body.warehouseId || req.body.warehouse);
 
-  if (!projectId) {
-    throw new AppError('projectId is required', 400);
-  }
+  let project = null;
+  let resolvedProjectName = '';
 
-  const project = await projectRepository.findById(projectId);
-  if (!project) {
-    throw new AppError('Project not found', 404);
+  if (projectId) {
+    project = await projectRepository.findById(projectId);
+    if (!project) {
+      throw new AppError('Project not found', 404);
+    }
+    resolvedProjectName = project.name || '';
+  } else if (manualProjectName) {
+    resolvedProjectName = manualProjectName;
+  } else {
+    throw new AppError('projectId or manualProjectName is required', 400);
   }
 
   let assignedPreparer = null;
@@ -116,8 +123,8 @@ export const createMaterialRequest = asyncHandler(async (req, res) => {
 
   const created = await materialsRepository.createRequest({
     requestNo,
-    project: project._id,
-    projectName: project.name || '',
+    project: project ? project._id : null,
+    projectName: resolvedProjectName,
     clientName,
     requestedBy: req.user.id,
     requestedFor: requestedForId || null,

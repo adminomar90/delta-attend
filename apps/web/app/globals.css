@@ -1,4 +1,4 @@
-﻿:root {
+:root {
   --bg: #050a14;
   --surface: #0d182e;
   --surface-soft: #13233f;
@@ -574,6 +574,22 @@ textarea:disabled {
 .table th {
   font-size: 13px;
   color: #b7c5de;
+}
+
+.th-sortable {
+  cursor: pointer;
+  user-select: none;
+  transition: color 0.15s ease, background 0.15s ease;
+  white-space: nowrap;
+}
+
+.th-sortable:hover {
+  color: var(--accent);
+  background: rgba(196, 215, 67, 0.06);
+}
+
+.th-sort-active {
+  color: var(--accent);
 }
 
 .progress {

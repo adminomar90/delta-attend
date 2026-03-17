@@ -4,6 +4,8 @@ import { useEffect, useMemo, useState, useCallback } from 'react';
 import { api } from '../../../lib/api';
 import { authStorage } from '../../../lib/auth';
 import { Permission, hasAnyPermission, hasPermission } from '../../../lib/permissions';
+import { useSort } from '../../../lib/useSort';
+import SortableHeader from '../../../components/SortableHeader';
 
 /* ─── constants ─── */
 const statusLabel = {
@@ -84,6 +86,11 @@ export default function MaterialsPage() {
   const [summary, setSummary] = useState(null);
   const [activeTab, setActiveTab] = useState('requests');
 
+  /* sorting */
+  const { sortedData: sortedRequests, sortKey: reqSK, sortDirection: reqSD, requestSort: reqSort } = useSort(requests);
+  const { sortedData: sortedCustodies, sortKey: cusSK, sortDirection: cusSD, requestSort: cusSort } = useSort(custodies);
+  const { sortedData: sortedReconciliations, sortKey: recSK, sortDirection: recSD, requestSort: recSort } = useSort(reconciliations);
+
   /* modals */
   const [reviewModal, setReviewModal] = useState(null);
   const [prepareModal, setPrepareModal] = useState(null);
@@ -93,8 +100,9 @@ export default function MaterialsPage() {
   const [detailModal, setDetailModal] = useState(null);
 
   /* request form */
+  const [manualProjectMode, setManualProjectMode] = useState(false);
   const [requestForm, setRequestForm] = useState({
-    projectId: '', priority: 'NORMAL', clientName: '', requestedForId: '',
+    projectId: '', manualProjectName: '', priority: 'NORMAL', clientName: '', requestedForId: '',
     assignedPreparerId: '', warehouseId: '', generalNotes: '', items: [makeItem()],
   });
 
@@ -173,7 +181,7 @@ export default function MaterialsPage() {
       '[ طلب مواد - Delta Plus ]',
       '----------------------------------',
       `رقم الطلب: ${req.requestNo}`,
-      `المشروع: ${req.project?.name || '-'}`,
+      `المشروع: ${req.project?.name || req.projectName || '-'}`,
       `الطالب: ${req.requestedFor?.fullName || req.requestedBy?.fullName || '-'}`,
       `المجهز: ${req.assignedPreparer?.fullName || 'غير معين'}`,
       `عدد البنود: ${(req.items || []).length}`,
@@ -189,7 +197,7 @@ export default function MaterialsPage() {
       '----------------------------------',
       `رقم الذمة: ${cu.custodyNo}`,
       `المستلم: ${cu.holder?.fullName || '-'}`,
-      `المشروع: ${cu.project?.name || '-'}`,
+      `المشروع: ${cu.project?.name || cu.projectName || '-'}`,
       `عدد البنود: ${(cu.items || []).length}`,
       '----------------------------------',
       'يرجى متابعة الذمة.',
@@ -246,7 +254,7 @@ export default function MaterialsPage() {
         .map((it) => ({ materialName: it.materialName.trim(), unit: it.unit || 'PIECE', requestedQty: toNum(it.requestedQty), notes: it.notes }));
       if (!items.length) throw new Error('يرجى إضافة مادة واحدة على الأقل مع كمية أكبر من صفر.');
       await api.post('/materials/requests', { ...requestForm, items });
-      setRequestForm({ projectId: '', priority: 'NORMAL', clientName: '', requestedForId: '', assignedPreparerId: '', warehouseId: '', generalNotes: '', items: [makeItem()] });
+      setRequestForm({ projectId: '', manualProjectName: '', priority: 'NORMAL', clientName: '', requestedForId: '', assignedPreparerId: '', warehouseId: '', generalNotes: '', items: [makeItem()] });
       setInfo('تم إنشاء الطلب بنجاح'); await load();
     } catch (err) { setError(err.message || 'فشل إنشاء الطلب'); }
     finally { setBusy(''); }
@@ -386,7 +394,11 @@ export default function MaterialsPage() {
             <h2 style={{ marginTop: 0 }}>طلب مواد جديد</h2>
             <form onSubmit={createRequest}>
               <div className="grid-3" style={{ marginBottom: 12 }}>
-                <label>المشروع *<select className="select" value={requestForm.projectId} onChange={(e) => setRequestForm((p) => ({ ...p, projectId: e.target.value }))} required><option value="">اختر المشروع</option>{projects.map((p) => <option key={p._id} value={p._id}>{p.name}</option>)}</select></label>
+                <label>تحديد المشروع *<select className="select" value={manualProjectMode ? 'manual' : 'list'} onChange={(e) => { const isManual = e.target.value === 'manual'; setManualProjectMode(isManual); setRequestForm((p) => ({ ...p, projectId: '', manualProjectName: '' })); }}><option value="list">مشروع حالي</option><option value="manual">كتابة يدوية</option></select></label>
+                {manualProjectMode
+                  ? <label>اسم المشروع *<input className="input" value={requestForm.manualProjectName} onChange={(e) => setRequestForm((p) => ({ ...p, manualProjectName: e.target.value }))} placeholder="اكتب اسم المشروع" required /></label>
+                  : <label>المشروع *<select className="select" value={requestForm.projectId} onChange={(e) => setRequestForm((p) => ({ ...p, projectId: e.target.value }))} required><option value="">اختر المشروع</option>{projects.map((p) => <option key={p._id} value={p._id}>{p.name}</option>)}</select></label>
+                }
                 <label>المخزن<select className="select" value={requestForm.warehouseId} onChange={(e) => setRequestForm((p) => ({ ...p, warehouseId: e.target.value }))}><option value="">افتراضي</option>{warehouses.map((w) => <option key={w._id} value={w._id}>{w.name}</option>)}</select></label>
                 <label>مجهز الطلب<select className="select" value={requestForm.assignedPreparerId} onChange={(e) => setRequestForm((p) => ({ ...p, assignedPreparerId: e.target.value }))}><option value="">بدون تعيين</option>{allUsers.map((u) => <option key={u.id || u._id} value={u.id || u._id}>{u.fullName}{u.employeeCode ? ` (${u.employeeCode})` : ''}</option>)}</select></label>
                 <label>المستلم (طالب المواد)<select className="select" value={requestForm.requestedForId} onChange={(e) => setRequestForm((p) => ({ ...p, requestedForId: e.target.value }))}><option value="">نفس المستخدم</option>{users.map((u) => <option key={u.id || u._id} value={u.id || u._id}>{u.fullName}{u.employeeCode ? ` (${u.employeeCode})` : ''}</option>)}</select></label>
@@ -423,12 +435,12 @@ export default function MaterialsPage() {
             <h2 style={{ marginTop: 0 }}>طلبات المواد ({requests.length})</h2>
             <div style={{ overflowX: 'auto' }}>
               <table className="table">
-                <thead><tr><th>رقم الطلب</th><th>المشروع</th><th>الطالب</th><th>مجهز الطلب</th><th>الحالة</th><th>بنود</th><th>إجراءات</th></tr></thead>
+                <thead><tr><SortableHeader label="رقم الطلب" sortKey="requestNo" accessor={(r) => r.requestNo} activeSortKey={reqSK} sortDirection={reqSD} onSort={reqSort} /><SortableHeader label="المشروع" sortKey="project" accessor={(r) => r.project?.name || r.projectName || ''} activeSortKey={reqSK} sortDirection={reqSD} onSort={reqSort} /><SortableHeader label="الطالب" sortKey="requester" accessor={(r) => r.requestedFor?.fullName || r.requestedBy?.fullName || ''} activeSortKey={reqSK} sortDirection={reqSD} onSort={reqSort} /><SortableHeader label="مجهز الطلب" sortKey="preparer" accessor={(r) => r.assignedPreparer?.fullName || ''} activeSortKey={reqSK} sortDirection={reqSD} onSort={reqSort} /><SortableHeader label="الحالة" sortKey="status" accessor={(r) => r.status} activeSortKey={reqSK} sortDirection={reqSD} onSort={reqSort} /><SortableHeader label="بنود" sortKey="items" accessor={(r) => (r.items || []).length} activeSortKey={reqSK} sortDirection={reqSD} onSort={reqSort} /><SortableHeader label="إجراءات" disabled /></tr></thead>
                 <tbody>
-                  {requests.length ? requests.map((req) => (
+                  {sortedRequests.length ? sortedRequests.map((req) => (
                     <tr key={req._id}>
                       <td><button type="button" className="btn btn-soft" style={{ padding: '2px 8px', fontSize: 12 }} onClick={() => setDetailModal(req)}>{req.requestNo}</button></td>
-                      <td>{req.project?.name || '-'}</td>
+                      <td>{req.project?.name || req.projectName || '-'}</td>
                       <td>{req.requestedFor?.fullName || req.requestedBy?.fullName || '-'}</td>
                       <td>{req.assignedPreparer?.fullName || <span style={{ color: 'var(--text-soft)' }}>غير معين</span>}</td>
                       <td><Badge status={req.status} /></td>
@@ -457,13 +469,13 @@ export default function MaterialsPage() {
             <h2 style={{ marginTop: 0 }}>الذمم ({custodies.length})</h2>
             <div style={{ overflowX: 'auto' }}>
               <table className="table">
-                <thead><tr><th>رقم الذمة</th><th>المستلم</th><th>المشروع</th><th>الحالة</th><th>البنود</th><th>إجراءات</th></tr></thead>
+                <thead><tr><SortableHeader label="رقم الذمة" sortKey="custodyNo" accessor={(c) => c.custodyNo} activeSortKey={cusSK} sortDirection={cusSD} onSort={cusSort} /><SortableHeader label="المستلم" sortKey="holder" accessor={(c) => c.holder?.fullName || ''} activeSortKey={cusSK} sortDirection={cusSD} onSort={cusSort} /><SortableHeader label="المشروع" sortKey="project" accessor={(c) => c.project?.name || c.projectName || ''} activeSortKey={cusSK} sortDirection={cusSD} onSort={cusSort} /><SortableHeader label="الحالة" sortKey="status" accessor={(c) => c.status} activeSortKey={cusSK} sortDirection={cusSD} onSort={cusSort} /><SortableHeader label="البنود" sortKey="items" accessor={(c) => (c.items || []).length} activeSortKey={cusSK} sortDirection={cusSD} onSort={cusSort} /><SortableHeader label="إجراءات" disabled /></tr></thead>
                 <tbody>
-                  {custodies.length ? custodies.map((cu) => (
+                  {sortedCustodies.length ? sortedCustodies.map((cu) => (
                     <tr key={cu._id}>
                       <td>{cu.custodyNo}</td>
                       <td>{cu.holder?.fullName || '-'}</td>
-                      <td>{cu.project?.name || '-'}</td>
+                      <td>{cu.project?.name || cu.projectName || '-'}</td>
                       <td><Badge status={cu.status} /></td>
                       <td>{(cu.items || []).length}</td>
                       <td>
@@ -488,9 +500,9 @@ export default function MaterialsPage() {
             <h2 style={{ marginTop: 0 }}>التصفيات ({reconciliations.length})</h2>
             <div style={{ overflowX: 'auto' }}>
               <table className="table">
-                <thead><tr><th>رقم التصفية</th><th>الذمة</th><th>الحالة</th><th>إجراءات</th></tr></thead>
+                <thead><tr><SortableHeader label="رقم التصفية" sortKey="reconcileNo" accessor={(r) => r.reconcileNo} activeSortKey={recSK} sortDirection={recSD} onSort={recSort} /><SortableHeader label="الذمة" sortKey="custody" accessor={(r) => r.custody?.custodyNo || ''} activeSortKey={recSK} sortDirection={recSD} onSort={recSort} /><SortableHeader label="الحالة" sortKey="status" accessor={(r) => r.status} activeSortKey={recSK} sortDirection={recSD} onSort={recSort} /><SortableHeader label="إجراءات" disabled /></tr></thead>
                 <tbody>
-                  {reconciliations.length ? reconciliations.map((rc) => (
+                  {sortedReconciliations.length ? sortedReconciliations.map((rc) => (
                     <tr key={rc._id}>
                       <td>{rc.reconcileNo}</td>
                       <td>{rc.custody?.custodyNo || '-'}</td>
@@ -543,7 +555,7 @@ export default function MaterialsPage() {
       <Modal open={!!reviewModal} title="مراجعة واعتماد الطلب" onClose={() => setReviewModal(null)}>
         {reviewModal && (
           <>
-            <p>طلب رقم: <strong>{reviewModal.request.requestNo}</strong> — {reviewModal.request.project?.name}</p>
+            <p>طلب رقم: <strong>{reviewModal.request.requestNo}</strong> — {reviewModal.request.project?.name || reviewModal.request.projectName || '-'}</p>
             <table className="table" style={{ marginBottom: 12 }}>
               <thead><tr><th>المادة</th><th>الكمية المطلوبة</th><th>الوحدة</th></tr></thead>
               <tbody>
@@ -683,7 +695,7 @@ export default function MaterialsPage() {
         {detailModal && (
           <>
             <div className="grid-3" style={{ gap: 8, marginBottom: 12 }}>
-              <div><span style={{ color: 'var(--text-soft)' }}>المشروع:</span> {detailModal.project?.name || '-'}</div>
+              <div><span style={{ color: 'var(--text-soft)' }}>المشروع:</span> {detailModal.project?.name || detailModal.projectName || '-'}</div>
               <div><span style={{ color: 'var(--text-soft)' }}>الطالب:</span> {detailModal.requestedBy?.fullName || '-'}</div>
               <div><span style={{ color: 'var(--text-soft)' }}>المستلم:</span> {detailModal.requestedFor?.fullName || detailModal.requestedBy?.fullName || '-'}</div>
               <div><span style={{ color: 'var(--text-soft)' }}>المجهز:</span> {detailModal.assignedPreparer?.fullName || 'غير معين'}</div>
