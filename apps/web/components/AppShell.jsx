@@ -7,6 +7,7 @@ import HeaderBar from './HeaderBar';
 import PointsToast from './PointsToast';
 import InAppNotifToast from './InAppNotifToast';
 import { authStorage } from '../lib/auth';
+import { api } from '../lib/api';
 import { Permission, hasAnyPermission } from '../lib/permissions';
 
 const titleByPath = {
@@ -123,22 +124,42 @@ export default function AppShell({ children }) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
   useEffect(() => {
-    const token = authStorage.getToken();
-    const currentUser = authStorage.getUser();
+    let cancelled = false;
 
-    if (!token) {
-      router.push('/login');
-      return;
-    }
+    const verifySession = async () => {
+      const token = authStorage.getToken();
+      if (!token) {
+        router.push('/login');
+        return;
+      }
 
-    const requiredPermissions = resolveRouteValue(pathname, routePermissionRules);
-    if (requiredPermissions && !hasAnyPermission(currentUser, requiredPermissions)) {
-      router.push('/dashboard');
-      return;
-    }
+      try {
+        const data = await api.get('/auth/me');
+        if (cancelled) return;
 
-    setUser(currentUser);
-    setIsChecking(false);
+        const currentUser = data.user;
+        authStorage.setUser(currentUser);
+
+        const requiredPermissions = resolveRouteValue(pathname, routePermissionRules);
+        if (requiredPermissions && !hasAnyPermission(currentUser, requiredPermissions)) {
+          router.push('/dashboard');
+          return;
+        }
+
+        setUser(currentUser);
+        setIsChecking(false);
+      } catch {
+        if (cancelled) return;
+        authStorage.logout();
+        router.push('/login');
+      }
+    };
+
+    verifySession();
+
+    return () => {
+      cancelled = true;
+    };
   }, [pathname, router]);
 
   // Refresh user state when user data changes (e.g. avatar upload)

@@ -3,6 +3,7 @@ import { buildWhatsAppSendUrl } from '../../shared/attendanceUtils.js';
 import { AppError, asyncHandler } from '../../shared/errors.js';
 import { buildMaterialsExcelBuffer } from '../../infrastructure/reports/materialsExcelReportBuilder.js';
 import { buildMaterialsPdfBuffer } from '../../infrastructure/reports/materialsPdfReportBuilder.js';
+import { buildMaterialRequestPdfBuffer } from '../../infrastructure/reports/materialRequestPdfBuilder.js';
 import {
   materialsRepository,
   toUpper,
@@ -23,7 +24,21 @@ const mapRequestRow = (request) => ({
   status: request.status,
   requestDate: request.requestDate ? new Date(request.requestDate).toLocaleDateString('ar-IQ') : '-',
   itemsCount: (request.items || []).length,
+  materials: (request.items || []).map((i) => i.materialName || i.material?.name || '-').join('، '),
 });
+
+const mapRequestItemRow = (request) =>
+  (request.items || []).map((item) => ({
+    requestNo: request.requestNo,
+    projectName: request.project?.name || request.projectName || '-',
+    materialName: item.materialName || item.material?.name || '-',
+    unit: item.unit || '-',
+    requestedQty: roundQty(item.requestedQty),
+    approvedQty: roundQty(item.approvedQty),
+    preparedQty: roundQty(item.preparedQty),
+    deliveredQty: roundQty(item.deliveredQty),
+    notes: item.notes || '-',
+  }));
 
 const mapDispatchRow = (dispatch) => ({
   dispatchNo: dispatch.dispatchNo,
@@ -205,6 +220,7 @@ const loadMaterialsReportData = async (req) => {
   const movement = await materialsRepository.listStockTransactions(movementFilter, { limit: 5000 });
 
   const requestsRows = requests.map(mapRequestRow);
+  const requestItemRows = requests.flatMap(mapRequestItemRow);
   const dispatchRows = dispatches.map(mapDispatchRow);
   const openCustodyRows = custodies
     .filter((item) => !['CLOSED'].includes(item.status))
@@ -219,6 +235,7 @@ const loadMaterialsReportData = async (req) => {
       to: to.format('YYYY-MM-DD'),
     },
     requestsRows,
+    requestItemRows,
     dispatchRows,
     openCustodyRows,
     reconciliationRows,
@@ -255,6 +272,7 @@ export const exportMaterialsExcel = asyncHandler(async (req, res) => {
   const reportData = await loadMaterialsReportData(req);
   const buffer = await buildMaterialsExcelBuffer({
     requests: reportData.requestsRows,
+    requestItems: reportData.requestItemRows,
     dispatches: reportData.dispatchRows,
     openCustodies: reportData.openCustodyRows,
     reconciliations: reportData.reconciliationRows,
@@ -342,4 +360,18 @@ export const materialReportByProject = asyncHandler(async (req, res) => {
     movement: reportData.movementRows,
     summary: reportData.projectSummaryRows,
   });
+});
+
+export const exportRequestPdf = asyncHandler(async (req, res) => {
+  const request = await materialsRepository.findRequestById(req.params.id);
+  if (!request) {
+    throw new AppError('Material request not found', 404);
+  }
+
+  const buffer = await buildMaterialRequestPdfBuffer({ request });
+  const filename = `material-request-${request.requestNo}.pdf`;
+
+  res.setHeader('Content-Type', 'application/pdf');
+  res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+  res.send(buffer);
 });

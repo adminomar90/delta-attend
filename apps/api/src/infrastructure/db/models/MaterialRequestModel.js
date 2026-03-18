@@ -178,10 +178,15 @@ const materialRequestSchema = new mongoose.Schema(
     project: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'Project',
-      required: true,
+      default: null,
       index: true,
     },
     projectName: {
+      type: String,
+      default: '',
+      trim: true,
+    },
+    manualProjectName: {
       type: String,
       default: '',
       trim: true,
@@ -228,6 +233,14 @@ const materialRequestSchema = new mongoose.Schema(
     status: {
       type: String,
       enum: [
+        /* ─── new workflow ─── */
+        'PENDING_MANAGER_APPROVAL',
+        'PENDING_SUPPLIER_APPROVAL',
+        'IN_PROGRESS',
+        'PENDING_RECEIPT',
+        'RECEIVED',
+        'PENDING_SETTLEMENT',
+        /* ─── legacy (backward compat) ─── */
         'NEW',
         'UNDER_REVIEW',
         'APPROVED',
@@ -239,7 +252,7 @@ const materialRequestSchema = new mongoose.Schema(
         'RECONCILED',
         'CLOSED',
       ],
-      default: 'NEW',
+      default: 'PENDING_MANAGER_APPROVAL',
       index: true,
     },
     approvalSummary: {
@@ -299,6 +312,20 @@ const materialRequestSchema = new mongoose.Schema(
     },
     closedAt: {
       type: Date,
+      default: null,
+    },
+    archived: {
+      type: Boolean,
+      default: false,
+      index: true,
+    },
+    archivedAt: {
+      type: Date,
+      default: null,
+    },
+    archivedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
       default: null,
     },
   },

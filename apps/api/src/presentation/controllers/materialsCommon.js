@@ -12,6 +12,8 @@ import { whatsappService } from '../../application/services/whatsappService.js';
 import { buildWhatsAppSendUrl } from '../../shared/attendanceUtils.js';
 import { resolveManagedUserIds } from '../../shared/accessScope.js';
 import { AppError } from '../../shared/errors.js';
+import { Permission } from '../../shared/constants.js';
+import { hasPermission } from '../../shared/permissions.js';
 
 export const materialsRepository = new MaterialsRepository();
 export const userRepository = new UserRepository();
@@ -139,8 +141,13 @@ export const assertRequestReadable = async (req, request) => {
 };
 
 export const assertCustodyReadable = async (req, custody) => {
+  const actorId = String(req.user.id);
   const holderId = String(custody?.holder?._id || custody?.holder || '');
-  if (holderId === String(req.user.id)) {
+  if (holderId === actorId) {
+    return;
+  }
+
+  if (hasPermission(req.user, Permission.PREPARE_MATERIAL_REQUESTS)) {
     return;
   }
 
@@ -311,7 +318,7 @@ export const sendWhatsappOps = async ({ to, message }) => {
 
 export const buildRequestWhatsappMessage = ({ request, detailsUrl }) => {
   const recipientName = request.requestedFor?.fullName || request.requestedBy?.fullName || '-';
-  const projectName = request.project?.name || request.projectName || '-';
+  const projectName = request.project?.name || request.projectName || request.manualProjectName || '-';
   const assignedPreparer = request.assignedPreparer?.fullName || '-';
   const requestedQty = sumBy(request.items || [], (item) => item.requestedQty);
   const approvedQty = sumBy(request.items || [], (item) => item.approvedQty);
@@ -332,7 +339,7 @@ export const buildRequestWhatsappMessage = ({ request, detailsUrl }) => {
 };
 
 export const buildCustodyWhatsappMessage = ({ custody, detailsUrl }) => {
-  const projectName = custody.project?.name || '-';
+  const projectName = custody.project?.name || custody.manualProjectName || '-';
   const totalReceived = sumBy(custody.items || [], (item) => item.receivedQty);
   const totalRemaining = sumBy(custody.items || [], (item) => item.remainingQty);
 
@@ -351,7 +358,7 @@ export const buildCustodyWhatsappMessage = ({ custody, detailsUrl }) => {
 };
 
 export const buildReconciliationWhatsappMessage = ({ reconciliation, detailsUrl }) => {
-  const projectName = reconciliation.project?.name || '-';
+  const projectName = reconciliation.project?.name || reconciliation.manualProjectName || '-';
   const consumed = sumBy(reconciliation.items || [], (item) => item.consumedQty);
   const toReturn = sumBy(reconciliation.items || [], (item) => item.toReturnQty);
 

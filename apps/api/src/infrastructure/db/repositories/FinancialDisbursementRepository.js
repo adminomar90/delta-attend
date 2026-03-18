@@ -61,4 +61,136 @@ export class FinancialDisbursementRepository {
       { new: true },
     ).populate(populatePipeline);
   }
+
+  async archiveById(id, userId) {
+    return FinancialDisbursementModel.findByIdAndUpdate(
+      id,
+      {
+        $set: {
+          archived: true,
+          archivedAt: new Date(),
+          archivedBy: userId,
+        },
+        $push: {
+          workflowTrail: {
+            action: 'ARCHIVE',
+            actor: userId,
+            notes: '',
+            occurredAt: new Date(),
+          },
+        },
+      },
+      { new: true },
+    ).populate(populatePipeline);
+  }
+
+  async unarchiveById(id, userId) {
+    return FinancialDisbursementModel.findByIdAndUpdate(
+      id,
+      {
+        $set: {
+          archived: false,
+          archivedAt: null,
+          archivedBy: null,
+        },
+        $push: {
+          workflowTrail: {
+            action: 'UNARCHIVE',
+            actor: userId,
+            notes: '',
+            occurredAt: new Date(),
+          },
+        },
+      },
+      { new: true },
+    ).populate(populatePipeline);
+  }
+
+  async aggregateReports(filter = {}) {
+    return FinancialDisbursementModel.aggregate([
+      { $match: filter },
+      {
+        $group: {
+          _id: null,
+          totalRequests: { $sum: 1 },
+          totalAmount: { $sum: '$amount' },
+          totalApprovedAmount: {
+            $sum: { $ifNull: ['$approvedAmount', '$amount'] },
+          },
+          avgAmount: { $avg: '$amount' },
+          byType: {
+            $push: { type: '$requestType', amount: '$amount', status: '$status' },
+          },
+        },
+      },
+    ]);
+  }
+
+  async aggregateByField(filter = {}, field = 'requestType') {
+    return FinancialDisbursementModel.aggregate([
+      { $match: filter },
+      {
+        $group: {
+          _id: `$${field}`,
+          count: { $sum: 1 },
+          totalAmount: { $sum: '$amount' },
+          totalApprovedAmount: {
+            $sum: { $ifNull: ['$approvedAmount', '$amount'] },
+          },
+        },
+      },
+      { $sort: { totalAmount: -1 } },
+    ]);
+  }
+
+  async aggregateByMonth(filter = {}) {
+    return FinancialDisbursementModel.aggregate([
+      { $match: filter },
+      {
+        $group: {
+          _id: {
+            year: { $year: '$createdAt' },
+            month: { $month: '$createdAt' },
+          },
+          count: { $sum: 1 },
+          totalAmount: { $sum: '$amount' },
+        },
+      },
+      { $sort: { '_id.year': -1, '_id.month': -1 } },
+    ]);
+  }
+
+  async aggregateByEmployee(filter = {}) {
+    return FinancialDisbursementModel.aggregate([
+      { $match: filter },
+      {
+        $group: {
+          _id: '$employee',
+          count: { $sum: 1 },
+          totalAmount: { $sum: '$amount' },
+        },
+      },
+      { $sort: { totalAmount: -1 } },
+      { $limit: 50 },
+      {
+        $lookup: {
+          from: 'users',
+          localField: '_id',
+          foreignField: '_id',
+          as: 'employeeInfo',
+        },
+      },
+      { $unwind: { path: '$employeeInfo', preserveNullAndEmptyArrays: true } },
+      {
+        $project: {
+          _id: 1,
+          count: 1,
+          totalAmount: 1,
+          fullName: '$employeeInfo.fullName',
+          employeeCode: '$employeeInfo.employeeCode',
+          role: '$employeeInfo.role',
+        },
+      },
+    ]);
+  }
 }

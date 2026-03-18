@@ -33,6 +33,10 @@ import {
   dispatchMaterialRequest,
   requestWhatsappLink,
   listMaterialRequestsForApprovals,
+  supplierApproveMaterialRequest,
+  confirmReceipt,
+  archiveMaterialRequest,
+  openCustodiesSummary,
 } from '../controllers/materialsRequestController.js';
 import {
   listCustodies,
@@ -52,6 +56,7 @@ import {
   exportMaterialsExcel,
   exportMaterialsPdf,
   materialsReportWhatsappLink,
+  exportRequestPdf,
 } from '../controllers/materialsReportsController.js';
 
 const materialsRoutes = Router();
@@ -87,9 +92,15 @@ materialsRoutes.get('/approvals/requests/pending', canReviewMaterialRequests, li
 materialsRoutes.post('/requests', canCreateMaterialRequests, createMaterialRequest);
 materialsRoutes.get('/requests/:id', getMaterialRequest);
 materialsRoutes.patch('/requests/:id/review', canReviewMaterialRequests, reviewMaterialRequest);
+materialsRoutes.patch('/requests/:id/supplier-approve', canPrepareMaterialRequests, supplierApproveMaterialRequest);
 materialsRoutes.patch('/requests/:id/prepare', canPrepareMaterialRequests, prepareMaterialRequest);
 materialsRoutes.patch('/requests/:id/dispatch', canDispatchMaterialRequests, dispatchMaterialRequest);
+materialsRoutes.patch('/requests/:id/confirm-receipt', requireAuth, confirmReceipt);
+materialsRoutes.patch('/requests/:id/archive', canReviewMaterialRequests, archiveMaterialRequest);
 materialsRoutes.post('/requests/:id/whatsapp-link', requestWhatsappLink);
+materialsRoutes.get('/requests/:id/pdf', exportRequestPdf);
+
+materialsRoutes.get('/open-custodies-summary', openCustodiesSummary);
 
 materialsRoutes.get('/custodies', listCustodies);
 materialsRoutes.get('/custodies/:id', getCustody);

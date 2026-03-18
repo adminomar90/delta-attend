@@ -60,17 +60,18 @@ export const listMaterialEmployees = asyncHandler(async (_req, res) => {
 
 export const createMaterialRequest = asyncHandler(async (req, res) => {
   const projectId = toCleanString(req.body.projectId || req.body.project);
+  const manualProjectName = toCleanString(req.body.manualProjectName);
   const clientName = toCleanString(req.body.clientName || req.body.client);
   const requestedForId = toCleanString(req.body.requestedForId || req.body.requestedFor);
   const assignedPreparerId = toCleanString(req.body.assignedPreparerId || req.body.assignedPreparer);
   const warehouse = await ensureWarehouseOptional(req.body.warehouseId || req.body.warehouse);
 
-  if (!projectId) {
-    throw new AppError('projectId is required', 400);
+  if (!projectId && !manualProjectName) {
+    throw new AppError('اسم المشروع مطلوب', 400);
   }
 
-  const project = await projectRepository.findById(projectId);
-  if (!project) {
+  const project = projectId ? await projectRepository.findById(projectId) : null;
+  if (projectId && !project) {
     throw new AppError('Project not found', 404);
   }
 
@@ -116,8 +117,9 @@ export const createMaterialRequest = asyncHandler(async (req, res) => {
 
   const created = await materialsRepository.createRequest({
     requestNo,
-    project: project._id,
-    projectName: project.name || '',
+    project: project?._id || null,
+    projectName: project?.name || manualProjectName || '',
+    manualProjectName: project ? '' : (manualProjectName || ''),
     clientName,
     requestedBy: req.user.id,
     requestedFor: requestedForId || null,
@@ -125,7 +127,7 @@ export const createMaterialRequest = asyncHandler(async (req, res) => {
     requestDate: toDateOrNull(req.body.requestDate) || new Date(),
     priority: mapPriority(req.body.priority),
     generalNotes: toCleanString(req.body.generalNotes || req.body.notes),
-    status: 'NEW',
+    status: 'PENDING_MANAGER_APPROVAL',
     items: requestItems,
     approvals: [],
     preparations: [],
@@ -212,6 +214,15 @@ export const createMaterialRequest = asyncHandler(async (req, res) => {
 export const listMaterialRequests = asyncHandler(async (req, res) => {
   const filter = {};
 
+  /* by default exclude archived requests unless explicitly asked */
+  if (req.query.archived === 'true') {
+    filter.archived = true;
+  } else if (req.query.archived === 'all') {
+    /* no filter — return everything */
+  } else {
+    filter.archived = { $ne: true };
+  }
+
   if (req.query.status) {
     filter.status = toUpper(req.query.status);
   }
@@ -269,6 +280,9 @@ export const reviewMaterialRequest = asyncHandler(async (req, res) => {
   if (['REJECTED', 'CLOSED'].includes(request.status)) {
     throw new AppError('This request cannot be reviewed in its current status', 409);
   }
+
+  /* Manager approval can happen on both legacy and new statuses */
+  const isManagerStep = ['PENDING_MANAGER_APPROVAL', 'NEW', 'UNDER_REVIEW'].includes(request.status);
 
   const action = toUpper(req.body.action || 'APPROVE_FULL');
   if (!REQUEST_REVIEW_ACTIONS.includes(action)) {
@@ -345,7 +359,9 @@ export const reviewMaterialRequest = asyncHandler(async (req, res) => {
 
   const nextStatus = action === 'REJECT' || approvedQtyTotal <= 0
     ? 'REJECTED'
-    : 'APPROVED';
+    : isManagerStep
+      ? 'PENDING_SUPPLIER_APPROVAL'
+      : 'APPROVED';
 
   const approvalType = action === 'REJECT'
     ? 'REJECTED'
@@ -382,16 +398,27 @@ export const reviewMaterialRequest = asyncHandler(async (req, res) => {
     },
   });
 
-  const requesterId = request.assignedPreparer?._id
+  /* Determine notification recipient: if manager approved → notify preparer, else notify requester */
+  const notifyTarget = nextStatus === 'PENDING_SUPPLIER_APPROVAL'
+    ? (request.assignedPreparer?._id || request.assignedPreparer)
+    : (request.requestedBy?._id || request.requestedBy);
+  const requesterId = notifyTarget
+    || request.assignedPreparer?._id
     || request.assignedPreparer
     || request.requestedBy?._id
     || request.requestedBy;
   await notificationService.notifySystem(
     requesterId,
-    nextStatus === 'REJECTED' ? 'رفض طلب المواد' : 'اعتماد طلب المواد',
+    nextStatus === 'REJECTED'
+      ? 'رفض طلب المواد'
+      : nextStatus === 'PENDING_SUPPLIER_APPROVAL'
+        ? 'اعتماد مدير المشاريع - بانتظار المجهز'
+        : 'اعتماد طلب المواد',
     nextStatus === 'REJECTED'
       ? `تم رفض طلب المواد رقم ${request.requestNo}.`
-      : `تم اعتماد طلب المواد رقم ${request.requestNo} (${approvalType === 'PARTIAL' ? 'اعتماد جزئي' : 'اعتماد كامل'}).`,
+      : nextStatus === 'PENDING_SUPPLIER_APPROVAL'
+        ? `تم اعتماد طلب المواد رقم ${request.requestNo} من مدير المشاريع. بانتظار اعتمادك كمجهز.`
+        : `تم اعتماد طلب المواد رقم ${request.requestNo} (${approvalType === 'PARTIAL' ? 'اعتماد جزئي' : 'اعتماد كامل'}).`,
     {
       requestId: String(request._id),
       requestNo: request.requestNo,
@@ -456,7 +483,7 @@ export const prepareMaterialRequest = asyncHandler(async (req, res) => {
 
   await assertRequestReadable(req, request);
 
-  if (!['APPROVED', 'PREPARING', 'PREPARED', 'DELIVERED'].includes(request.status)) {
+  if (!['APPROVED', 'PREPARING', 'PREPARED', 'DELIVERED', 'IN_PROGRESS', 'PENDING_SUPPLIER_APPROVAL'].includes(request.status)) {
     throw new AppError('Request is not ready for preparation', 409);
   }
 
@@ -565,7 +592,7 @@ export const prepareMaterialRequest = asyncHandler(async (req, res) => {
 
   const updated = await materialsRepository.updateRequestById(request._id, {
     items: updatedItems,
-    status: allPrepared ? 'PREPARED' : 'PREPARING',
+    status: allPrepared ? 'PENDING_RECEIPT' : 'IN_PROGRESS',
     $push: {
       preparations: {
         preparedBy: req.user.id,
@@ -581,8 +608,10 @@ export const prepareMaterialRequest = asyncHandler(async (req, res) => {
   const requesterId = request.requestedBy?._id || request.requestedBy;
   await notificationService.notifySystem(
     requesterId,
-    'تجهيز طلب مواد',
-    `تم تجهيز ${mode === 'FULL' ? 'كامل' : 'جزئي'} لطلب المواد رقم ${request.requestNo}.`,
+    allPrepared ? 'تجهيز طلب مواد — بانتظار الاستلام' : 'تجهيز طلب مواد',
+    allPrepared
+      ? `تم تجهيز طلب المواد رقم ${request.requestNo} بالكامل. يرجى تأكيد الاستلام.`
+      : `تم تجهيز ${mode === 'FULL' ? 'كامل' : 'جزئي'} لطلب المواد رقم ${request.requestNo}.`,
     {
       requestId: String(request._id),
       requestNo: request.requestNo,
@@ -637,7 +666,7 @@ export const dispatchMaterialRequest = asyncHandler(async (req, res) => {
 
   await assertRequestReadable(req, request);
 
-  if (!['PREPARING', 'PREPARED', 'DELIVERED'].includes(request.status)) {
+  if (!['PREPARING', 'PREPARED', 'DELIVERED', 'IN_PROGRESS', 'PENDING_RECEIPT', 'RECEIVED'].includes(request.status)) {
     throw new AppError('Request is not ready for dispatch', 409);
   }
 
@@ -737,7 +766,8 @@ export const dispatchMaterialRequest = asyncHandler(async (req, res) => {
   const dispatch = await materialsRepository.createDispatch({
     dispatchNo,
     request: request._id,
-    project: request.project?._id || request.project,
+    project: request.project?._id || request.project || null,
+    manualProjectName: request.manualProjectName || '',
     recipient: recipient._id,
     deliveredBy: req.user.id,
     preparedBy: request.assignedPreparer?._id || request.assignedPreparer || req.user.id,
@@ -758,7 +788,8 @@ export const dispatchMaterialRequest = asyncHandler(async (req, res) => {
     custody = await materialsRepository.createCustody({
       custodyNo,
       request: request._id,
-      project: request.project?._id || request.project,
+      project: request.project?._id || request.project || null,
+      manualProjectName: request.manualProjectName || '',
       holder: recipient._id,
       openedAt: new Date(),
       dueDate: toDateOrNull(req.body.custodyDueDate),
@@ -829,7 +860,7 @@ export const dispatchMaterialRequest = asyncHandler(async (req, res) => {
 
   const updatedRequest = await materialsRepository.updateRequestById(request._id, {
     items: updatedItems,
-    status: fullyDelivered ? 'PENDING_RECONCILIATION' : 'DELIVERED',
+    status: fullyDelivered ? 'PENDING_SETTLEMENT' : 'RECEIVED',
     dispatchRef: dispatch._id,
     custodyRef: custody._id,
   });
@@ -928,7 +959,7 @@ export const requestWhatsappLink = asyncHandler(async (req, res) => {
 export const listMaterialRequestsForApprovals = asyncHandler(async (req, res) => {
   const managedUserIds = await resolveManagedScope(req);
   const filter = {
-    status: { $in: ['NEW', 'UNDER_REVIEW'] },
+    status: { $in: ['PENDING_MANAGER_APPROVAL', 'PENDING_SUPPLIER_APPROVAL', 'NEW', 'UNDER_REVIEW'] },
   };
 
   applyMaterialRequestScopeFilter({
@@ -951,4 +982,476 @@ export const listMaterialRequestsForApprovals = asyncHandler(async (req, res) =>
   });
 
   res.json({ requests: pending });
+});
+
+/* ════════════════════════════════════════════════════════════════════════════
+   SUPPLIER (PREPARER) APPROVAL — step 3 in workflow
+   ════════════════════════════════════════════════════════════════════════════ */
+export const supplierApproveMaterialRequest = asyncHandler(async (req, res) => {
+  const request = await materialsRepository.findRequestById(req.params.id);
+  if (!request) {
+    throw new AppError('Material request not found', 404);
+  }
+
+  await assertRequestReadable(req, request);
+
+  if (!['PENDING_SUPPLIER_APPROVAL', 'APPROVED'].includes(request.status)) {
+    throw new AppError('هذا الطلب ليس بانتظار اعتماد المجهز', 409);
+  }
+
+  const action = toUpper(req.body.action || 'ACCEPT');
+  if (!['ACCEPT', 'REJECT'].includes(action)) {
+    throw new AppError('Invalid action. Must be ACCEPT or REJECT', 400);
+  }
+
+  const notes = toCleanString(req.body.comment || req.body.notes);
+  const nextStatus = action === 'REJECT' ? 'REJECTED' : 'IN_PROGRESS';
+
+  const beforeSnapshot = { status: request.status };
+
+  const updated = await materialsRepository.updateRequestById(request._id, {
+    status: nextStatus,
+    $push: {
+      approvals: {
+        action: action === 'ACCEPT' ? 'APPROVE_FULL' : 'REJECT',
+        approvedBy: req.user.id,
+        approvedAt: new Date(),
+        comment: notes || (action === 'ACCEPT' ? 'قبول المجهز' : 'رفض المجهز'),
+        beforeSnapshot,
+        afterSnapshot: { status: nextStatus },
+      },
+    },
+  });
+
+  const requesterId = request.requestedBy?._id || request.requestedBy;
+  await notificationService.notifySystem(
+    requesterId,
+    action === 'REJECT' ? 'رفض المجهز للطلب' : 'قبول المجهز — قيد التجهيز',
+    action === 'REJECT'
+      ? `رفض المجهز طلب المواد رقم ${request.requestNo}.`
+      : `قبل المجهز طلب المواد رقم ${request.requestNo}. الطلب الآن قيد التجهيز.`,
+    { requestId: String(request._id), requestNo: request.requestNo, status: nextStatus },
+  );
+
+  const recipientPhone = await resolveRecipientPhone({
+    userId: requesterId,
+    fallback: env.attendanceAdminWhatsapp,
+  });
+  const detailsUrl = appDetailsUrl(`/materials?requestId=${request._id}`);
+  const whatsappMessage = buildRequestWhatsappMessage({ request: updated, detailsUrl });
+  const whatsapp = await sendWhatsappOps({ to: recipientPhone, message: whatsappMessage });
+
+  await auditService.log({
+    actorId: req.user.id,
+    action: action === 'REJECT' ? 'MATERIAL_REQUEST_SUPPLIER_REJECTED' : 'MATERIAL_REQUEST_SUPPLIER_APPROVED',
+    entityType: 'MATERIAL_REQUEST',
+    entityId: request._id,
+    before: beforeSnapshot,
+    after: { status: nextStatus, whatsappDelivery: whatsapp.delivery },
+    req,
+  });
+
+  const audience = await resolveNotificationAudience({
+    userRepository,
+    actorId: requesterId,
+    watchPermission: NotificationWatchPermission.OPERATION,
+    excludeUserIds: [req.user.id],
+  });
+  await notificationService.notifyOperationActivity(audience, {
+    titleAr: action === 'REJECT' ? 'رفض المجهز لطلب مواد' : 'قبول المجهز لطلب مواد',
+    actorName: req.user.name || req.user.fullName || 'مستخدم النظام',
+    actionLabel: action === 'REJECT' ? 'رفض طلب مواد' : 'قبول طلب مواد من المجهز',
+    entityLabel: request.requestNo,
+    occurredAt: new Date(),
+    metadata: {
+      entityType: 'MATERIAL_REQUEST',
+      entityId: String(request._id),
+      action: action === 'REJECT' ? 'MATERIAL_REQUEST_SUPPLIER_REJECTED' : 'MATERIAL_REQUEST_SUPPLIER_APPROVED',
+      status: nextStatus,
+    },
+  });
+
+  res.json({ request: updated, whatsapp });
+});
+
+/* ════════════════════════════════════════════════════════════════════════════
+   CONFIRM RECEIPT — step 5 in workflow (employee confirms)
+   ════════════════════════════════════════════════════════════════════════════ */
+export const confirmReceipt = asyncHandler(async (req, res) => {
+  const request = await materialsRepository.findRequestById(req.params.id);
+  if (!request) {
+    throw new AppError('Material request not found', 404);
+  }
+
+  const myId = String(req.user.id);
+  const requestedById = String(request.requestedBy?._id || request.requestedBy || '');
+  const requestedForId = String(request.requestedFor?._id || request.requestedFor || '');
+  const isGM = req.user.role === 'GENERAL_MANAGER';
+
+  if (myId !== requestedById && myId !== requestedForId && !isGM) {
+    throw new AppError('فقط الموظف الطالب أو المستلم يمكنه تأكيد الاستلام', 403);
+  }
+
+  if (!['PENDING_RECEIPT', 'PREPARED'].includes(request.status)) {
+    throw new AppError('هذا الطلب ليس بانتظار تأكيد الاستلام', 409);
+  }
+
+  const notes = toCleanString(req.body.notes);
+  const recipient = await userRepository.findById(requestedForId || requestedById);
+  if (!recipient) {
+    throw new AppError('المستلم غير موجود', 404);
+  }
+
+  const warehouse = await ensureWarehouseOptional(req.body.warehouseId);
+
+  const dispatchItems = (request.items || [])
+    .filter((line) => roundQty(line.preparedQty || 0) > 0)
+    .map((line) => ({
+      material: line.material?._id || line.material,
+      materialName: line.materialName || '',
+      unit: line.unitSnapshot || '',
+      deliveredQty: roundQty(line.preparedQty || 0),
+      notes: '',
+    }));
+
+  if (!dispatchItems.length) {
+    throw new AppError('لا توجد مواد مجهزة لتأكيد استلامها', 400);
+  }
+
+  const dispatchNo = await sequenceService.next('MATERIAL_DISPATCH', { prefix: 'DN', digits: 5 });
+  const dispatch = await materialsRepository.createDispatch({
+    dispatchNo,
+    request: request._id,
+    project: request.project?._id || request.project || null,
+    manualProjectName: request.manualProjectName || '',
+    recipient: recipient._id,
+    deliveredBy: request.assignedPreparer?._id || request.assignedPreparer || req.user.id,
+    preparedBy: request.assignedPreparer?._id || request.assignedPreparer || req.user.id,
+    warehouse: warehouse?._id || null,
+    deliveredAt: new Date(),
+    confirmationMethod: 'EMPLOYEE_CONFIRM',
+    status: 'CONFIRMED',
+    notes: notes || 'تأكيد استلام من الموظف',
+    items: dispatchItems,
+  });
+
+  let custody = request.custodyRef
+    ? await materialsRepository.findCustodyById(request.custodyRef)
+    : null;
+
+  if (!custody) {
+    const custodyNo = await sequenceService.next('MATERIAL_CUSTODY', { prefix: 'CU', digits: 5 });
+    custody = await materialsRepository.createCustody({
+      custodyNo,
+      request: request._id,
+      project: request.project?._id || request.project || null,
+      manualProjectName: request.manualProjectName || '',
+      holder: recipient._id,
+      openedAt: new Date(),
+      status: 'OPEN',
+      dispatchNotes: [dispatch._id],
+      notes: notes || '',
+      items: dispatchItems.map((line) => ({
+        material: line.material,
+        materialName: line.materialName,
+        unit: line.unit,
+        receivedQty: line.deliveredQty,
+        consumedQty: 0,
+        remainingQty: line.deliveredQty,
+        returnedQty: 0,
+        damagedQty: 0,
+        lostQty: 0,
+        lineStatus: 'OPEN',
+        notes: '',
+      })),
+    });
+  }
+
+  const updatedItems = (request.items || []).map((line) => {
+    const prepared = roundQty(line.preparedQty || 0);
+    return {
+      ...line.toObject(),
+      deliveredQty: prepared,
+      lineStatus: prepared >= roundQty(line.approvedQty || 0) ? 'DELIVERED' : 'PARTIAL',
+    };
+  });
+
+  const updated = await materialsRepository.updateRequestById(request._id, {
+    items: updatedItems,
+    status: 'RECEIVED',
+    dispatchRef: dispatch._id,
+    custodyRef: custody._id,
+    $push: {
+      approvals: {
+        action: 'APPROVE_FULL',
+        approvedBy: req.user.id,
+        approvedAt: new Date(),
+        comment: notes || 'تأكيد استلام المواد من الموظف',
+        beforeSnapshot: { status: request.status },
+        afterSnapshot: { status: 'RECEIVED' },
+      },
+    },
+  });
+
+  const preparerId = request.assignedPreparer?._id || request.assignedPreparer;
+  if (preparerId) {
+    await notificationService.notifySystem(
+      preparerId,
+      'تأكيد استلام مواد',
+      `قام الموظف بتأكيد استلام مواد الطلب رقم ${request.requestNo}.`,
+      { requestId: String(request._id), requestNo: request.requestNo, status: 'RECEIVED' },
+    );
+  }
+
+  const recipientPhone = await resolveRecipientPhone({
+    userId: preparerId || requestedById,
+    fallback: env.attendanceAdminWhatsapp,
+  });
+  const detailsUrl = appDetailsUrl(`/materials?requestId=${request._id}`);
+  const whatsappMessage = buildCustodyWhatsappMessage({ custody, detailsUrl });
+  const whatsapp = await sendWhatsappOps({ to: recipientPhone, message: whatsappMessage });
+
+  await auditService.log({
+    actorId: req.user.id,
+    action: 'MATERIAL_REQUEST_RECEIPT_CONFIRMED',
+    entityType: 'MATERIAL_REQUEST',
+    entityId: request._id,
+    after: {
+      requestNo: request.requestNo,
+      dispatchNo: dispatch.dispatchNo,
+      custodyNo: custody.custodyNo,
+      status: 'RECEIVED',
+      recipientId: String(recipient._id),
+      whatsappDelivery: whatsapp.delivery,
+    },
+    req,
+  });
+
+  const audience = await resolveNotificationAudience({
+    userRepository,
+    actorId: req.user.id,
+    watchPermission: NotificationWatchPermission.OPERATION,
+    excludeUserIds: [req.user.id],
+  });
+  await notificationService.notifyOperationActivity(audience, {
+    titleAr: 'تأكيد استلام مواد',
+    actorName: req.user.name || req.user.fullName || 'مستخدم النظام',
+    actionLabel: 'تأكيد استلام مواد',
+    entityLabel: request.requestNo,
+    occurredAt: new Date(),
+    metadata: {
+      entityType: 'MATERIAL_REQUEST',
+      entityId: String(request._id),
+      action: 'MATERIAL_REQUEST_RECEIPT_CONFIRMED',
+      custodyId: String(custody._id),
+    },
+  });
+
+  res.json({ request: updated, dispatch, custody, whatsapp });
+});
+
+/* ────────── ARCHIVE ────────── */
+export const archiveMaterialRequest = asyncHandler(async (req, res) => {
+  const request = await materialsRepository.findRequestById(req.params.id);
+  if (!request) {
+    throw new AppError('Material request not found', 404);
+  }
+
+  if (!['CLOSED', 'RECONCILED'].includes(request.status)) {
+    throw new AppError('يمكن أرشفة الطلبات المغلقة فقط', 400);
+  }
+
+  if (request.archived) {
+    throw new AppError('هذا الطلب مؤرشف بالفعل', 409);
+  }
+
+  const updated = await materialsRepository.updateRequestById(request._id, {
+    archived: true,
+    archivedAt: new Date(),
+    archivedBy: req.user.id,
+  });
+
+  await auditService.log({
+    actorId: req.user.id,
+    action: 'MATERIAL_REQUEST_ARCHIVED',
+    entityType: 'MATERIAL_REQUEST',
+    entityId: request._id,
+    before: { archived: false },
+    after: { archived: true, archivedAt: updated.archivedAt, archivedBy: req.user.id },
+    req,
+  });
+
+  await notificationService.notifySystem(
+    req.user.id,
+    'أرشفة طلب مواد',
+    `تم أرشفة طلب المواد رقم ${request.requestNo} بنجاح.`,
+    { requestId: String(request._id), requestNo: request.requestNo },
+  );
+
+  const audience = await resolveNotificationAudience({
+    userRepository,
+    actorId: req.user.id,
+    watchPermission: NotificationWatchPermission.OPERATION,
+  });
+  await notificationService.notifyOperationActivity(audience, {
+    titleAr: 'أرشفة طلب مواد',
+    actorName: req.user.name || req.user.fullName || 'مستخدم النظام',
+    actionLabel: 'أرشفة طلب',
+    entityLabel: request.requestNo,
+    occurredAt: new Date(),
+    metadata: {
+      entityType: 'MATERIAL_REQUEST',
+      entityId: String(request._id),
+      action: 'MATERIAL_REQUEST_ARCHIVED',
+    },
+  });
+
+  res.json({ request: updated });
+});
+
+/* ────────── OPEN CUSTODIES SUMMARY ────────── */
+export const openCustodiesSummary = asyncHandler(async (req, res) => {
+  const userId = String(req.user.id);
+
+  /* 1. load all non-closed custodies with deep population */
+  const allCustodies = await materialsRepository.listCustodies(
+    { status: { $in: ['OPEN', 'PARTIALLY_RECONCILED', 'OVERDUE', 'PENDING_RECONCILIATION'] } },
+    { limit: 5000 },
+  );
+
+  /* deep-populate request sub-refs (requestedBy, requestedFor, assignedPreparer) */
+  const { MaterialRequestModel } = await import('../../infrastructure/db/models/MaterialRequestModel.js');
+  const requestIds = [...new Set(allCustodies.map((c) => c.request?._id || c.request).filter(Boolean).map(String))];
+  const deepRequests = await MaterialRequestModel.find({ _id: { $in: requestIds } })
+    .populate('requestedBy', 'fullName role employeeCode phone')
+    .populate('requestedFor', 'fullName role employeeCode phone')
+    .populate('assignedPreparer', 'fullName role employeeCode phone')
+    .populate('project', 'name code')
+    .populate('approvals.approvedBy', 'fullName role employeeCode')
+    .populate('preparations.preparedBy', 'fullName role employeeCode')
+    .populate('preparations.warehouse', 'name code')
+    .lean();
+  const requestMap = new Map(deepRequests.map((r) => [String(r._id), r]));
+
+  /* 2. role-based filtering (server-enforced) */
+  const managedUserIds = await resolveManagedScope(req);
+  const custodies = allCustodies.filter((cu) => {
+    const holderId = String(cu.holder?._id || cu.holder || '');
+    const reqData = requestMap.get(String(cu.request?._id || cu.request || ''));
+    const preparerId = String(reqData?.assignedPreparer?._id || reqData?.assignedPreparer || '');
+    /* holder can always see own custodies */
+    if (holderId === userId) return true;
+    /* preparer can see custodies of requests they prepared */
+    if (preparerId === userId) return true;
+    /* managers / GM see within their managed scope */
+    if (isWithinScope(managedUserIds, holderId)) return true;
+    return false;
+  });
+
+  /* 3. group by holder — enriched data */
+  const byHolder = new Map();
+  for (const cu of custodies) {
+    const holderId = String(cu.holder?._id || cu.holder || 'unknown');
+    if (!byHolder.has(holderId)) {
+      byHolder.set(holderId, {
+        holderId,
+        holderName: cu.holder?.fullName || '-',
+        employeeCode: cu.holder?.employeeCode || '',
+        custodies: [],
+        totalItems: 0,
+        totalRemaining: 0,
+        projects: new Set(),
+        lastReceivedAt: null,
+      });
+    }
+    const entry = byHolder.get(holderId);
+    const rq = requestMap.get(String(cu.request?._id || cu.request || '')) || {};
+    entry.custodies.push({
+      custodyId: cu._id,
+      custodyNo: cu.custodyNo,
+      project: cu.project?.name || cu.manualProjectName || '-',
+      projectCode: cu.project?.code || '',
+      status: cu.status,
+      itemsCount: (cu.items || []).length,
+      remainingQty: (cu.items || []).reduce((s, i) => s + (i.remainingQty || 0), 0),
+      openedAt: cu.openedAt,
+      dueDate: cu.dueDate || null,
+      notes: cu.notes || '',
+      /* request details (deep-populated) */
+      requestId: rq._id || cu.request?._id || null,
+      requestNo: rq.requestNo || cu.request?.requestNo || '-',
+      requestStatus: rq.status || '-',
+      requestedByName: rq.requestedBy?.fullName || '-',
+      requestedForName: rq.requestedFor?.fullName || '-',
+      preparerName: rq.assignedPreparer?.fullName || '-',
+      preparerId: String(rq.assignedPreparer?._id || rq.assignedPreparer || ''),
+      requestDate: rq.requestDate || rq.createdAt || null,
+      generalNotes: rq.generalNotes || '',
+      priority: rq.priority || 'NORMAL',
+      /* request items (what was requested/approved/prepared/delivered) */
+      requestItems: (rq.items || []).map((ri) => ({
+        materialName: ri.materialName || ri.material?.name || '-',
+        materialCode: ri.material?.code || '',
+        unit: ri.unitSnapshot || ri.unit || '-',
+        requestedQty: ri.requestedQty || 0,
+        approvedQty: ri.approvedQty || 0,
+        preparedQty: ri.preparedQty || 0,
+        deliveredQty: ri.deliveredQty || 0,
+        lineNotes: ri.lineNotes || '',
+      })),
+      /* approval trail */
+      approvals: (rq.approvals || []).map((a) => ({
+        action: a.action,
+        approvedBy: a.approvedBy?.fullName || '-',
+        approvedAt: a.approvedAt,
+        comment: a.comment || '',
+      })),
+      /* preparation log */
+      preparations: (rq.preparations || []).map((p) => ({
+        preparedBy: p.preparedBy?.fullName || '-',
+        preparedAt: p.preparedAt,
+        warehouse: p.warehouse?.name || '-',
+        mode: p.mode || '-',
+        notes: p.notes || '',
+      })),
+      /* dispatch info */
+      dispatchInfo: (cu.dispatchNotes || []).map((d) => ({
+        dispatchNo: d.dispatchNo,
+        deliveredAt: d.deliveredAt,
+        status: d.status,
+      })),
+      /* enriched custody items */
+      items: (cu.items || []).map((it) => ({
+        materialName: it.materialName || it.material?.name || '-',
+        materialCode: it.material?.code || '',
+        unit: it.unit || '-',
+        receivedQty: it.receivedQty || 0,
+        consumedQty: it.consumedQty || 0,
+        remainingQty: it.remainingQty || 0,
+        returnedQty: it.returnedQty || 0,
+        damagedQty: it.damagedQty || 0,
+        lostQty: it.lostQty || 0,
+        lineStatus: it.lineStatus || 'OPEN',
+        notes: it.notes || '',
+      })),
+    });
+    entry.totalItems += (cu.items || []).length;
+    entry.totalRemaining += (cu.items || []).reduce((s, i) => s + (i.remainingQty || 0), 0);
+    if (cu.project?.name) entry.projects.add(cu.project.name);
+    if (cu.manualProjectName) entry.projects.add(cu.manualProjectName);
+    const opened = cu.openedAt || cu.createdAt;
+    if (opened && (!entry.lastReceivedAt || new Date(opened) > new Date(entry.lastReceivedAt))) {
+      entry.lastReceivedAt = opened;
+    }
+  }
+
+  const holders = Array.from(byHolder.values()).map((h) => ({
+    ...h,
+    projects: Array.from(h.projects),
+    custodiesCount: h.custodies.length,
+  }));
+
+  holders.sort((a, b) => b.totalRemaining - a.totalRemaining);
+
+  res.json({ holders, totalHolders: holders.length });
 });

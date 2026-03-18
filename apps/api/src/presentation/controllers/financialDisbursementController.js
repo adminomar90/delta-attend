@@ -504,6 +504,22 @@ export const listFinancialDisbursements = asyncHandler(async (req, res) => {
     filter.employee = req.user.id;
   }
 
+  if (String(req.query.archived || '').toLowerCase() === 'true') {
+    filter.archived = true;
+  } else {
+    filter.archived = { $ne: true };
+  }
+
+  if (req.query.requestType) {
+    filter.requestType = String(req.query.requestType).toUpperCase();
+  }
+
+  if (req.query.dateFrom || req.query.dateTo) {
+    filter.createdAt = {};
+    if (req.query.dateFrom) filter.createdAt.$gte = new Date(req.query.dateFrom);
+    if (req.query.dateTo) filter.createdAt.$lte = new Date(req.query.dateTo);
+  }
+
   const requests = await financialDisbursementRepository.list(filter);
   res.json({
     requests: requests.map((request) => serializeRequest(request, req.user)),
@@ -1563,6 +1579,115 @@ export const financialDisbursementWhatsappLink = asyncHandler(async (req, res) =
       url: whatsapp.url || directUrl,
       delivery: whatsapp.delivery,
       mode: whatsapp.delivery?.sent ? 'AUTO' : 'MANUAL_LINK',
+    },
+  });
+});
+
+/* ───────── Archive / Unarchive ───────── */
+
+export const archiveFinancialDisbursement = asyncHandler(async (req, res) => {
+  const request = await financialDisbursementRepository.findById(req.params.id);
+  if (!request) throw new AppError('Financial request not found', 404);
+  ensureReadableRequest(req, request);
+
+  if (![FinancialDisbursementStatus.CLOSED, FinancialDisbursementStatus.RECEIVED].includes(request.status)
+    && !request.status.startsWith('REJECTED')) {
+    throw new AppError('Only closed, received or rejected requests can be archived', 400);
+  }
+
+  if (request.archived) {
+    throw new AppError('Request is already archived', 400);
+  }
+
+  const updated = await financialDisbursementRepository.archiveById(request._id, req.user.id);
+
+  await auditService.log({
+    actorId: req.user.id,
+    action: 'FINANCIAL_REQUEST_ARCHIVED',
+    entityType: 'FINANCIAL_DISBURSEMENT',
+    entityId: request._id,
+    after: { requestNo: request.requestNo },
+    req,
+  });
+
+  res.json({ request: serializeRequest(updated, req.user) });
+});
+
+export const unarchiveFinancialDisbursement = asyncHandler(async (req, res) => {
+  const request = await financialDisbursementRepository.findById(req.params.id);
+  if (!request) throw new AppError('Financial request not found', 404);
+  ensureReadableRequest(req, request);
+
+  if (!request.archived) {
+    throw new AppError('Request is not archived', 400);
+  }
+
+  const updated = await financialDisbursementRepository.unarchiveById(request._id, req.user.id);
+
+  await auditService.log({
+    actorId: req.user.id,
+    action: 'FINANCIAL_REQUEST_UNARCHIVED',
+    entityType: 'FINANCIAL_DISBURSEMENT',
+    entityId: request._id,
+    after: { requestNo: request.requestNo },
+    req,
+  });
+
+  res.json({ request: serializeRequest(updated, req.user) });
+});
+
+/* ───────── Reports / Analytics ───────── */
+
+export const financialDisbursementReports = asyncHandler(async (req, res) => {
+  const filter = {};
+
+  if (req.query.status) filter.status = String(req.query.status).toUpperCase();
+  if (req.query.requestType) filter.requestType = String(req.query.requestType).toUpperCase();
+  if (req.query.employee) filter.employee = req.query.employee;
+  if (req.query.archived === 'true') filter.archived = true;
+  else filter.archived = { $ne: true };
+
+  if (req.query.dateFrom || req.query.dateTo) {
+    filter.createdAt = {};
+    if (req.query.dateFrom) filter.createdAt.$gte = new Date(req.query.dateFrom);
+    if (req.query.dateTo) filter.createdAt.$lte = new Date(req.query.dateTo);
+  }
+
+  const [overall, byType, byMonth, byEmployee] = await Promise.all([
+    financialDisbursementRepository.aggregateReports(filter),
+    financialDisbursementRepository.aggregateByField(filter, 'requestType'),
+    financialDisbursementRepository.aggregateByMonth(filter),
+    financialDisbursementRepository.aggregateByEmployee(filter),
+  ]);
+
+  const summary = overall[0] || { totalRequests: 0, totalAmount: 0, totalApprovedAmount: 0, avgAmount: 0 };
+
+  res.json({
+    reports: {
+      totalRequests: summary.totalRequests,
+      totalAmount: summary.totalAmount,
+      totalApprovedAmount: summary.totalApprovedAmount,
+      avgAmount: Math.round(summary.avgAmount || 0),
+      byType: byType.map((item) => ({
+        type: item._id,
+        count: item.count,
+        totalAmount: item.totalAmount,
+        totalApprovedAmount: item.totalApprovedAmount,
+      })),
+      byMonth: byMonth.map((item) => ({
+        year: item._id.year,
+        month: item._id.month,
+        count: item.count,
+        totalAmount: item.totalAmount,
+      })),
+      byEmployee: byEmployee.map((item) => ({
+        employeeId: String(item._id),
+        fullName: item.fullName || '',
+        employeeCode: item.employeeCode || '',
+        role: item.role || '',
+        count: item.count,
+        totalAmount: item.totalAmount,
+      })),
     },
   });
 });

@@ -2,6 +2,7 @@
 
 import { usePathname, useRouter } from 'next/navigation';
 import { authStorage } from '../lib/auth';
+import { api } from '../lib/api';
 import { Permission, hasAnyPermission } from '../lib/permissions';
 import { useNotifications } from '../lib/notifications';
 
@@ -134,7 +135,12 @@ export default function Sidebar({ mobileOpen, onClose }) {
     if (onClose) onClose();
   };
 
-  const logout = () => {
+  const logout = async () => {
+    try {
+      await api.post('/auth/logout');
+    } catch {
+      // ignore — clear local state regardless
+    }
     authStorage.logout();
     router.push('/login');
   };

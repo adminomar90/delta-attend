@@ -9,10 +9,12 @@ import {
 import { Permission } from '../../shared/constants.js';
 import { uploadDocumentMiddleware } from '../middlewares/uploadMiddleware.js';
 import {
+  archiveFinancialDisbursement,
   confirmFinancialDisbursementReceipt,
   createFinancialDisbursement,
   deleteFinancialDisbursement,
   deliverFinancialDisbursement,
+  financialDisbursementReports,
   financialDisbursementSummary,
   financialDisbursementWhatsappLink,
   getFinancialDisbursement,
@@ -22,6 +24,7 @@ import {
   reviewFinancialDisbursementAsGeneralManager,
   reviewFinancialDisbursementAsProjectManager,
   submitFinancialDisbursement,
+  unarchiveFinancialDisbursement,
   updateFinancialDisbursement,
 } from '../controllers/financialDisbursementController.js';
 
@@ -37,6 +40,7 @@ const canAccessFinancialDisbursementsModule = requireAnyPermission(
 financialDisbursementsRoutes.use(requireAuth, canAccessFinancialDisbursementsModule);
 
 financialDisbursementsRoutes.get('/summary', financialDisbursementSummary);
+financialDisbursementsRoutes.get('/reports', financialDisbursementReports);
 financialDisbursementsRoutes.get('/', listFinancialDisbursements);
 financialDisbursementsRoutes.post('/', canCreateFinancialDisbursements, uploadDocumentMiddleware.array('attachments', 10), createFinancialDisbursement);
 financialDisbursementsRoutes.get('/:id/pdf', exportFinancialDisbursementPdf);
@@ -50,5 +54,7 @@ financialDisbursementsRoutes.patch('/:id/financial-manager-review', canReviewFin
 financialDisbursementsRoutes.patch('/:id/general-manager-review', canReviewFinancialDisbursements, reviewFinancialDisbursementAsGeneralManager);
 financialDisbursementsRoutes.patch('/:id/deliver', canDisburseFinancialFunds, deliverFinancialDisbursement);
 financialDisbursementsRoutes.patch('/:id/confirm-receipt', confirmFinancialDisbursementReceipt);
+financialDisbursementsRoutes.patch('/:id/archive', archiveFinancialDisbursement);
+financialDisbursementsRoutes.patch('/:id/unarchive', unarchiveFinancialDisbursement);
 
 export default financialDisbursementsRoutes;

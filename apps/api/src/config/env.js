@@ -54,5 +54,7 @@ export const env = {
   vapidPublicKey: process.env.VAPID_PUBLIC_KEY || '',
   vapidPrivateKey: process.env.VAPID_PRIVATE_KEY || '',
   vapidEmail: process.env.VAPID_EMAIL || 'mailto:admin@deltaplus-iq.com',
+  sessionSecret: process.env.SESSION_SECRET || process.env.JWT_SECRET,
+  sessionMaxAgeDays: toNumberOr(process.env.SESSION_MAX_AGE_DAYS, 7),
 };
 

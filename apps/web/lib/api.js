@@ -1,9 +1,16 @@
 'use client';
 
-import { authStorage } from './auth';
-
 export const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api';
 const API_BASE = API_URL.replace(/\/api\/?$/, '');
+
+// Global auth-expired event — AuthContext listens for this
+export const AUTH_EXPIRED_EVENT = 'auth:expired';
+
+function emitAuthExpired() {
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new Event(AUTH_EXPIRED_EVENT));
+  }
+}
 
 export function assetUrl(path) {
   if (!path) return '';
@@ -13,21 +20,24 @@ export function assetUrl(path) {
 
 export const api = {
   async request(path, options = {}) {
-    const token = authStorage.getToken();
     const isFormData = options.body instanceof FormData;
 
     try {
       const response = await fetch(`${API_URL}${path}`, {
         ...options,
+        credentials: 'include',
         headers: {
           ...(isFormData ? {} : { 'Content-Type': 'application/json' }),
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
           ...(options.headers || {}),
         },
         cache: 'no-store',
       });
 
       if (!response.ok) {
+        // Emit auth-expired for 401 on non-auth endpoints
+        if (response.status === 401) {
+          emitAuthExpired();
+        }
         const payload = await response.json().catch(() => ({ message: 'Request failed' }));
         throw new Error(payload.message || 'Request failed');
       }
@@ -39,7 +49,6 @@ export const api = {
 
       return response.blob();
     } catch (error) {
-      // Re-throw with more details
       if (error instanceof TypeError) {
         throw new Error('Failed to connect to server');
       }
@@ -80,10 +89,12 @@ export const api = {
   },
 
   async downloadBlob(path) {
-    const token = authStorage.getToken();
     const response = await fetch(`${API_URL}${path}`, {
-      headers: token ? { Authorization: `Bearer ${token}` } : {},
+      credentials: 'include',
     });
+    if (response.status === 401) {
+      emitAuthExpired();
+    }
     if (!response.ok) {
       const payload = await response.json().catch(() => ({ message: 'فشل التصدير' }));
       throw new Error(payload.message || 'فشل التصدير');

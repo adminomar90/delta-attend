@@ -1,57 +1,45 @@
 ﻿'use client';
 
-const TOKEN_KEY = 'delta_plus_token';
-const USER_KEY = 'delta_plus_user';
+// ── In-memory auth state — never persisted to localStorage ──
+// Session cookie (HttpOnly) is the primary auth mechanism.
+// Token is kept in memory only for SSE streaming.
+let _token = null;
+let _user = null;
+
+// One-time cleanup of legacy localStorage data
+if (typeof window !== 'undefined') {
+  try {
+    window.localStorage.removeItem('delta_plus_token');
+    window.localStorage.removeItem('delta_plus_user');
+  } catch {
+    // ignore
+  }
+}
 
 export const authStorage = {
   getToken() {
-    if (typeof window === 'undefined') {
-      return null;
-    }
-    return window.localStorage.getItem(TOKEN_KEY);
+    return _token;
   },
   setToken(token) {
-    if (typeof window === 'undefined') {
-      return;
-    }
-    window.localStorage.setItem(TOKEN_KEY, token);
+    _token = token || null;
   },
   clearToken() {
-    if (typeof window === 'undefined') {
-      return;
-    }
-    window.localStorage.removeItem(TOKEN_KEY);
+    _token = null;
   },
   getUser() {
-    if (typeof window === 'undefined') {
-      return null;
-    }
-    const raw = window.localStorage.getItem(USER_KEY);
-    if (!raw) {
-      return null;
-    }
-
-    try {
-      return JSON.parse(raw);
-    } catch {
-      return null;
-    }
+    return _user;
   },
   setUser(user) {
-    if (typeof window === 'undefined') {
-      return;
+    _user = user || null;
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('user-updated', { detail: user }));
     }
-    window.localStorage.setItem(USER_KEY, JSON.stringify(user));
-    window.dispatchEvent(new CustomEvent('user-updated', { detail: user }));
   },
   clearUser() {
-    if (typeof window === 'undefined') {
-      return;
-    }
-    window.localStorage.removeItem(USER_KEY);
+    _user = null;
   },
   logout() {
-    this.clearToken();
-    this.clearUser();
+    _token = null;
+    _user = null;
   },
 };

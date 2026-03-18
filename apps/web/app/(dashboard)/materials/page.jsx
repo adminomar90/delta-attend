@@ -1,23 +1,34 @@
 'use client';
 
-import { useEffect, useMemo, useState, useCallback } from 'react';
+import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import { api } from '../../../lib/api';
 import { authStorage } from '../../../lib/auth';
 import { Permission, hasAnyPermission, hasPermission } from '../../../lib/permissions';
 
 /* ─── constants ─── */
 const statusLabel = {
+  /* new workflow */
+  PENDING_MANAGER_APPROVAL: 'بانتظار اعتماد مدير المشاريع',
+  PENDING_SUPPLIER_APPROVAL: 'بانتظار اعتماد المجهز',
+  IN_PROGRESS: 'قيد التجهيز',
+  PENDING_RECEIPT: 'بانتظار استلام الموظف',
+  RECEIVED: 'تم الاستلام',
+  PENDING_SETTLEMENT: 'بانتظار اعتماد التصفية',
+  /* legacy + shared */
   NEW: 'جديد', UNDER_REVIEW: 'قيد المراجعة', APPROVED: 'معتمد', REJECTED: 'مرفوض',
   PREPARING: 'جاري التجهيز', PREPARED: 'تم التجهيز', DELIVERED: 'تم التسليم',
   PENDING_RECONCILIATION: 'بانتظار التصفية', RECONCILED: 'تمت التصفية',
-  PARTIALLY_RECONCILED: 'تصفية جزئية', FULLY_RECONCILED: 'تصفية كاملة',
-  SUBMITTED: 'مرسل', OPEN: 'مفتوح', CLOSED: 'مغلق',
+  PARTIALLY_RECONCILED: 'تصفية جزئية', FULLY_RECONCILED: 'تصفية كاملة', PARTIAL: 'جزئي',
+  SUBMITTED: 'مرسل', OPEN: 'مفتوح', CLOSED: 'مغلق', ARCHIVED: 'مؤرشف',
 };
 const statusColor = {
+  PENDING_MANAGER_APPROVAL: '#ffa726', PENDING_SUPPLIER_APPROVAL: '#42a5f5',
+  IN_PROGRESS: '#ffb74d', PENDING_RECEIPT: '#ab47bc', RECEIVED: '#66bb6a',
+  PENDING_SETTLEMENT: '#ffd54f',
   NEW: '#4fc3f7', APPROVED: '#81c784', REJECTED: '#e57373', PREPARING: '#ffb74d',
   PREPARED: '#aed581', DELIVERED: '#64b5f6', PENDING_RECONCILIATION: '#ffd54f',
-  RECONCILED: '#81c784', PARTIALLY_RECONCILED: '#ffb74d', FULLY_RECONCILED: '#81c784',
-  SUBMITTED: '#4fc3f7', OPEN: '#4fc3f7', CLOSED: '#90a4ae',
+  RECONCILED: '#81c784', PARTIALLY_RECONCILED: '#ffb74d', FULLY_RECONCILED: '#81c784', PARTIAL: '#ffb74d',
+  SUBMITTED: '#4fc3f7', OPEN: '#4fc3f7', CLOSED: '#90a4ae', ARCHIVED: '#78909c',
 };
 const unitLabels = { PIECE: 'قطعة', METER: 'متر', KG: 'كجم', TON: 'طن', LITER: 'لتر', SQM: 'م²', BAG: 'كيس', ROLL: 'لفة', SET: 'طقم', PAIR: 'زوج', BOX: 'صندوق' };
 
@@ -42,8 +53,9 @@ const downloadBlob = (blob, filename) => {
 };
 
 /* ─── Badge component ─── */
+const lightBgs = new Set(['PENDING_SETTLEMENT', 'PENDING_RECONCILIATION', 'IN_PROGRESS', 'PREPARING', 'PENDING_MANAGER_APPROVAL']);
 const Badge = ({ status }) => (
-  <span style={{ padding: '2px 10px', borderRadius: 12, fontSize: 12, fontWeight: 600, background: statusColor[status] || '#555', color: '#fff' }}>
+  <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', whiteSpace: 'nowrap', padding: '3px 12px', borderRadius: 12, fontSize: 12, lineHeight: '18px', fontWeight: 600, background: statusColor[status] || '#555', color: lightBgs.has(status) ? '#333' : '#fff' }}>
     {statusLabel[status] || status}
   </span>
 );
@@ -82,7 +94,19 @@ export default function MaterialsPage() {
   const [custodies, setCustodies] = useState([]);
   const [reconciliations, setReconciliations] = useState([]);
   const [summary, setSummary] = useState(null);
+  const [archivedRequests, setArchivedRequests] = useState([]);
+  const [openCustodiesData, setOpenCustodiesData] = useState({ holders: [], totalHolders: 0 });
   const [activeTab, setActiveTab] = useState('requests');
+
+  /* request filters */
+  const [reqFilterStatus, setReqFilterStatus] = useState('');
+  const [reqFilterSearch, setReqFilterSearch] = useState('');
+
+  /* archive filter */
+  const [archiveSearch, setArchiveSearch] = useState('');
+
+  /* open custodies filter */
+  const [custodyHolderSearch, setCustodyHolderSearch] = useState('');
 
   /* modals */
   const [reviewModal, setReviewModal] = useState(null);
@@ -91,12 +115,80 @@ export default function MaterialsPage() {
   const [reconcileModal, setReconcileModal] = useState(null);
   const [returnModal, setReturnModal] = useState(null);
   const [detailModal, setDetailModal] = useState(null);
+  const [custodyDetailModal, setCustodyDetailModal] = useState(null);
 
   /* request form */
   const [requestForm, setRequestForm] = useState({
-    projectId: '', priority: 'NORMAL', clientName: '', requestedForId: '',
+    projectId: '', manualProjectName: '', priority: 'NORMAL', clientName: '', requestedForId: '',
     assignedPreparerId: '', warehouseId: '', generalNotes: '', items: [makeItem()],
   });
+
+  /* project combobox state */
+  const [projectSearch, setProjectSearch] = useState('');
+  const [projectDropdownOpen, setProjectDropdownOpen] = useState(false);
+  const projectComboRef = useRef(null);
+
+  const filteredProjects = useMemo(() => {
+    if (!projectSearch.trim()) return projects;
+    const q = projectSearch.trim().toLowerCase();
+    return projects.filter((p) => p.name?.toLowerCase().includes(q));
+  }, [projects, projectSearch]);
+
+  const filteredRequests = useMemo(() => {
+    let list = requests;
+    if (reqFilterStatus) list = list.filter((r) => r.status === reqFilterStatus);
+    if (reqFilterSearch.trim()) {
+      const q = reqFilterSearch.trim().toLowerCase();
+      list = list.filter((r) =>
+        (r.requestNo || '').toLowerCase().includes(q) ||
+        (r.project?.name || r.manualProjectName || '').toLowerCase().includes(q) ||
+        (r.requestedFor?.fullName || '').toLowerCase().includes(q) ||
+        (r.requestedBy?.fullName || '').toLowerCase().includes(q) ||
+        (r.assignedPreparer?.fullName || '').toLowerCase().includes(q)
+      );
+    }
+    return list;
+  }, [requests, reqFilterStatus, reqFilterSearch]);
+
+  const filteredArchive = useMemo(() => {
+    if (!archiveSearch.trim()) return archivedRequests;
+    const q = archiveSearch.trim().toLowerCase();
+    return archivedRequests.filter((r) =>
+      (r.requestNo || '').toLowerCase().includes(q) ||
+      (r.project?.name || r.manualProjectName || '').toLowerCase().includes(q) ||
+      (r.requestedFor?.fullName || '').toLowerCase().includes(q) ||
+      (r.requestedBy?.fullName || '').toLowerCase().includes(q) ||
+      (r.assignedPreparer?.fullName || '').toLowerCase().includes(q) ||
+      (r.items || []).some((it) => (it.materialName || '').toLowerCase().includes(q))
+    );
+  }, [archivedRequests, archiveSearch]);
+
+  const filteredCustodyHolders = useMemo(() => {
+    if (!custodyHolderSearch.trim()) return openCustodiesData.holders;
+    const q = custodyHolderSearch.trim().toLowerCase();
+    return openCustodiesData.holders.filter((h) =>
+      (h.holderName || '').toLowerCase().includes(q) ||
+      (h.employeeCode || '').toLowerCase().includes(q) ||
+      (h.projects || []).some((p) => p.toLowerCase().includes(q)) ||
+      (h.custodies || []).some((c) =>
+        (c.requestNo || '').toLowerCase().includes(q) ||
+        (c.custodyNo || '').toLowerCase().includes(q) ||
+        (c.preparerName || '').toLowerCase().includes(q) ||
+        (c.requestedByName || '').toLowerCase().includes(q) ||
+        (c.items || []).some((it) => (it.materialName || '').toLowerCase().includes(q))
+      )
+    );
+  }, [openCustodiesData.holders, custodyHolderSearch]);
+
+  useEffect(() => {
+    const handleClickOutside = (e) => {
+      if (projectComboRef.current && !projectComboRef.current.contains(e.target)) {
+        setProjectDropdownOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
 
   /* permissions */
   const canAccess = useMemo(() => hasAnyPermission(currentUser, [
@@ -123,11 +215,17 @@ export default function MaterialsPage() {
     return pid === myId || isGM;
   };
 
+  const isMyRequest = (req) => {
+    const rid = String(req.requestedBy?._id || req.requestedBy || '');
+    const fid = String(req.requestedFor?._id || req.requestedFor || '');
+    return rid === String(myId) || fid === String(myId) || isGM;
+  };
+
   /* data loader */
   const load = useCallback(async () => {
     setLoading(true); setError('');
     try {
-      const [mRes, wRes, pRes, uRes, allURes, rqRes, cuRes, rcRes, smRes] = await Promise.all([
+      const [mRes, wRes, pRes, uRes, allURes, rqRes, cuRes, rcRes, smRes, arRes, ocRes] = await Promise.all([
         api.get('/materials/catalog'),
         api.get('/materials/warehouses'),
         api.get('/projects').catch(() => ({ projects: [] })),
@@ -146,6 +244,8 @@ export default function MaterialsPage() {
         api.get('/materials/custodies'),
         api.get('/materials/reconciliations'),
         canReports ? api.get('/materials/reports/summary').catch(() => null) : Promise.resolve(null),
+        api.get('/materials/requests?archived=true').catch(() => ({ requests: [] })),
+        api.get('/materials/open-custodies-summary').catch(() => ({ holders: [], totalHolders: 0 })),
       ]);
       setMaterials(mRes.materials || []);
       setWarehouses(wRes.warehouses || []);
@@ -156,6 +256,8 @@ export default function MaterialsPage() {
       setCustodies(cuRes.custodies || []);
       setReconciliations(rcRes.reconciliations || []);
       setSummary(smRes);
+      setArchivedRequests(arRes.requests || []);
+      setOpenCustodiesData(ocRes || { holders: [], totalHolders: 0 });
     } catch (err) { setError(err.message || 'تعذر تحميل البيانات'); }
     finally { setLoading(false); }
   }, [canReports]);
@@ -173,7 +275,7 @@ export default function MaterialsPage() {
       '[ طلب مواد - Delta Plus ]',
       '----------------------------------',
       `رقم الطلب: ${req.requestNo}`,
-      `المشروع: ${req.project?.name || '-'}`,
+      `المشروع: ${req.project?.name || req.manualProjectName || req.projectName || '-'}`,
       `الطالب: ${req.requestedFor?.fullName || req.requestedBy?.fullName || '-'}`,
       `المجهز: ${req.assignedPreparer?.fullName || 'غير معين'}`,
       `عدد البنود: ${(req.items || []).length}`,
@@ -189,7 +291,7 @@ export default function MaterialsPage() {
       '----------------------------------',
       `رقم الذمة: ${cu.custodyNo}`,
       `المستلم: ${cu.holder?.fullName || '-'}`,
-      `المشروع: ${cu.project?.name || '-'}`,
+      `المشروع: ${cu.project?.name || cu.manualProjectName || '-'}`,
       `عدد البنود: ${(cu.items || []).length}`,
       '----------------------------------',
       'يرجى متابعة الذمة.',
@@ -228,6 +330,52 @@ export default function MaterialsPage() {
     finally { setBusy(''); }
   };
 
+  /* ────── supplier approve / reject ────── */
+  const handleSupplierApprove = async (req, action) => {
+    setBusy('supplierApprove');
+    await doAction(async () => {
+      await api.patch(`/materials/requests/${req._id}/supplier-approve`, { action });
+      setInfo(action === 'ACCEPT' ? 'تم قبول الطلب من المجهز' : 'تم رفض الطلب من المجهز');
+    });
+  };
+
+  /* ────── confirm receipt ────── */
+  const handleConfirmReceipt = async (req) => {
+    setBusy('confirmReceipt');
+    await doAction(async () => {
+      await api.patch(`/materials/requests/${req._id}/confirm-receipt`, {});
+      setInfo('تم تأكيد الاستلام بنجاح');
+    });
+  };
+
+  /* ────── download per-request PDF ────── */
+  const downloadRequestPdf = async (req) => {
+    try {
+      const res = await api.get(`/materials/requests/${req._id}/pdf`);
+      const blob = res instanceof Blob ? res : new Blob([res], { type: 'application/pdf' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `طلب-مواد-${req.requestNo || req._id}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      setError(err.message || 'فشل تحميل ملف PDF');
+    }
+  };
+
+  /* ────── archive request ────── */
+  const handleArchive = async (req) => {
+    if (!confirm(`هل تريد أرشفة الطلب ${req.requestNo}؟ سيختفي من القائمة الرئيسية.`)) return;
+    setBusy('archive');
+    await doAction(async () => {
+      await api.patch(`/materials/requests/${req._id}/archive`, {});
+      setInfo(`تم أرشفة الطلب ${req.requestNo} بنجاح`);
+    });
+  };
+
   const updateRequestItem = (itemId, changes) => {
     setRequestForm((prev) => ({
       ...prev,
@@ -246,7 +394,8 @@ export default function MaterialsPage() {
         .map((it) => ({ materialName: it.materialName.trim(), unit: it.unit || 'PIECE', requestedQty: toNum(it.requestedQty), notes: it.notes }));
       if (!items.length) throw new Error('يرجى إضافة مادة واحدة على الأقل مع كمية أكبر من صفر.');
       await api.post('/materials/requests', { ...requestForm, items });
-      setRequestForm({ projectId: '', priority: 'NORMAL', clientName: '', requestedForId: '', assignedPreparerId: '', warehouseId: '', generalNotes: '', items: [makeItem()] });
+      setRequestForm({ projectId: '', manualProjectName: '', priority: 'NORMAL', clientName: '', requestedForId: '', assignedPreparerId: '', warehouseId: '', generalNotes: '', items: [makeItem()] });
+      setProjectSearch('');
       setInfo('تم إنشاء الطلب بنجاح'); await load();
     } catch (err) { setError(err.message || 'فشل إنشاء الطلب'); }
     finally { setBusy(''); }
@@ -363,9 +512,9 @@ export default function MaterialsPage() {
 
       {/* KPI */}
       <section className="grid-4" style={{ marginBottom: 16 }}>
-        <article className="card section"><p style={{ marginTop: 0, color: 'var(--text-soft)' }}>الطلبات</p><h2>{requests.length}</h2></article>
-        <article className="card section"><p style={{ marginTop: 0, color: 'var(--text-soft)' }}>الذمم المفتوحة</p><h2>{custodies.filter((c) => c.status !== 'CLOSED').length}</h2></article>
-        <article className="card section"><p style={{ marginTop: 0, color: 'var(--text-soft)' }}>التصفيات</p><h2>{reconciliations.length}</h2></article>
+        <article className="card section"><p style={{ marginTop: 0, color: 'var(--text-soft)' }}>الطلبات النشطة</p><h2>{requests.length}</h2></article>
+        <article className="card section"><p style={{ marginTop: 0, color: 'var(--text-soft)' }}>الذمم المفتوحة</p><h2>{openCustodiesData.totalHolders || custodies.filter((c) => c.status !== 'CLOSED').length}</h2></article>
+        <article className="card section"><p style={{ marginTop: 0, color: 'var(--text-soft)' }}>الأرشيف</p><h2>{archivedRequests.length}</h2></article>
         <article className="card section"><p style={{ marginTop: 0, color: 'var(--text-soft)' }}>المواد بالكتلوج</p><h2>{materials.length}</h2></article>
       </section>
 
@@ -373,6 +522,8 @@ export default function MaterialsPage() {
       <div className="tabs-bar">
         <button type="button" style={tabStyle('requests')} onClick={() => setActiveTab('requests')}>طلبات المواد</button>
         <button type="button" style={tabStyle('custodies')} onClick={() => setActiveTab('custodies')}>الذمم والتصفية</button>
+        <button type="button" style={tabStyle('openCustodies')} onClick={() => setActiveTab('openCustodies')}>الذمم المفتوحة</button>
+        <button type="button" style={tabStyle('archive')} onClick={() => setActiveTab('archive')}>الأرشيف</button>
         {canReports && <button type="button" style={tabStyle('reports')} onClick={() => setActiveTab('reports')}>التقارير</button>}
         <div className="tabs-spacer" />
         <button className="btn btn-soft" type="button" onClick={load} disabled={loading} style={{ alignSelf: 'center', fontSize: 12 }}>{loading ? 'جارٍ...' : 'تحديث ↻'}</button>
@@ -386,7 +537,42 @@ export default function MaterialsPage() {
             <h2 style={{ marginTop: 0 }}>طلب مواد جديد</h2>
             <form onSubmit={createRequest}>
               <div className="grid-3" style={{ marginBottom: 12 }}>
-                <label>المشروع *<select className="select" value={requestForm.projectId} onChange={(e) => setRequestForm((p) => ({ ...p, projectId: e.target.value }))} required><option value="">اختر المشروع</option>{projects.map((p) => <option key={p._id} value={p._id}>{p.name}</option>)}</select></label>
+                <label>المشروع *
+                  <div ref={projectComboRef} style={{ position: 'relative' }}>
+                    <input
+                      className="input"
+                      value={projectSearch}
+                      onChange={(e) => {
+                        setProjectSearch(e.target.value);
+                        setProjectDropdownOpen(true);
+                        setRequestForm((p) => ({ ...p, projectId: '', manualProjectName: e.target.value }));
+                      }}
+                      onFocus={() => setProjectDropdownOpen(true)}
+                      placeholder="ابحث أو اكتب اسم المشروع"
+                      required={!requestForm.projectId && !requestForm.manualProjectName}
+                      autoComplete="off"
+                    />
+                    {projectDropdownOpen && filteredProjects.length > 0 && (
+                      <ul style={{ position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 50, background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 6, maxHeight: 200, overflowY: 'auto', margin: 0, padding: 0, listStyle: 'none', boxShadow: '0 4px 12px rgba(0,0,0,.15)' }}>
+                        {filteredProjects.map((p) => (
+                          <li
+                            key={p._id}
+                            style={{ padding: '8px 12px', cursor: 'pointer', fontSize: 14, borderBottom: '1px solid var(--border)' }}
+                            onMouseDown={() => {
+                              setRequestForm((prev) => ({ ...prev, projectId: p._id, manualProjectName: '' }));
+                              setProjectSearch(p.name);
+                              setProjectDropdownOpen(false);
+                            }}
+                            onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--bg)'; }}
+                            onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
+                          >
+                            {p.name}
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                </label>
                 <label>المخزن<select className="select" value={requestForm.warehouseId} onChange={(e) => setRequestForm((p) => ({ ...p, warehouseId: e.target.value }))}><option value="">افتراضي</option>{warehouses.map((w) => <option key={w._id} value={w._id}>{w.name}</option>)}</select></label>
                 <label>مجهز الطلب<select className="select" value={requestForm.assignedPreparerId} onChange={(e) => setRequestForm((p) => ({ ...p, assignedPreparerId: e.target.value }))}><option value="">بدون تعيين</option>{allUsers.map((u) => <option key={u.id || u._id} value={u.id || u._id}>{u.fullName}{u.employeeCode ? ` (${u.employeeCode})` : ''}</option>)}</select></label>
                 <label>المستلم (طالب المواد)<select className="select" value={requestForm.requestedForId} onChange={(e) => setRequestForm((p) => ({ ...p, requestedForId: e.target.value }))}><option value="">نفس المستخدم</option>{users.map((u) => <option key={u.id || u._id} value={u.id || u._id}>{u.fullName}{u.employeeCode ? ` (${u.employeeCode})` : ''}</option>)}</select></label>
@@ -420,25 +606,45 @@ export default function MaterialsPage() {
 
           {/* requests table */}
           <section className="card section">
-            <h2 style={{ marginTop: 0 }}>طلبات المواد ({requests.length})</h2>
+            <h2 style={{ marginTop: 0 }}>طلبات المواد ({filteredRequests.length})</h2>
+            {/* filter bar */}
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>
+              <input className="input" placeholder="بحث: رقم الطلب، المشروع، الطالب، المجهز" value={reqFilterSearch} onChange={(e) => setReqFilterSearch(e.target.value)} style={{ minWidth: 220, flex: 1 }} />
+              <select className="select" value={reqFilterStatus} onChange={(e) => setReqFilterStatus(e.target.value)} style={{ minWidth: 160 }}>
+                <option value="">كل الحالات</option>
+                {Object.entries(statusLabel).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+              </select>
+              {(reqFilterSearch || reqFilterStatus) && <button className="btn btn-soft" type="button" onClick={() => { setReqFilterSearch(''); setReqFilterStatus(''); }}>مسح الفلتر</button>}
+            </div>
             <div style={{ overflowX: 'auto' }}>
               <table className="table">
                 <thead><tr><th>رقم الطلب</th><th>المشروع</th><th>الطالب</th><th>مجهز الطلب</th><th>الحالة</th><th>بنود</th><th>إجراءات</th></tr></thead>
                 <tbody>
-                  {requests.length ? requests.map((req) => (
+                  {filteredRequests.length ? filteredRequests.map((req) => (
                     <tr key={req._id}>
                       <td><button type="button" className="btn btn-soft" style={{ padding: '2px 8px', fontSize: 12 }} onClick={() => setDetailModal(req)}>{req.requestNo}</button></td>
-                      <td>{req.project?.name || '-'}</td>
+                      <td>{req.project?.name || req.manualProjectName || req.projectName || '-'}</td>
                       <td>{req.requestedFor?.fullName || req.requestedBy?.fullName || '-'}</td>
                       <td>{req.assignedPreparer?.fullName || <span style={{ color: 'var(--text-soft)' }}>غير معين</span>}</td>
-                      <td><Badge status={req.status} /></td>
+                      <td style={{ whiteSpace: 'nowrap' }}><Badge status={req.status} /></td>
                       <td>{(req.items || []).length}</td>
                       <td>
                         <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
                           <button className="btn btn-soft" style={{ fontSize: 11, padding: '3px 8px' }} type="button" onClick={() => sendRequestWhatsapp(req)}>واتساب</button>
-                          {isMyPreparer(req) && ['NEW', 'UNDER_REVIEW'].includes(req.status) && <button className="btn btn-soft" style={{ fontSize: 11, padding: '3px 8px', color: '#81c784' }} type="button" disabled={!!busy} onClick={() => openReview(req)}>مراجعة</button>}
-                          {isMyPreparer(req) && ['APPROVED', 'PREPARING'].includes(req.status) && <button className="btn btn-soft" style={{ fontSize: 11, padding: '3px 8px', color: '#ffb74d' }} type="button" disabled={!!busy} onClick={() => openPrepare(req)}>تجهيز</button>}
-                          {isMyPreparer(req) && ['PREPARED', 'PREPARING'].includes(req.status) && <button className="btn btn-soft" style={{ fontSize: 11, padding: '3px 8px', color: '#64b5f6' }} type="button" disabled={!!busy} onClick={() => openDispatch(req)}>تسليم</button>}
+                          <button className="btn btn-soft" style={{ fontSize: 11, padding: '3px 8px' }} type="button" onClick={() => downloadRequestPdf(req)}>PDF</button>
+                          {/* Step 2: Manager approves */}
+                          {canReview && ['PENDING_MANAGER_APPROVAL', 'NEW', 'UNDER_REVIEW'].includes(req.status) && <button className="btn btn-soft" style={{ fontSize: 11, padding: '3px 8px', color: '#81c784' }} type="button" disabled={!!busy} onClick={() => openReview(req)}>اعتماد المدير</button>}
+                          {/* Step 3: Supplier/Preparer approves */}
+                          {isMyPreparer(req) && ['PENDING_SUPPLIER_APPROVAL', 'APPROVED'].includes(req.status) && <button className="btn btn-soft" style={{ fontSize: 11, padding: '3px 8px', color: '#42a5f5' }} type="button" disabled={!!busy} onClick={() => handleSupplierApprove(req, 'ACCEPT')}>قبول المجهز</button>}
+                          {isMyPreparer(req) && ['PENDING_SUPPLIER_APPROVAL', 'APPROVED'].includes(req.status) && <button className="btn btn-soft" style={{ fontSize: 11, padding: '3px 8px', color: '#e57373' }} type="button" disabled={!!busy} onClick={() => handleSupplierApprove(req, 'REJECT')}>رفض المجهز</button>}
+                          {/* Step 4: Prepare */}
+                          {isMyPreparer(req) && ['IN_PROGRESS', 'PREPARING'].includes(req.status) && <button className="btn btn-soft" style={{ fontSize: 11, padding: '3px 8px', color: '#ffb74d' }} type="button" disabled={!!busy} onClick={() => openPrepare(req)}>تجهيز</button>}
+                          {/* Step 5: Employee confirms receipt */}
+                          {isMyRequest(req) && ['PENDING_RECEIPT', 'PREPARED'].includes(req.status) && <button className="btn btn-soft" style={{ fontSize: 11, padding: '3px 8px', color: '#ab47bc' }} type="button" disabled={!!busy} onClick={() => handleConfirmReceipt(req)}>تأكيد الاستلام</button>}
+                          {/* Legacy dispatch button */}
+                          {isMyPreparer(req) && ['PREPARED', 'PREPARING', 'IN_PROGRESS', 'PENDING_RECEIPT', 'RECEIVED'].includes(req.status) && <button className="btn btn-soft" style={{ fontSize: 11, padding: '3px 8px', color: '#64b5f6' }} type="button" disabled={!!busy} onClick={() => openDispatch(req)}>تسليم يدوي</button>}
+                          {/* Archive closed requests */}
+                          {canReview && ['CLOSED', 'RECONCILED'].includes(req.status) && !req.archived && <button className="btn btn-soft" style={{ fontSize: 11, padding: '3px 8px', color: '#78909c' }} type="button" disabled={!!busy} onClick={() => handleArchive(req)}>أرشفة</button>}
                         </div>
                       </td>
                     </tr>
@@ -463,16 +669,16 @@ export default function MaterialsPage() {
                     <tr key={cu._id}>
                       <td>{cu.custodyNo}</td>
                       <td>{cu.holder?.fullName || '-'}</td>
-                      <td>{cu.project?.name || '-'}</td>
+                      <td>{cu.project?.name || cu.manualProjectName || '-'}</td>
                       <td><Badge status={cu.status} /></td>
                       <td>{(cu.items || []).length}</td>
                       <td>
                         <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
                           <button className="btn btn-soft" style={{ fontSize: 11, padding: '3px 8px' }} type="button" onClick={() => sendCustodyWhatsapp(cu)}>واتساب</button>
-                          {(() => { const pid = cu.request?.assignedPreparer; return (!pid && isGM) || pid === myId || isGM; })() && ['OPEN', 'PARTIALLY_RECONCILED'].includes(cu.status) && (
+                          {(canPrepare || isGM) && ['OPEN', 'PARTIALLY_RECONCILED'].includes(cu.status) && (
                             <button className="btn btn-soft" style={{ fontSize: 11, padding: '3px 8px', color: '#ffd54f' }} type="button" disabled={!!busy} onClick={() => openReconcile(cu)}>تصفية الذمة</button>
                           )}
-                          {(isGM || (() => { const pid = cu.request?.assignedPreparer; return pid === myId; })()) && ['FULLY_RECONCILED'].includes(cu.status) && (
+                          {(canPrepare || isGM) && ['FULLY_RECONCILED'].includes(cu.status) && (
                             <button className="btn btn-soft" style={{ fontSize: 11, padding: '3px 8px', color: '#90a4ae' }} type="button" disabled={!!busy} onClick={async () => { setBusy('close'); await doAction(async () => { await api.patch(`/materials/custodies/${cu._id}/close`, {}); setInfo('تم إغلاق الذمة'); }); }}>إغلاق</button>
                           )}
                         </div>
@@ -516,6 +722,122 @@ export default function MaterialsPage() {
             </div>
           </section>
         </>
+      )}
+
+      {/* ══════ TAB: OPEN CUSTODIES SUMMARY ══════ */}
+      {activeTab === 'openCustodies' && (
+        <section className="card section">
+          <h2 style={{ marginTop: 0 }}>الموظفون الذين لديهم ذمم مفتوحة ({filteredCustodyHolders.length})</h2>
+          <div style={{ marginBottom: 12 }}>
+            <input className="input" placeholder="بحث: اسم الموظف، الكود، المشروع، رقم الطلب، المادة، المجهز" value={custodyHolderSearch} onChange={(e) => setCustodyHolderSearch(e.target.value)} style={{ minWidth: 220, maxWidth: 500 }} />
+          </div>
+          {filteredCustodyHolders.length ? (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+              {filteredCustodyHolders.map((h) => (
+                <div key={h.holderId} className="card" style={{ overflow: 'hidden' }}>
+                  {/* holder header */}
+                  <div style={{ padding: '12px 16px', background: 'linear-gradient(135deg, var(--primary), var(--primary-strong))', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
+                    <div>
+                      <span style={{ fontWeight: 700, fontSize: 15, color: 'var(--text)' }}>{h.holderName}</span>
+                      {h.employeeCode && <span style={{ color: 'var(--text-soft)', fontSize: 12, marginRight: 8 }}>({h.employeeCode})</span>}
+                    </div>
+                    <div style={{ display: 'flex', gap: 16, fontSize: 12, flexWrap: 'wrap', color: 'var(--text-soft)' }}>
+                      <span>عدد الذمم: <strong style={{ color: 'var(--text)' }}>{h.custodiesCount}</strong></span>
+                      <span>إجمالي البنود: <strong style={{ color: 'var(--text)' }}>{h.totalItems}</strong></span>
+                      <span>إجمالي المتبقي: <strong style={{ color: h.totalRemaining > 0 ? 'var(--danger, #f28787)' : 'var(--accent, #c4d743)' }}>{h.totalRemaining}</strong></span>
+                      <span>المشاريع: <strong style={{ color: 'var(--text)' }}>{(h.projects || []).join('، ') || '-'}</strong></span>
+                    </div>
+                  </div>
+                  {/* custodies list */}
+                  <div style={{ padding: '8px 12px' }}>
+                    <div style={{ overflowX: 'auto' }}>
+                      <table className="table">
+                        <thead>
+                          <tr>
+                            <th>رقم الذمة</th>
+                            <th>رقم الطلب</th>
+                            <th>المشروع</th>
+                            <th>البنود</th>
+                            <th>المتبقي</th>
+                            <th>الحالة</th>
+                            <th>تاريخ الفتح</th>
+                            <th>التفاصيل</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {h.custodies.map((c) => (
+                            <tr key={c.custodyId}>
+                              <td style={{ fontWeight: 600 }}>{c.custodyNo}</td>
+                              <td>{c.requestNo}</td>
+                              <td>{c.project}</td>
+                              <td>{c.itemsCount}</td>
+                              <td style={{ fontWeight: 700, color: c.remainingQty > 0 ? 'var(--danger, #f28787)' : 'var(--accent, #c4d743)' }}>{c.remainingQty}</td>
+                              <td style={{ whiteSpace: 'nowrap' }}><Badge status={c.status} /></td>
+                              <td>{c.openedAt ? new Date(c.openedAt).toLocaleDateString('ar-IQ') : '-'}</td>
+                              <td>
+                                <button className="btn btn-soft" style={{ fontSize: 11, padding: '3px 10px' }} type="button" onClick={() => setCustodyDetailModal({ ...c, holderName: h.holderName, holderEmployeeCode: h.employeeCode })}>عرض التفاصيل</button>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p style={{ color: 'var(--text-soft)', textAlign: 'center' }}>لا توجد ذمم مفتوحة حالياً</p>
+          )}
+        </section>
+      )}
+
+      {/* ══════ TAB: ARCHIVE ══════ */}
+      {activeTab === 'archive' && (
+        <section className="card section">
+          <h2 style={{ marginTop: 0 }}>أرشيف الطلبات ({filteredArchive.length})</h2>
+          <div style={{ marginBottom: 12 }}>
+            <input className="input" placeholder="بحث: رقم الطلب، المشروع، الموظف، المادة" value={archiveSearch} onChange={(e) => setArchiveSearch(e.target.value)} style={{ minWidth: 220, maxWidth: 400 }} />
+          </div>
+          {filteredArchive.length ? (
+            <div style={{ overflowX: 'auto' }}>
+              <table className="table">
+                <thead>
+                  <tr>
+                    <th>رقم الطلب</th>
+                    <th>المشروع</th>
+                    <th>الطالب</th>
+                    <th>المجهز</th>
+                    <th>الحالة</th>
+                    <th>تاريخ الأرشفة</th>
+                    <th>بنود</th>
+                    <th>تفاصيل</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredArchive.map((req) => (
+                    <tr key={req._id}>
+                      <td><button type="button" className="btn btn-soft" style={{ padding: '2px 8px', fontSize: 12 }} onClick={() => setDetailModal(req)}>{req.requestNo}</button></td>
+                      <td>{req.project?.name || req.manualProjectName || req.projectName || '-'}</td>
+                      <td>{req.requestedFor?.fullName || req.requestedBy?.fullName || '-'}</td>
+                      <td>{req.assignedPreparer?.fullName || '-'}</td>
+                      <td style={{ whiteSpace: 'nowrap' }}><Badge status={req.archived ? 'ARCHIVED' : req.status} /></td>
+                      <td style={{ fontSize: 12 }}>{req.archivedAt ? new Date(req.archivedAt).toLocaleDateString('ar-IQ') : '-'}</td>
+                      <td>{(req.items || []).length}</td>
+                      <td>
+                        <div style={{ display: 'flex', gap: 4 }}>
+                          <button className="btn btn-soft" style={{ fontSize: 11, padding: '3px 8px' }} type="button" onClick={() => downloadRequestPdf(req)}>PDF</button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <p style={{ color: 'var(--text-soft)', textAlign: 'center' }}>لا توجد طلبات مؤرشفة</p>
+          )}
+        </section>
       )}
 
       {/* ══════ TAB: REPORTS ══════ */}
@@ -678,17 +1000,207 @@ export default function MaterialsPage() {
         )}
       </Modal>
 
+      {/* Custody Detail Modal */}
+      <Modal open={!!custodyDetailModal} title={`تفاصيل الذمة ${custodyDetailModal?.custodyNo || ''}`} onClose={() => setCustodyDetailModal(null)}>
+        {custodyDetailModal && (() => {
+          const cd = custodyDetailModal;
+          const fmtDate = (d) => d ? new Date(d).toLocaleDateString('ar-IQ') : '-';
+          const fmtDateTime = (d) => d ? new Date(d).toLocaleString('ar-IQ') : '-';
+          const sectionStyle = { border: '1px solid var(--border)', borderRadius: 8, padding: '12px 14px', marginBottom: 12, background: 'var(--surface-soft)' };
+          const sectionTitle = { fontWeight: 700, fontSize: 14, marginBottom: 8, color: 'var(--accent)', borderBottom: '1px solid var(--border)', paddingBottom: 6 };
+          const infoRow = { display: 'flex', gap: 12, flexWrap: 'wrap', fontSize: 13, lineHeight: '1.8' };
+          const label = { color: 'var(--text-soft)', minWidth: 90 };
+          const val = { fontWeight: 600 };
+          const InfoItem = ({ l, v }) => (<div style={{ flex: '1 1 200px' }}><span style={label}>{l}:</span> <span style={val}>{v || '-'}</span></div>);
+          return (
+            <div style={{ maxHeight: '75vh', overflowY: 'auto', overflowX: 'hidden' }}>
+              {/* ── Section 1: معلومات الذمة ── */}
+              <div style={sectionStyle}>
+                <div style={sectionTitle}>معلومات الذمة</div>
+                <div style={infoRow}>
+                  <InfoItem l="رقم الذمة" v={cd.custodyNo} />
+                  <InfoItem l="حالة الذمة" v={statusLabel[cd.status] || cd.status} />
+                  <InfoItem l="تاريخ الفتح" v={fmtDate(cd.openedAt)} />
+                  {cd.dueDate && <InfoItem l="تاريخ الاستحقاق" v={fmtDate(cd.dueDate)} />}
+                </div>
+                <div style={{ ...infoRow, marginTop: 4 }}>
+                  <InfoItem l="الموظف المستلم" v={`${cd.holderName}${cd.holderEmployeeCode ? ` (${cd.holderEmployeeCode})` : ''}`} />
+                  <InfoItem l="إجمالي المتبقي" v={String(cd.remainingQty)} />
+                </div>
+              </div>
+
+              {/* ── Section 2: معلومات الطلب ── */}
+              <div style={sectionStyle}>
+                <div style={sectionTitle}>معلومات الطلب</div>
+                <div style={infoRow}>
+                  <InfoItem l="رقم الطلب" v={cd.requestNo} />
+                  <InfoItem l="حالة الطلب" v={statusLabel[cd.requestStatus] || cd.requestStatus} />
+                  <InfoItem l="الأولوية" v={cd.priority === 'URGENT' ? 'عاجل' : cd.priority === 'LOW' ? 'منخفض' : 'عادي'} />
+                </div>
+                <div style={{ ...infoRow, marginTop: 4 }}>
+                  <InfoItem l="تاريخ الطلب" v={fmtDate(cd.requestDate)} />
+                  <InfoItem l="مقدم الطلب" v={cd.requestedByName} />
+                  <InfoItem l="المستلم" v={cd.requestedForName} />
+                </div>
+              </div>
+
+              {/* ── Section 3: معلومات المشروع والمجهز ── */}
+              <div style={sectionStyle}>
+                <div style={sectionTitle}>المشروع والمجهز</div>
+                <div style={infoRow}>
+                  <InfoItem l="المشروع" v={cd.project} />
+                  {cd.projectCode && <InfoItem l="كود المشروع" v={cd.projectCode} />}
+                  <InfoItem l="المجهز" v={cd.preparerName} />
+                </div>
+              </div>
+
+              {/* ── Section 4: المواد المطلوبة (من الطلب الأصلي) ── */}
+              {(cd.requestItems || []).length > 0 && (
+                <div style={sectionStyle}>
+                  <div style={sectionTitle}>المواد المطلوبة (الطلب الأصلي)</div>
+                  <div style={{ overflowX: 'auto' }}>
+                    <table className="table" style={{ fontSize: 12 }}>
+                      <thead>
+                        <tr>
+                          <th>المادة</th>
+                          <th>الوحدة</th>
+                          <th>المطلوب</th>
+                          <th>المعتمد</th>
+                          <th>المجهز</th>
+                          <th>المسلم</th>
+                          <th>ملاحظات</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {cd.requestItems.map((ri, i) => (
+                          <tr key={i}>
+                            <td style={{ fontWeight: 500 }}>{ri.materialName}{ri.materialCode ? ` (${ri.materialCode})` : ''}</td>
+                            <td>{unitLabels[ri.unit] || ri.unit}</td>
+                            <td>{ri.requestedQty}</td>
+                            <td>{ri.approvedQty}</td>
+                            <td>{ri.preparedQty}</td>
+                            <td>{ri.deliveredQty}</td>
+                            <td style={{ fontSize: 11, color: 'var(--text-soft)' }}>{ri.lineNotes || '-'}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+
+              {/* ── Section 5: حالة الذمة (الأصناف على المستلم) ── */}
+              {(cd.items || []).length > 0 && (
+                <div style={sectionStyle}>
+                  <div style={sectionTitle}>حالة الذمة (الأصناف على المستلم)</div>
+                  <div style={{ overflowX: 'auto' }}>
+                    <table className="table" style={{ fontSize: 12 }}>
+                      <thead>
+                        <tr>
+                          <th>المادة</th>
+                          <th>الوحدة</th>
+                          <th>المستلم</th>
+                          <th>المستهلك</th>
+                          <th>المرتجع</th>
+                          <th>تالف</th>
+                          <th>مفقود</th>
+                          <th style={{ fontWeight: 700 }}>المتبقي</th>
+                          <th>الحالة</th>
+                          <th>ملاحظات</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {cd.items.map((it, idx) => (
+                          <tr key={idx}>
+                            <td style={{ fontWeight: 500 }}>{it.materialName}{it.materialCode ? ` (${it.materialCode})` : ''}</td>
+                            <td>{unitLabels[it.unit] || it.unit}</td>
+                            <td>{it.receivedQty}</td>
+                            <td>{it.consumedQty}</td>
+                            <td>{it.returnedQty}</td>
+                            <td>{it.damagedQty}</td>
+                            <td>{it.lostQty}</td>
+                            <td style={{ fontWeight: 700, color: it.remainingQty > 0 ? 'var(--danger, #f28787)' : 'var(--accent, #c4d743)' }}>{it.remainingQty}</td>
+                            <td style={{ whiteSpace: 'nowrap' }}><Badge status={it.lineStatus} /></td>
+                            <td style={{ fontSize: 11, color: 'var(--text-soft)' }}>{it.notes || '-'}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+
+              {/* ── Section 6: الملاحظات ── */}
+              {(cd.generalNotes || cd.notes) && (
+                <div style={sectionStyle}>
+                  <div style={sectionTitle}>الملاحظات</div>
+                  {cd.generalNotes && <div style={{ fontSize: 13, marginBottom: 4 }}><span style={label}>ملاحظات الطلب:</span> {cd.generalNotes}</div>}
+                  {cd.notes && <div style={{ fontSize: 13 }}><span style={label}>ملاحظات الذمة:</span> {cd.notes}</div>}
+                </div>
+              )}
+
+              {/* ── Section 7: التسليم ── */}
+              {(cd.dispatchInfo || []).length > 0 && (
+                <div style={sectionStyle}>
+                  <div style={sectionTitle}>سجل التسليم</div>
+                  <ul style={{ margin: 0, padding: '0 16px', fontSize: 13 }}>
+                    {cd.dispatchInfo.map((d, i) => (
+                      <li key={i} style={{ marginBottom: 4 }}>
+                        <strong>{d.dispatchNo}</strong> — <Badge status={d.status} /> — {fmtDateTime(d.deliveredAt)}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
+              {/* ── Section 8: سجل الاعتمادات ── */}
+              {(cd.approvals || []).length > 0 && (
+                <div style={sectionStyle}>
+                  <div style={sectionTitle}>سجل الاعتمادات</div>
+                  <ul style={{ margin: 0, padding: '0 16px', fontSize: 13 }}>
+                    {cd.approvals.map((a, i) => (
+                      <li key={i} style={{ marginBottom: 4 }}>
+                        <strong>{a.approvedBy}</strong> — {a.action === 'APPROVE_FULL' ? 'اعتماد كامل' : a.action === 'APPROVE_PARTIAL' ? 'اعتماد جزئي' : a.action === 'REJECT' ? 'رفض' : a.action} — {fmtDateTime(a.approvedAt)}
+                        {a.comment && <span style={{ color: 'var(--text-soft)' }}> — {a.comment}</span>}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
+              {/* ── Section 9: سجل التجهيز ── */}
+              {(cd.preparations || []).length > 0 && (
+                <div style={sectionStyle}>
+                  <div style={sectionTitle}>سجل التجهيز</div>
+                  <ul style={{ margin: 0, padding: '0 16px', fontSize: 13 }}>
+                    {cd.preparations.map((p, i) => (
+                      <li key={i} style={{ marginBottom: 4 }}>
+                        <strong>{p.preparedBy}</strong> — {p.mode === 'FULL' ? 'تجهيز كامل' : 'تجهيز جزئي'} — المخزن: {p.warehouse} — {fmtDateTime(p.preparedAt)}
+                        {p.notes && <span style={{ color: 'var(--text-soft)' }}> — {p.notes}</span>}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </div>
+          );
+        })()}
+      </Modal>
+
       {/* Detail Modal */}
       <Modal open={!!detailModal} title={`تفاصيل الطلب ${detailModal?.requestNo || ''}`} onClose={() => setDetailModal(null)}>
         {detailModal && (
           <>
             <div className="grid-3" style={{ gap: 8, marginBottom: 12 }}>
-              <div><span style={{ color: 'var(--text-soft)' }}>المشروع:</span> {detailModal.project?.name || '-'}</div>
+              <div><span style={{ color: 'var(--text-soft)' }}>المشروع:</span> {detailModal.project?.name || detailModal.manualProjectName || detailModal.projectName || '-'}</div>
               <div><span style={{ color: 'var(--text-soft)' }}>الطالب:</span> {detailModal.requestedBy?.fullName || '-'}</div>
               <div><span style={{ color: 'var(--text-soft)' }}>المستلم:</span> {detailModal.requestedFor?.fullName || detailModal.requestedBy?.fullName || '-'}</div>
               <div><span style={{ color: 'var(--text-soft)' }}>المجهز:</span> {detailModal.assignedPreparer?.fullName || 'غير معين'}</div>
-              <div><span style={{ color: 'var(--text-soft)' }}>الحالة:</span> <Badge status={detailModal.status} /></div>
+              <div><span style={{ color: 'var(--text-soft)' }}>الحالة:</span> <Badge status={detailModal.archived ? 'ARCHIVED' : detailModal.status} /></div>
               <div><span style={{ color: 'var(--text-soft)' }}>الأولوية:</span> {detailModal.priority || '-'}</div>
+              <div><span style={{ color: 'var(--text-soft)' }}>تاريخ الإنشاء:</span> {detailModal.requestDate ? new Date(detailModal.requestDate).toLocaleDateString('ar-IQ') : detailModal.createdAt ? new Date(detailModal.createdAt).toLocaleDateString('ar-IQ') : '-'}</div>
+              {detailModal.closedAt && <div><span style={{ color: 'var(--text-soft)' }}>تاريخ الإغلاق:</span> {new Date(detailModal.closedAt).toLocaleDateString('ar-IQ')}</div>}
+              {detailModal.archivedAt && <div><span style={{ color: 'var(--text-soft)' }}>تاريخ الأرشفة:</span> {new Date(detailModal.archivedAt).toLocaleDateString('ar-IQ')}</div>}
             </div>
             <table className="table">
               <thead><tr><th>المادة</th><th>المطلوب</th><th>المعتمد</th><th>المجهز</th><th>المسلم</th><th>الوحدة</th></tr></thead>
@@ -706,6 +1218,33 @@ export default function MaterialsPage() {
               </tbody>
             </table>
             {detailModal.generalNotes && <p style={{ marginTop: 8, color: 'var(--text-soft)' }}>ملاحظات: {detailModal.generalNotes}</p>}
+            {/* Approval trail */}
+            {(detailModal.approvals || []).length > 0 && (
+              <>
+                <h4 style={{ margin: '12px 0 6px' }}>سجل الاعتمادات</h4>
+                <ul style={{ margin: 0, padding: '0 16px', fontSize: 13 }}>
+                  {detailModal.approvals.map((a, i) => (
+                    <li key={i} style={{ marginBottom: 4 }}>
+                      <strong>{a.approvedBy?.fullName || '-'}</strong> — {a.action === 'APPROVE_FULL' ? 'اعتماد كامل' : a.action === 'REJECT' ? 'رفض' : a.action} — {a.approvedAt ? new Date(a.approvedAt).toLocaleString('ar-IQ') : '-'}
+                      {a.comment && <span style={{ color: 'var(--text-soft)' }}> — {a.comment}</span>}
+                    </li>
+                  ))}
+                </ul>
+              </>
+            )}
+            {/* Preparations */}
+            {(detailModal.preparations || []).length > 0 && (
+              <>
+                <h4 style={{ margin: '12px 0 6px' }}>سجل التجهيز</h4>
+                <ul style={{ margin: 0, padding: '0 16px', fontSize: 13 }}>
+                  {detailModal.preparations.map((p, i) => (
+                    <li key={i} style={{ marginBottom: 4 }}>
+                      <strong>{p.preparedBy?.fullName || '-'}</strong> — {p.mode === 'FULL' ? 'تجهيز كامل' : 'تجهيز جزئي'} — {p.preparedAt ? new Date(p.preparedAt).toLocaleString('ar-IQ') : '-'}
+                    </li>
+                  ))}
+                </ul>
+              </>
+            )}
           </>
         )}
       </Modal>

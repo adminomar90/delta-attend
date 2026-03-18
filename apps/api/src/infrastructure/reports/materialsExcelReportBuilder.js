@@ -15,6 +15,7 @@ const addSheet = (workbook, title, columns, rows = []) => {
 
 export const buildMaterialsExcelBuffer = async ({
   requests = [],
+  requestItems = [],
   dispatches = [],
   openCustodies = [],
   reconciliations = [],
@@ -35,8 +36,26 @@ export const buildMaterialsExcelBuffer = async ({
       { header: 'الحالة', key: 'status', width: 24 },
       { header: 'تاريخ الطلب', key: 'requestDate', width: 18 },
       { header: 'عدد البنود', key: 'itemsCount', width: 12 },
+      { header: 'المواد المستخدمة', key: 'materials', width: 40 },
     ],
     requests,
+  );
+
+  addSheet(
+    workbook,
+    'بنود الطلبات',
+    [
+      { header: 'رقم الطلب', key: 'requestNo', width: 18 },
+      { header: 'المشروع', key: 'projectName', width: 22 },
+      { header: 'اسم المادة', key: 'materialName', width: 28 },
+      { header: 'الوحدة', key: 'unit', width: 12 },
+      { header: 'الكمية المطلوبة', key: 'requestedQty', width: 14 },
+      { header: 'الكمية المعتمدة', key: 'approvedQty', width: 14 },
+      { header: 'الكمية المجهزة', key: 'preparedQty', width: 14 },
+      { header: 'الكمية المسلمة', key: 'deliveredQty', width: 14 },
+      { header: 'ملاحظات', key: 'notes', width: 24 },
+    ],
+    requestItems,
   );
 
   addSheet(

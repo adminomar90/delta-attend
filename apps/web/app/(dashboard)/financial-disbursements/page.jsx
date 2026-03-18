@@ -28,7 +28,7 @@ const typeLabelMap = {
   SALARY_ADVANCE: 'سلفة من راتب',
   BUSINESS_EXPENSE: 'مصروف تشغيلي',
   EXCEPTIONAL_EXPENSE: 'مصروف استثنائي',
-  TRAVEL_EXPENSE: 'مصروف سفر',
+  TRAVEL_EXPENSE: 'مصروف السفر',
   PURCHASE_REIMBURSEMENT: 'استرداد شراء',
   OTHER: 'أخرى',
 };
@@ -41,7 +41,7 @@ const typeOptions = [
   ['SALARY_ADVANCE', 'سلفة من راتب'],
   ['BUSINESS_EXPENSE', 'مصروف تشغيلي'],
   ['EXCEPTIONAL_EXPENSE', 'مصروف استثنائي'],
-  ['TRAVEL_EXPENSE', 'مصروف سفر'],
+  ['TRAVEL_EXPENSE', 'مصروف السفر'],
   ['PURCHASE_REIMBURSEMENT', 'استرداد شراء'],
   ['OTHER', 'أخرى'],
 ];
@@ -66,6 +66,19 @@ const statusClassMap = {
   REJECTED_BY_FINANCIAL_MANAGER: 'status-rejected',
   REJECTED_BY_GENERAL_MANAGER: 'status-rejected',
 };
+
+function SortableHeader({ label, sortKey, activeSortKey, sortDirection, onSort, disabled }) {
+  if (disabled) return <th>{label}</th>;
+  const isActive = activeSortKey === sortKey;
+  return (
+    <th
+      style={{ cursor: 'pointer', userSelect: 'none' }}
+      onClick={() => onSort(sortKey)}
+    >
+      {label} {isActive ? (sortDirection === 'asc' ? '▲' : '▼') : ''}
+    </th>
+  );
+}
 
 export default function FinancialDisbursementsPage() {
   const currentUser = authStorage.getUser();
@@ -479,6 +492,58 @@ export default function FinancialDisbursementsPage() {
   const isReviewable = (request) =>
     request.canReviewAsProjectManager || request.canReviewAsFinancialManager || request.canReviewAsGeneralManager;
 
+  const [searchText, setSearchText] = useState('');
+  const filteredRequests = useMemo(() => {
+    if (!searchText) return requests;
+    const lower = searchText.toLowerCase();
+    return requests.filter(r =>
+      String(r.requestNo || '').toLowerCase().includes(lower) ||
+      String(r.employee?.fullName || '').toLowerCase().includes(lower) ||
+      String(typeLabelMap[r.requestType] || r.requestType).toLowerCase().includes(lower) ||
+      String(r.description || '').toLowerCase().includes(lower)
+    );
+  }, [searchText, requests]);
+
+  const [finSK, setFinSK] = useState('');
+  const [finSD, setFinSD] = useState('asc');
+
+  const sortAccessors = {
+    requestNo: (r) => r.requestNo,
+    transactionDate: (r) => r.transactionDate || r.createdAt || '',
+    employee: (r) => r.employee?.fullName || '',
+    amount: (r) => Number(r.amount || 0),
+    totalAmount: (r) => Number(r.transactionTotalAmount || r.amount || 0),
+    status: (r) => r.status,
+    attachments: (r) => (r.attachments || []).length,
+    points: (r) => Number(r.pointsImpact || 0),
+  };
+
+  const finSort = (key) => {
+    if (finSK === key) {
+      setFinSD((prev) => (prev === 'asc' ? 'desc' : 'asc'));
+    } else {
+      setFinSK(key);
+      setFinSD('asc');
+    }
+  };
+
+  const sortedRequests = useMemo(() => {
+    if (!finSK) return filteredRequests;
+    const accessor = sortAccessors[finSK];
+    if (!accessor) return filteredRequests;
+    return [...filteredRequests].sort((a, b) => {
+      const va = accessor(a);
+      const vb = accessor(b);
+      let cmp = 0;
+      if (typeof va === 'number' && typeof vb === 'number') {
+        cmp = va - vb;
+      } else {
+        cmp = String(va).localeCompare(String(vb), 'ar');
+      }
+      return finSD === 'asc' ? cmp : -cmp;
+    });
+  }, [filteredRequests, finSK, finSD]);
+
   if (loading) {
     return <section className="card section">جارٍ تحميل نظام الصرف المالي...</section>;
   }
@@ -658,22 +723,32 @@ export default function FinancialDisbursementsPage() {
 
       <section className="card section">
         <h2>طلبات الصرف المالي</h2>
+        <div style={{ marginBottom: 12 }}>
+          <input
+            className="input"
+            type="text"
+            placeholder="بحث برقم الطلب، اسم الموظف، نوع الصرف، أو الوصف..."
+            value={searchText}
+            onChange={(e) => setSearchText(e.target.value)}
+            style={{ maxWidth: 400 }}
+          />
+        </div>
         <table className="table">
           <thead>
             <tr>
-              <th>الطلب</th>
-              <th>تاريخ المعاملة</th>
-              <th>الموظف</th>
-              <th>القيمة</th>
-              <th>إجمالي المعاملة</th>
-              <th>الحالة</th>
-              <th>المرفقات</th>
-              <th>النقاط</th>
-              <th>الإجراءات</th>
+              <SortableHeader label="الطلب" sortKey="requestNo" accessor={(r) => r.requestNo} activeSortKey={finSK} sortDirection={finSD} onSort={finSort} />
+              <SortableHeader label="تاريخ المعاملة" sortKey="transactionDate" accessor={(r) => r.transactionDate || r.createdAt || ''} activeSortKey={finSK} sortDirection={finSD} onSort={finSort} />
+              <SortableHeader label="الموظف" sortKey="employee" accessor={(r) => r.employee?.fullName || ''} activeSortKey={finSK} sortDirection={finSD} onSort={finSort} />
+              <SortableHeader label="القيمة" sortKey="amount" accessor={(r) => Number(r.amount || 0)} activeSortKey={finSK} sortDirection={finSD} onSort={finSort} />
+              <SortableHeader label="إجمالي المعاملة" sortKey="totalAmount" accessor={(r) => Number(r.transactionTotalAmount || r.amount || 0)} activeSortKey={finSK} sortDirection={finSD} onSort={finSort} />
+              <SortableHeader label="الحالة" sortKey="status" accessor={(r) => r.status} activeSortKey={finSK} sortDirection={finSD} onSort={finSort} />
+              <SortableHeader label="المرفقات" sortKey="attachments" accessor={(r) => (r.attachments || []).length} activeSortKey={finSK} sortDirection={finSD} onSort={finSort} />
+              <SortableHeader label="النقاط" sortKey="points" accessor={(r) => Number(r.pointsImpact || 0)} activeSortKey={finSK} sortDirection={finSD} onSort={finSort} />
+              <SortableHeader label="الإجراءات" disabled />
             </tr>
           </thead>
           <tbody>
-            {requests.length ? requests.map((request) => (
+            {sortedRequests.length ? sortedRequests.map((request) => (
               <tr key={request.id}>
                 <td>
                   <strong>{request.requestNo}</strong>
@@ -740,7 +815,7 @@ export default function FinancialDisbursementsPage() {
                         <button className="btn btn-soft" type="button" onClick={() => downloadTransactionPdf(request)}>PDF</button>
                       ) : null}
                       <button className="btn btn-soft" type="button" onClick={() => sendWhatsapp(request)}>واتساب</button>
-                      {request.canEdit ? <button className="btn btn-soft" type="button" onClick={() => beginEdit(request)}>تعديل</button> : null}
+                      {request.canEdit ? <button className="btn btn-soft" type="button" onClick={() => beginEdit(request)}> تعديل</button> : null}
                       {request.canSubmit ? <button className="btn btn-primary" type="button" onClick={() => submitExistingRequest(request)}>إرسال</button> : null}
                       {request.canReviewAsProjectManager ? <button className="btn btn-primary" type="button" onClick={() => runAction(request, 'projectManager', 'APPROVE')}>اعتماد مدير المشاريع</button> : null}
                       {request.canReviewAsProjectManager ? <button className="btn btn-soft" type="button" onClick={() => runAction(request, 'projectManager', 'RETURN_FOR_REVIEW')}>إعادة للمراجعة</button> : null}
@@ -764,9 +839,7 @@ export default function FinancialDisbursementsPage() {
                 </td>
               </tr>
             )) : (
-              <tr>
-                <td colSpan={9} style={{ color: 'var(--text-soft)' }}>لا توجد طلبات صرف مالي حالياً.</td>
-              </tr>
+              <tr><td colSpan={9} style={{ textAlign: 'center', color: 'var(--text-soft)' }}>لا توجد طلبات</td></tr>
             )}
           </tbody>
         </table>

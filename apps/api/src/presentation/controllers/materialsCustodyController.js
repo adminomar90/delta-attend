@@ -4,6 +4,8 @@ import { auditService } from '../../application/services/auditService.js';
 import { notificationService } from '../../application/services/notificationService.js';
 import { buildWhatsAppSendUrl } from '../../shared/attendanceUtils.js';
 import { AppError, asyncHandler } from '../../shared/errors.js';
+import { Permission } from '../../shared/constants.js';
+import { hasPermission } from '../../shared/permissions.js';
 import {
   materialsRepository,
   toCleanString,
@@ -38,12 +40,15 @@ export const listCustodies = asyncHandler(async (req, res) => {
     filter.holder = req.query.holderId;
   }
 
-  const managedUserIds = await resolveManagedScope(req);
-
   if (String(req.query.mine || '').toLowerCase() === 'true') {
     filter.holder = req.user.id;
-  } else if (Array.isArray(managedUserIds)) {
-    filter.holder = { $in: managedUserIds };
+  } else if (hasPermission(req.user, Permission.PREPARE_MATERIAL_REQUESTS)) {
+    /* preparers can see all custodies */
+  } else {
+    const managedUserIds = await resolveManagedScope(req);
+    if (Array.isArray(managedUserIds)) {
+      filter.holder = { $in: managedUserIds };
+    }
   }
 
   const custodies = await materialsRepository.listCustodies(filter, { limit: 500 });
@@ -98,10 +103,12 @@ export const submitCustodyReconciliation = asyncHandler(async (req, res) => {
 
   const holderId = String(custody.holder?._id || custody.holder || '');
   const actorId = String(req.user.id);
-  const managedUserIds = await resolveManagedScope(req);
 
-  if (holderId !== actorId && !isWithinScope(managedUserIds, holderId)) {
-    throw new AppError('You cannot submit reconciliation for this custody', 403);
+  if (holderId !== actorId && !hasPermission(req.user, Permission.PREPARE_MATERIAL_REQUESTS)) {
+    const managedUserIds = await resolveManagedScope(req);
+    if (!isWithinScope(managedUserIds, holderId)) {
+      throw new AppError('You cannot submit reconciliation for this custody', 403);
+    }
   }
 
   if (['CLOSED'].includes(custody.status)) {
@@ -261,17 +268,18 @@ export const listReconciliations = asyncHandler(async (req, res) => {
     filter.request = req.query.requestId;
   }
 
-  const managedUserIds = await resolveManagedScope(req);
-  if (Array.isArray(managedUserIds)) {
-    filter.$or = [
-      { submittedBy: { $in: managedUserIds } },
-      { reviewedBy: { $in: managedUserIds } },
-    ];
-  }
-
   if (String(req.query.mine || '').toLowerCase() === 'true') {
     filter.submittedBy = req.user.id;
-    delete filter.$or;
+  } else if (hasPermission(req.user, Permission.PREPARE_MATERIAL_REQUESTS)) {
+    /* preparers can see all reconciliations */
+  } else {
+    const managedUserIds = await resolveManagedScope(req);
+    if (Array.isArray(managedUserIds)) {
+      filter.$or = [
+        { submittedBy: { $in: managedUserIds } },
+        { reviewedBy: { $in: managedUserIds } },
+      ];
+    }
   }
 
   const reconciliations = await materialsRepository.listReconciliations(filter, { limit: 500 });

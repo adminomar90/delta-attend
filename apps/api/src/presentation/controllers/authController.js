@@ -512,6 +512,9 @@ export const login = asyncHandler(async (req, res) => {
   const token = issueAccessToken(user);
   await userRepository.updateLastLogin(user._id);
 
+  req.session.userId = String(user._id);
+  req.session.sv = user.sessionVersion || 1;
+
   res.json({
     token,
     user: serializeUser(user),
@@ -547,6 +550,9 @@ export const verifyOtp = asyncHandler(async (req, res) => {
   const token = issueAccessToken(user);
   await userRepository.updateLastLogin(user._id);
 
+  req.session.userId = String(user._id);
+  req.session.sv = user.sessionVersion || 1;
+
   res.json({
     token,
     user: serializeUser(user),
@@ -563,7 +569,10 @@ export const me = asyncHandler(async (req, res) => {
     await user.populate('manager', 'fullName role jobTitle');
   }
 
+  const token = issueAccessToken(user);
+
   res.json({
+    token,
     user: serializeUser(user),
   });
 });
@@ -1197,6 +1206,17 @@ export const orgChart = asyncHandler(async (req, res) => {
 export const listAvailablePermissions = asyncHandler(async (req, res) => {
   res.json({
     permissions: Object.values(Permission),
+  });
+});
+
+export const logout = asyncHandler(async (req, res) => {
+  req.session.destroy((err) => {
+    if (err) {
+      return res.status(500).json({ message: 'Failed to logout' });
+    }
+
+    res.clearCookie('connect.sid');
+    return res.json({ message: 'Logged out successfully' });
   });
 });
 

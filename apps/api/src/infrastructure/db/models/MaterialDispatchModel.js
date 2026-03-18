@@ -64,8 +64,13 @@ const materialDispatchSchema = new mongoose.Schema(
     project: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'Project',
-      required: true,
+      default: null,
       index: true,
+    },
+    manualProjectName: {
+      type: String,
+      default: '',
+      trim: true,
     },
     recipient: {
       type: mongoose.Schema.Types.ObjectId,

@@ -2,6 +2,7 @@ import { Router } from 'express';
 import {
   login,
   verifyOtp,
+  logout,
   me,
   listUsers,
   createUser,
@@ -39,6 +40,7 @@ const authRoutes = Router();
 
 authRoutes.post('/login', login);
 authRoutes.post('/verify-otp', verifyOtp);
+authRoutes.post('/logout', logout);
 authRoutes.post('/admin/setup', createSuperAdmin);
 
 authRoutes.get('/me', requireAuth, me);
