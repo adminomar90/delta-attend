@@ -127,17 +127,12 @@ export default function AppShell({ children }) {
     let cancelled = false;
 
     const verifySession = async () => {
-      const token = authStorage.getToken();
-      if (!token) {
-        router.push('/login');
-        return;
-      }
-
       try {
         const data = await api.get('/auth/me');
         if (cancelled) return;
 
         const currentUser = data.user;
+        if (data.token) authStorage.setToken(data.token);
         authStorage.setUser(currentUser);
 
         const requiredPermissions = resolveRouteValue(pathname, routePermissionRules);
