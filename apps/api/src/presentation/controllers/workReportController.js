@@ -113,14 +113,21 @@ const parseIdArray = (value) => {
   return [];
 };
 
-const buildUploadedImages = (files = [], comments = []) =>
-  files.map((file, index) => ({
+const buildUploadedImages = (files = [], comments = []) => {
+  if (files.length) {
+    console.log(`[WorkReport] Processing ${files.length} uploaded image(s):`);
+    files.forEach((file, i) => {
+      console.log(`  [${i + 1}] ${file.originalname} - ${(file.size / 1024).toFixed(1)} KB - ${file.mimetype}`);
+    });
+  }
+  return files.map((file, index) => ({
     publicUrl: `/uploads/${file.filename}`,
     originalName: file.originalname,
     mimeType: file.mimetype,
     size: Number(file.size || 0),
     comment: toCleanString(comments[index]),
   }));
+};
 
 const formatPoints = (value) => {
   const parsed = Number(value || 0);

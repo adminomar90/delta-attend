@@ -67,6 +67,58 @@ export const api = {
     });
   },
 
+  /**
+   * POST with upload progress tracking via XMLHttpRequest.
+   * @param {string} path - API path
+   * @param {FormData} formData - Must be FormData
+   * @param {{ onProgress?: (e: {loaded:number, total:number, percent:number}) => void }} options
+   * @returns {Promise<any>}
+   */
+  postWithProgress(path, formData, { onProgress } = {}) {
+    return new Promise((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open('POST', `${API_URL}${path}`);
+      xhr.withCredentials = true;
+      xhr.timeout = 180000; // 3 minutes
+
+      if (onProgress) {
+        xhr.upload.addEventListener('progress', (e) => {
+          if (e.lengthComputable) {
+            onProgress({
+              loaded: e.loaded,
+              total: e.total,
+              percent: Math.round((e.loaded / e.total) * 100),
+            });
+          }
+        });
+      }
+
+      xhr.addEventListener('load', () => {
+        if (xhr.status >= 200 && xhr.status < 300) {
+          try {
+            resolve(JSON.parse(xhr.responseText));
+          } catch {
+            resolve(xhr.responseText);
+          }
+        } else {
+          if (xhr.status === 401) emitAuthExpired();
+          try {
+            const payload = JSON.parse(xhr.responseText);
+            reject(new Error(payload.message || 'فشل الإرسال'));
+          } catch {
+            reject(new Error('فشل الإرسال'));
+          }
+        }
+      });
+
+      xhr.addEventListener('error', () => reject(new Error('تعذر الاتصال بالسيرفر')));
+      xhr.addEventListener('timeout', () => reject(new Error('انتهت مهلة الرفع — حاول تقليل حجم الصور')));
+      xhr.addEventListener('abort', () => reject(new Error('تم إلغاء الرفع')));
+
+      xhr.send(formData);
+    });
+  },
+
   patch(path, body) {
     return this.request(path, {
       method: 'PATCH',

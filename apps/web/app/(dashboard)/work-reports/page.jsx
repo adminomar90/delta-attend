@@ -8,6 +8,7 @@ import {
   calculateWorkReportDistribution,
   formatWorkReportPoints,
 } from '../../../lib/workReportPoints';
+import { compressImage, formatFileSize } from '../../../lib/imageUtils';
 
 /* ── Constants ─────────────────────────────────────────────────────────────── */
 
@@ -116,6 +117,9 @@ export default function WorkReportsPage() {
   const [rejecting, setRejecting] = useState(false);
   const [directApprovingId, setDirectApprovingId] = useState('');
   const [directRejectingId, setDirectRejectingId] = useState('');
+  const [uploadProgress, setUploadProgress] = useState(0);
+  const [isUploading, setIsUploading] = useState(false);
+  const [dragActive, setDragActive] = useState(false);
   const attachmentsRef = useRef([]);
 
   /* permissions */
@@ -264,19 +268,46 @@ export default function WorkReportsPage() {
     clearAttachments();
   };
 
-  const addAttachments = (fileList) => {
+  const addAttachments = async (fileList) => {
     const files = Array.from(fileList || []).filter((f) => f.type.startsWith('image/'));
     if (!files.length) return;
-    setAttachments((prev) => {
-      const remaining = Math.max(0, 10 - prev.length);
-      const selected = files.slice(0, remaining).map((file) => ({
-        id: makeAttachmentId(),
-        file,
-        comment: '',
-        previewUrl: window.URL.createObjectURL(file),
-      }));
-      return [...prev, ...selected];
-    });
+
+    const currentCount = attachments.length;
+    const remaining = Math.max(0, 10 - currentCount);
+    if (!remaining) return;
+    const selected = files.slice(0, remaining);
+
+    // Create attachment items with 'compressing' status
+    const newItems = selected.map((file) => ({
+      id: makeAttachmentId(),
+      file,
+      originalSize: file.size,
+      compressedSize: file.size,
+      comment: '',
+      previewUrl: window.URL.createObjectURL(file),
+      status: 'compressing', // compressing | ready | uploading | done | error
+      error: '',
+    }));
+
+    setAttachments((prev) => [...prev, ...newItems]);
+
+    // Compress each image asynchronously
+    for (const item of newItems) {
+      try {
+        const compressed = await compressImage(item.file);
+        setAttachments((prev) =>
+          prev.map((a) =>
+            a.id === item.id
+              ? { ...a, file: compressed, compressedSize: compressed.size, status: 'ready' }
+              : a,
+          ),
+        );
+      } catch {
+        setAttachments((prev) =>
+          prev.map((a) => (a.id === item.id ? { ...a, status: 'ready' } : a)),
+        );
+      }
+    }
   };
 
   const updateAttachmentComment = (id, comment) => {
@@ -321,8 +352,11 @@ export default function WorkReportsPage() {
   const submitReport = async (event) => {
     event.preventDefault();
     setSaving(true);
+    setIsUploading(false);
+    setUploadProgress(0);
     setError('');
     setInfo('');
+    let uploadStarted = false;
     try {
       const normalizedCount = Math.max(0, Number(form.participantCount || 0));
       const participantIds = Array.from(
@@ -344,6 +378,12 @@ export default function WorkReportsPage() {
         throw new Error('\u064A\u0631\u062C\u0649 \u0643\u062A\u0627\u0628\u0629 \u0627\u0633\u0645 \u0627\u0644\u0645\u0634\u0631\u0648\u0639.');
       }
 
+      // Wait for compression to finish
+      const isCompressing = attachments.some((a) => a.status === 'compressing');
+      if (isCompressing) {
+        throw new Error('يرجى الانتظار حتى اكتمال ضغط الصور.');
+      }
+
       const payload = new FormData();
       payload.append('projectName', form.projectName);
       payload.append('activityType', form.activityType);
@@ -361,15 +401,44 @@ export default function WorkReportsPage() {
       attachments.forEach((item) => payload.append('images', item.file));
       payload.append('imageComments', JSON.stringify(attachments.map((item) => item.comment || '')));
 
-      await api.post('/work-reports', payload);
+      const hasImages = attachments.length > 0;
+
+      if (hasImages) {
+        // Mark all images as uploading
+        uploadStarted = true;
+        setIsUploading(true);
+        setAttachments((prev) => prev.map((a) => ({ ...a, status: 'uploading', error: '' })));
+      }
+
+      // Use progress-tracked upload when images are present
+      const response = hasImages
+        ? await api.postWithProgress('/work-reports', payload, {
+            onProgress: ({ percent }) => setUploadProgress(percent),
+          })
+        : await api.post('/work-reports', payload);
+
+      if (hasImages) {
+        setAttachments((prev) => prev.map((a) => ({ ...a, status: 'done' })));
+        setUploadProgress(100);
+      }
+
       setInfo('تم إنشاء تقرير العمل بنجاح وإرساله للاعتماد.');
       resetForm();
       setShowCreateForm(false);
       await load();
     } catch (err) {
       setError(err.message || 'فشل إنشاء تقرير العمل');
+      // Mark images as error if upload was in progress
+      if (uploadStarted) {
+        setAttachments((prev) =>
+          prev.map((a) =>
+            a.status === 'uploading' ? { ...a, status: 'error', error: err.message || 'فشل الرفع' } : a,
+          ),
+        );
+      }
     } finally {
       setSaving(false);
+      setIsUploading(false);
     }
   };
 
@@ -821,64 +890,231 @@ export default function WorkReportsPage() {
                 صور الأعمال (حتى 10 صور)
               </h3>
               <p style={{ marginTop: 4, color: 'var(--text-soft)', fontSize: 12 }}>
-                يمكنك فتح كاميرا الموبايل مباشرة أو اختيار صور موجودة في الجهاز.
+                يمكنك فتح كاميرا الموبايل مباشرة أو اختيار صور أو سحب وإفلات الصور هنا. يتم ضغط الصور تلقائيًا لتسريع الرفع.
               </p>
-              <div className="action-row" style={{ marginBottom: 10 }}>
-                <label className="btn btn-soft" style={{ cursor: 'pointer' }}>
-                  فتح الكاميرا مباشرة
-                  <input
-                    type="file"
-                    accept="image/*"
-                    capture="environment"
-                    style={{ display: 'none' }}
-                    onChange={(e) => { addAttachments(e.target.files); e.target.value = ''; }}
-                  />
-                </label>
-                <label className="btn btn-soft" style={{ cursor: 'pointer' }}>
-                  رفع من ملفات الجهاز
-                  <input
-                    type="file"
-                    accept="image/*"
-                    multiple
-                    style={{ display: 'none' }}
-                    onChange={(e) => { addAttachments(e.target.files); e.target.value = ''; }}
-                  />
-                </label>
+
+              {/* Drag & Drop Zone */}
+              <div
+                onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); setDragActive(true); }}
+                onDragLeave={(e) => { e.preventDefault(); e.stopPropagation(); setDragActive(false); }}
+                onDrop={(e) => { e.preventDefault(); e.stopPropagation(); setDragActive(false); addAttachments(e.dataTransfer.files); }}
+                style={{
+                  border: `2px dashed ${dragActive ? '#4d91ff' : 'var(--border)'}`,
+                  borderRadius: 12,
+                  padding: '20px 16px',
+                  textAlign: 'center',
+                  background: dragActive ? 'rgba(77,145,255,0.06)' : 'transparent',
+                  marginBottom: 12,
+                  marginTop: 8,
+                  transition: 'all 0.2s ease',
+                }}
+              >
+                <div style={{ fontSize: 28, marginBottom: 6, opacity: 0.4 }}>📷</div>
+                <p style={{ color: 'var(--text-soft)', fontSize: 13, margin: '0 0 10px' }}>
+                  اسحب الصور وأفلتها هنا أو استخدم الأزرار أدناه
+                </p>
+                <div style={{ display: 'flex', gap: 8, justifyContent: 'center', flexWrap: 'wrap' }}>
+                  <label className="btn btn-soft" style={{ cursor: 'pointer' }}>
+                    فتح الكاميرا مباشرة
+                    <input
+                      type="file"
+                      accept="image/*"
+                      capture="environment"
+                      style={{ display: 'none' }}
+                      onChange={(e) => { addAttachments(e.target.files); e.target.value = ''; }}
+                    />
+                  </label>
+                  <label className="btn btn-soft" style={{ cursor: 'pointer' }}>
+                    رفع من ملفات الجهاز
+                    <input
+                      type="file"
+                      accept="image/*"
+                      multiple
+                      style={{ display: 'none' }}
+                      onChange={(e) => { addAttachments(e.target.files); e.target.value = ''; }}
+                    />
+                  </label>
+                </div>
+                {attachments.length > 0 && (
+                  <p style={{ marginTop: 8, fontSize: 12, color: '#4d91ff' }}>
+                    {attachments.length} / 10 صور مضافة
+                  </p>
+                )}
               </div>
 
+              {/* ── Overall Upload Progress Bar ── */}
+              {isUploading && (
+                <div style={{ marginBottom: 14, background: '#0e1a34', borderRadius: 10, padding: '12px 14px', border: '1px solid var(--border)' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                    <span style={{ fontSize: 13, fontWeight: 600 }}>جاري رفع الصور...</span>
+                    <span style={{ fontSize: 13, fontWeight: 700, color: '#4d91ff' }}>{uploadProgress}%</span>
+                  </div>
+                  <div style={{ width: '100%', height: 10, borderRadius: 5, background: '#1e2d4d', overflow: 'hidden' }}>
+                    <div style={{
+                      width: `${uploadProgress}%`,
+                      height: '100%',
+                      borderRadius: 5,
+                      background: uploadProgress >= 100 ? '#27ae60' : '#4d91ff',
+                      transition: 'width 0.3s ease',
+                    }} />
+                  </div>
+                </div>
+              )}
+
+              {/* ── Image Cards Grid ── */}
               {attachments.length ? (
-                <div className="grid-3" style={{ gap: 10 }}>
-                  {attachments.map((item) => (
-                    <article
-                      key={item.id}
-                      style={{
-                        border: '1px solid var(--border)',
-                        borderRadius: 10,
-                        padding: 10,
-                        background: '#0e1a34',
-                      }}
-                    >
-                      <img
-                        src={item.previewUrl}
-                        alt="attachment preview"
-                        style={{ width: '100%', height: 140, objectFit: 'cover', borderRadius: 8, marginBottom: 8 }}
-                      />
-                      <input
-                        className="input"
-                        placeholder="تعليق على الصورة"
-                        value={item.comment}
-                        onChange={(e) => updateAttachmentComment(item.id, e.target.value)}
-                      />
-                      <button
-                        className="btn btn-soft"
-                        type="button"
-                        style={{ marginTop: 8 }}
-                        onClick={() => removeAttachment(item.id)}
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 220px))', gap: 14 }}>
+                  {attachments.map((item) => {
+                    const statusColor =
+                      item.status === 'done' ? '#27ae60' :
+                      item.status === 'error' ? '#c0392b' :
+                      item.status === 'uploading' ? '#4d91ff' :
+                      item.status === 'compressing' ? '#e67e22' :
+                      'var(--text-soft)';
+
+                    const statusLabel =
+                      item.status === 'compressing' ? '⏳ جاري الضغط...' :
+                      item.status === 'ready' ? '✓ جاهز للرفع' :
+                      item.status === 'uploading' ? '↑ جاري الرفع...' :
+                      item.status === 'done' ? '✓ تم الرفع بنجاح' :
+                      item.status === 'error' ? '✕ فشل الرفع' : '';
+
+                    return (
+                      <article
+                        key={item.id}
+                        style={{
+                          border: `1px solid ${item.status === 'error' ? '#c0392b' : item.status === 'done' ? '#27ae60' : 'var(--border)'}`,
+                          borderRadius: 12,
+                          padding: 12,
+                          background: '#0e1a34',
+                          display: 'flex',
+                          flexDirection: 'column',
+                        }}
                       >
-                        حذف الصورة
-                      </button>
-                    </article>
-                  ))}
+                        {/* Image Preview */}
+                        <div style={{
+                          width: '100%',
+                          height: 160,
+                          borderRadius: 8,
+                          overflow: 'hidden',
+                          background: '#0a1128',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          border: '1px solid var(--border)',
+                          marginBottom: 8,
+                        }}>
+                          <img
+                            src={item.previewUrl}
+                            alt="معاينة"
+                            style={{
+                              maxWidth: '100%',
+                              maxHeight: '100%',
+                              objectFit: 'contain',
+                            }}
+                          />
+                        </div>
+
+                        {/* File Name */}
+                        <div
+                          title={item.file?.name}
+                          style={{
+                            fontSize: 12,
+                            color: 'var(--text-soft)',
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                            whiteSpace: 'nowrap',
+                            marginBottom: 4,
+                            direction: 'ltr',
+                            textAlign: 'right',
+                          }}
+                        >
+                          {item.file?.name || 'صورة'}
+                        </div>
+
+                        {/* File Size */}
+                        <div style={{ fontSize: 11, color: 'var(--text-soft)', marginBottom: 4 }}>
+                          الحجم: {formatFileSize(item.compressedSize || item.file?.size || 0)}
+                          {item.originalSize && item.compressedSize && item.originalSize > item.compressedSize && (
+                            <span style={{ color: '#27ae60', marginRight: 6 }}>
+                              ({formatFileSize(item.originalSize)} ← مضغوط)
+                            </span>
+                          )}
+                        </div>
+
+                        {/* Upload Status */}
+                        <div style={{
+                          fontSize: 12,
+                          fontWeight: 600,
+                          color: statusColor,
+                          marginBottom: 4,
+                        }}>
+                          {statusLabel}
+                        </div>
+
+                        {/* Per-Image Progress Bar */}
+                        {item.status === 'uploading' && (
+                          <div style={{ width: '100%', height: 5, borderRadius: 3, background: '#1e2d4d', overflow: 'hidden', marginBottom: 6 }}>
+                            <div style={{
+                              width: `${uploadProgress}%`,
+                              height: '100%',
+                              borderRadius: 3,
+                              background: '#4d91ff',
+                              transition: 'width 0.3s ease',
+                            }} />
+                          </div>
+                        )}
+
+                        {/* Compression Progress */}
+                        {item.status === 'compressing' && (
+                          <div style={{ width: '100%', height: 5, borderRadius: 3, background: '#1e2d4d', overflow: 'hidden', marginBottom: 6 }}>
+                            <div style={{
+                              width: '60%',
+                              height: '100%',
+                              borderRadius: 3,
+                              background: '#e67e22',
+                              animation: 'pulse 1.2s infinite',
+                            }} />
+                          </div>
+                        )}
+
+                        {/* Error message + Retry */}
+                        {item.status === 'error' && (
+                          <div style={{ fontSize: 11, color: '#c0392b', marginBottom: 4 }}>
+                            {item.error || 'حدث خطأ أثناء الرفع'}
+                          </div>
+                        )}
+
+                        {/* Comment Input */}
+                        <input
+                          className="input"
+                          placeholder="تعليق على الصورة"
+                          value={item.comment}
+                          style={{ marginTop: 'auto', fontSize: 12 }}
+                          onChange={(e) => updateAttachmentComment(item.id, e.target.value)}
+                          disabled={isUploading}
+                        />
+
+                        {/* Delete Button */}
+                        {!isUploading && (
+                          <button
+                            className="btn btn-soft"
+                            type="button"
+                            style={{
+                              marginTop: 8,
+                              width: '100%',
+                              fontSize: 12,
+                              color: '#c0392b',
+                              borderColor: '#c0392b33',
+                            }}
+                            onClick={() => removeAttachment(item.id)}
+                          >
+                            🗑 حذف الصورة
+                          </button>
+                        )}
+                      </article>
+                    );
+                  })}
                 </div>
               ) : (
                 <p style={{ color: 'var(--text-soft)' }}>لم يتم إضافة صور بعد.</p>
@@ -887,10 +1123,20 @@ export default function WorkReportsPage() {
 
             {/* ── Submit ── */}
             <div className="form-actions">
-              <button className="btn btn-primary" type="submit" disabled={saving}>
-                {saving ? 'جارٍ إرسال التقرير...' : 'إرسال التقرير للاعتماد'}
+              <button
+                className="btn btn-primary"
+                type="submit"
+                disabled={saving || isUploading || attachments.some((a) => a.status === 'compressing')}
+              >
+                {isUploading
+                  ? `جاري رفع الصور... ${uploadProgress}%`
+                  : saving
+                    ? 'جارٍ إرسال التقرير...'
+                    : attachments.some((a) => a.status === 'compressing')
+                      ? 'جاري ضغط الصور...'
+                      : 'إرسال التقرير للاعتماد'}
               </button>
-              <button className="btn btn-soft" type="button" onClick={resetForm}>
+              <button className="btn btn-soft" type="button" onClick={resetForm} disabled={saving || isUploading}>
                 إعادة تعيين
               </button>
             </div>
@@ -983,8 +1229,8 @@ export default function WorkReportsPage() {
                 <th>الموظف</th>
                 <th>المشروع</th>
                 <th>العنوان</th>
-                <th>تاريخ العمل</th>
-                <th>الإنجاز</th>
+                <th style={{ minWidth: 100, whiteSpace: 'nowrap' }}>تاريخ العمل</th>
+                <th style={{ minWidth: 120, whiteSpace: 'nowrap' }}>الإنجاز</th>
                 <th>الكادر</th>
                 <th>الحالة</th>
                 <th>النقاط</th>
@@ -1013,16 +1259,17 @@ export default function WorkReportsPage() {
                     </td>
                     <td>{report.project?.name || report.projectName || '-'}</td>
                     <td>{report.title || '-'}</td>
-                    <td>{formatDate(report.workDate || report.createdAt)}</td>
+                    <td style={{ whiteSpace: 'nowrap' }}>{formatDate(report.workDate || report.createdAt)}</td>
                     <td>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, direction: 'ltr', minWidth: 110 }}>
                         <div
                           style={{
-                            width: 50,
+                            flex: 1,
                             height: 8,
                             borderRadius: 4,
                             background: '#1e2d4d',
                             overflow: 'hidden',
+                            minWidth: 50,
                           }}
                         >
                           <div
@@ -1031,10 +1278,11 @@ export default function WorkReportsPage() {
                               height: '100%',
                               borderRadius: 4,
                               background: pct >= 80 ? '#27ae60' : pct >= 50 ? '#2980b9' : '#e67e22',
+                              transition: 'width 0.3s',
                             }}
                           />
                         </div>
-                        <span style={{ fontSize: 12 }}>{pct}%</span>
+                        <span style={{ fontSize: 12, fontVariantNumeric: 'tabular-nums', minWidth: 36, textAlign: 'right', whiteSpace: 'nowrap' }}>{pct}%</span>
                       </div>
                     </td>
                     <td>{reportParticipantCount}</td>
@@ -1292,31 +1540,64 @@ export default function WorkReportsPage() {
 
           {/* Images */}
           <div style={{ marginTop: 16 }}>
-            <h3 style={{ marginBottom: 8 }}>الصور المرفقة</h3>
+            <h3 style={{ marginBottom: 8 }}>الصور المرفقة ({(selectedReport.images || []).length})</h3>
             {(selectedReport.images || []).length ? (
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 220px))', gap: 12 }}>
                 {(selectedReport.images || []).map((image, index) => (
                   <a
                     key={`${selectedReport._id}-img-${index}`}
                     href={resolveUploadUrl(image.publicUrl)}
                     target="_blank"
                     rel="noreferrer"
-                    style={{ width: 110, textDecoration: 'none', color: 'inherit' }}
+                    style={{ textDecoration: 'none', color: 'inherit' }}
                   >
-                    <img
-                      src={resolveUploadUrl(image.publicUrl)}
-                      alt={`report-image-${index + 1}`}
-                      style={{
+                    <div style={{
+                      border: '1px solid var(--border)',
+                      borderRadius: 12,
+                      padding: 10,
+                      background: '#0e1a34',
+                    }}>
+                      <div style={{
                         width: '100%',
-                        height: 90,
-                        objectFit: 'cover',
-                        borderRadius: 10,
+                        height: 160,
+                        borderRadius: 8,
+                        overflow: 'hidden',
+                        background: '#0a1128',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
                         border: '1px solid var(--border)',
-                      }}
-                    />
-                    {image.comment ? (
-                      <div style={{ fontSize: 12, color: 'var(--text-soft)', marginTop: 6 }}>{image.comment}</div>
-                    ) : null}
+                        marginBottom: 8,
+                      }}>
+                        <img
+                          src={resolveUploadUrl(image.publicUrl)}
+                          alt={`صورة التقرير ${index + 1}`}
+                          style={{
+                            maxWidth: '100%',
+                            maxHeight: '100%',
+                            objectFit: 'contain',
+                          }}
+                        />
+                      </div>
+                      {image.originalName && (
+                        <div
+                          title={image.originalName}
+                          style={{ fontSize: 11, color: 'var(--text-soft)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', direction: 'ltr', textAlign: 'right' }}
+                        >
+                          {image.originalName}
+                        </div>
+                      )}
+                      {image.size > 0 && (
+                        <div style={{ fontSize: 11, color: 'var(--text-soft)', marginTop: 2 }}>
+                          {formatFileSize(image.size)}
+                        </div>
+                      )}
+                      {image.comment ? (
+                        <div style={{ fontSize: 12, color: 'var(--text-soft)', marginTop: 6, padding: '4px 6px', background: '#0a1128', borderRadius: 6, border: '1px solid var(--border)' }}>
+                          {image.comment}
+                        </div>
+                      ) : null}
+                    </div>
                   </a>
                 ))}
               </div>

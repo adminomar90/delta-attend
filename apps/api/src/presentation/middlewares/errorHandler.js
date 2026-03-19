@@ -24,12 +24,23 @@ export const errorHandler = (err, req, res, next) => {
   }
 
   if (err.name === 'MulterError') {
+    const multerMessages = {
+      LIMIT_FILE_SIZE: 'حجم الملف كبير جدًا – الحد الأقصى 10 ميجابايت لكل صورة',
+      LIMIT_FILE_COUNT: 'عدد الملفات تجاوز الحد الأقصى المسموح (10 صور)',
+      LIMIT_UNEXPECTED_FILE: 'حقل رفع الملف غير متوقع',
+      LIMIT_PART_COUNT: 'عدد أجزاء الطلب تجاوز الحد المسموح',
+      LIMIT_FIELD_KEY: 'اسم الحقل طويل جدًا',
+      LIMIT_FIELD_VALUE: 'قيمة الحقل طويلة جدًا',
+      LIMIT_FIELD_COUNT: 'عدد الحقول تجاوز الحد المسموح',
+    };
+    console.error('[Upload Error]', err.code, err.field, err.message);
     return res.status(400).json({
-      message: err.message || 'File upload error',
+      message: multerMessages[err.code] || err.message || 'خطأ في رفع الملف',
     });
   }
 
-  if (err.message?.includes('upload')) {
+  if (err.message?.includes('upload') || err.message?.includes('image') || err.message?.includes('نوع الملف')) {
+    console.error('[Upload Filter Error]', err.message);
     return res.status(400).json({
       message: err.message,
     });

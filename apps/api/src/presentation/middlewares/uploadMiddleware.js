@@ -44,8 +44,9 @@ export const uploadDocumentMiddleware = multer({
 });
 
 const workReportImageFilter = (_req, file, cb) => {
-  if (!file.mimetype.startsWith('image/')) {
-    cb(new Error('Only image uploads are allowed for work report images'));
+  const allowed = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'image/bmp', 'image/heic', 'image/heif']);
+  if (!file.mimetype.startsWith('image/') && !allowed.has(String(file.mimetype || '').toLowerCase())) {
+    cb(new Error('نوع الملف غير مدعوم – يُسمح فقط بالصور (JPG, PNG, WEBP, GIF)'));
     return;
   }
   cb(null, true);
