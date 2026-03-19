@@ -56,5 +56,6 @@ export const env = {
   vapidEmail: process.env.VAPID_EMAIL || 'mailto:admin@deltaplus-iq.com',
   sessionSecret: process.env.SESSION_SECRET || process.env.JWT_SECRET,
   sessionMaxAgeDays: toNumberOr(process.env.SESSION_MAX_AGE_DAYS, 7),
+  cookieDomain: process.env.COOKIE_DOMAIN || undefined,
 };
 
