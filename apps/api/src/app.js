@@ -1,6 +1,7 @@
 import express from 'express';
 import cors from 'cors';
 import morgan from 'morgan';
+import cookieParser from 'cookie-parser';
 import session from 'express-session';
 import MongoStore from 'connect-mongo';
 import path from 'path';
@@ -19,6 +20,7 @@ app.use(
   }),
 );
 app.use(express.json({ limit: '10mb' }));
+app.use(cookieParser());
 app.use(morgan('dev'));
 
 app.use(

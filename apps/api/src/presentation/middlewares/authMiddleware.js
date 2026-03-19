@@ -21,6 +21,8 @@ export const requireAuth = async (req, res, next) => {
 
   if (authHeader?.startsWith('Bearer ')) {
     token = authHeader.replace('Bearer ', '').trim();
+  } else if (req.cookies?.token) {
+    token = req.cookies.token;
   } else if (req.query.token) {
     token = req.query.token;
   }

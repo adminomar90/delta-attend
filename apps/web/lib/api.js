@@ -1,7 +1,5 @@
 'use client';
 
-import { authStorage } from './auth';
-
 export const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api';
 const API_BASE = API_URL.replace(/\/api\/?$/, '');
 
@@ -25,13 +23,11 @@ export const api = {
     const isFormData = options.body instanceof FormData;
 
     try {
-      const token = authStorage.getToken();
       const response = await fetch(`${API_URL}${path}`, {
         ...options,
         credentials: 'include',
         headers: {
           ...(isFormData ? {} : { 'Content-Type': 'application/json' }),
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
           ...(options.headers || {}),
         },
         cache: 'no-store',
@@ -93,12 +89,8 @@ export const api = {
   },
 
   async downloadBlob(path) {
-    const token = authStorage.getToken();
     const response = await fetch(`${API_URL}${path}`, {
       credentials: 'include',
-      headers: {
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      },
     });
     if (response.status === 401) {
       emitAuthExpired();

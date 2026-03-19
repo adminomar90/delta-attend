@@ -301,6 +301,16 @@ const issueAccessToken = (user) =>
     sv: user.sessionVersion || 1,
   });
 
+const setTokenCookie = (res, token) => {
+  res.cookie('token', token, {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
+    maxAge: 7 * 24 * 60 * 60 * 1000,
+    ...(env.cookieDomain ? { domain: env.cookieDomain } : {}),
+  });
+};
+
 const issueOtpToken = (user) =>
   authTokenService.sign({
     sub: String(user._id),
@@ -519,6 +529,8 @@ export const login = asyncHandler(async (req, res) => {
     req.session.save((err) => (err ? reject(err) : resolve()));
   });
 
+  setTokenCookie(res, token);
+
   res.json({
     token,
     user: serializeUser(user),
@@ -561,6 +573,8 @@ export const verifyOtp = asyncHandler(async (req, res) => {
     req.session.save((err) => (err ? reject(err) : resolve()));
   });
 
+  setTokenCookie(res, token);
+
   res.json({
     token,
     user: serializeUser(user),
@@ -578,6 +592,7 @@ export const me = asyncHandler(async (req, res) => {
   }
 
   const token = issueAccessToken(user);
+  setTokenCookie(res, token);
 
   res.json({
     token,
@@ -1218,17 +1233,20 @@ export const listAvailablePermissions = asyncHandler(async (req, res) => {
 });
 
 export const logout = asyncHandler(async (req, res) => {
+  const cookieOpts = {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
+    ...(env.cookieDomain ? { domain: env.cookieDomain } : {}),
+  };
+
   req.session.destroy((err) => {
     if (err) {
       return res.status(500).json({ message: 'Failed to logout' });
     }
 
-    res.clearCookie('connect.sid', {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
-      ...(env.cookieDomain ? { domain: env.cookieDomain } : {}),
-    });
+    res.clearCookie('connect.sid', cookieOpts);
+    res.clearCookie('token', cookieOpts);
     return res.json({ message: 'Logged out successfully' });
   });
 });
