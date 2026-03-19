@@ -47,6 +47,27 @@ app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', service: 'delta-plus-api' });
 });
 
+app.get('/api/debug/session', (req, res) => {
+  res.json({
+    nodeEnv: process.env.NODE_ENV,
+    cookieConfig: {
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
+      domain: env.cookieDomain || '(not set)',
+      maxAgeDays: env.sessionMaxAgeDays,
+    },
+    frontendOrigin: env.frontendOrigin,
+    sessionExists: !!req.session,
+    sessionUserId: req.session?.userId || null,
+    cookieHeader: req.headers.cookie ? '(present)' : '(missing)',
+    hasCookieSid: !!(req.headers.cookie && req.headers.cookie.includes('connect.sid')),
+    origin: req.headers.origin || '(none)',
+    trustProxy: req.app.get('trust proxy'),
+    protocol: req.protocol,
+    xForwardedProto: req.headers['x-forwarded-proto'] || '(none)',
+  });
+});
+
 app.use('/api', routes);
 app.use(notFoundHandler);
 app.use(errorHandler);

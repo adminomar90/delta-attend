@@ -515,6 +515,10 @@ export const login = asyncHandler(async (req, res) => {
   req.session.userId = String(user._id);
   req.session.sv = user.sessionVersion || 1;
 
+  await new Promise((resolve, reject) => {
+    req.session.save((err) => (err ? reject(err) : resolve()));
+  });
+
   res.json({
     token,
     user: serializeUser(user),
@@ -552,6 +556,10 @@ export const verifyOtp = asyncHandler(async (req, res) => {
 
   req.session.userId = String(user._id);
   req.session.sv = user.sessionVersion || 1;
+
+  await new Promise((resolve, reject) => {
+    req.session.save((err) => (err ? reject(err) : resolve()));
+  });
 
   res.json({
     token,
@@ -1215,7 +1223,12 @@ export const logout = asyncHandler(async (req, res) => {
       return res.status(500).json({ message: 'Failed to logout' });
     }
 
-    res.clearCookie('connect.sid');
+    res.clearCookie('connect.sid', {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
+      ...(env.cookieDomain ? { domain: env.cookieDomain } : {}),
+    });
     return res.json({ message: 'Logged out successfully' });
   });
 });

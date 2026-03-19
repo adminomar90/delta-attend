@@ -4,9 +4,11 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { api } from '../../lib/api';
 import { authStorage } from '../../lib/auth';
+import { useAuth } from '../../lib/AuthContext';
 
 export default function LoginPage() {
   const router = useRouter();
+  const { login: ctxLogin } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [otpCode, setOtpCode] = useState('');
@@ -53,6 +55,7 @@ export default function LoginPage() {
 
       authStorage.setToken(payload.token);
       authStorage.setUser(payload.user);
+      ctxLogin(payload);
       
       // Ensure data is saved before redirecting
       setTimeout(() => {
