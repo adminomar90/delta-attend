@@ -1072,8 +1072,17 @@ export const addWorkReportImages = asyncHandler(async (req, res) => {
   const comments = parseImageComments(req.body.imageComments);
   const newImages = buildUploadedImages(files, comments);
 
+  // Delete old cached PDF so it can be regenerated with the new images
+  if (report.pdfFile?.publicUrl) {
+    const oldPdfPath = resolveStoredWorkReportPdfAbsolutePath(report.pdfFile.publicUrl);
+    if (oldPdfPath) {
+      try { fs.unlinkSync(oldPdfPath); } catch { /* ignore missing */ }
+    }
+  }
+
   const updated = await workReportRepository.updateById(report._id, {
     $push: { images: { $each: newImages } },
+    $unset: { pdfFile: 1 },
   });
 
   res.json({ report: updated, addedCount: newImages.length });

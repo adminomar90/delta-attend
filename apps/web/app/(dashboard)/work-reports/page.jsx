@@ -442,6 +442,13 @@ export default function WorkReportsPage() {
         }
 
         setUploadProgress(100);
+
+        // ── Step 3: Regenerate PDF with all images included ──
+        try {
+          await api.post(`/work-reports/${reportId}/pdf/save`);
+        } catch {
+          // PDF will be regenerated on next access — not critical
+        }
       }
 
       setInfo('تم إنشاء تقرير العمل بنجاح وإرساله للاعتماد.');
