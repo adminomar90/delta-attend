@@ -996,3 +996,56 @@ export const rejectWorkReport = asyncHandler(async (req, res) => {
   res.json({ report: updated });
 });
 
+export const deleteWorkReport = asyncHandler(async (req, res) => {
+  const report = await workReportRepository.findById(req.params.id);
+  if (!report) {
+    throw new AppError('تقرير العمل غير موجود', 404);
+  }
+
+  const ownerId = String(report.user?._id || report.user);
+  const isOwner = ownerId === req.user.id;
+  const isGM = req.user.role === Roles.GENERAL_MANAGER;
+
+  if (!isOwner && !isGM) {
+    throw new AppError('لا يمكنك حذف هذا التقرير — يُسمح فقط لصاحب التقرير أو المدير العام', 403);
+  }
+
+  // If report is APPROVED, only GM can delete
+  if (report.status === 'APPROVED' && !isGM) {
+    throw new AppError('لا يمكن حذف تقرير معتمد — يُسمح فقط للمدير العام', 403);
+  }
+
+  // Clean up uploaded image files
+  for (const image of report.images || []) {
+    const filePath = resolveStoredWorkReportPdfAbsolutePath(image.publicUrl);
+    if (filePath) {
+      try { fs.unlinkSync(filePath); } catch { /* ignore missing files */ }
+    }
+  }
+
+  // Clean up stored PDF file
+  if (report.pdfFile?.publicUrl) {
+    const pdfPath = resolveStoredWorkReportPdfAbsolutePath(report.pdfFile.publicUrl);
+    if (pdfPath) {
+      try { fs.unlinkSync(pdfPath); } catch { /* ignore */ }
+    }
+  }
+
+  await workReportRepository.deleteById(report._id);
+
+  await auditService.log({
+    actorId: req.user.id,
+    action: 'WORK_REPORT_DELETED',
+    entityType: 'WORK_REPORT',
+    entityId: report._id,
+    after: {
+      title: report.title || '',
+      projectName: report.projectName || '',
+      status: report.status,
+    },
+    req,
+  });
+
+  res.json({ message: 'تم حذف التقرير بنجاح' });
+});
+

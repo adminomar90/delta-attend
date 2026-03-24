@@ -117,6 +117,7 @@ export default function WorkReportsPage() {
   const [rejecting, setRejecting] = useState(false);
   const [directApprovingId, setDirectApprovingId] = useState('');
   const [directRejectingId, setDirectRejectingId] = useState('');
+  const [deletingId, setDeletingId] = useState('');
   const [uploadProgress, setUploadProgress] = useState(0);
   const [isUploading, setIsUploading] = useState(false);
   const [dragActive, setDragActive] = useState(false);
@@ -622,6 +623,37 @@ export default function WorkReportsPage() {
     } finally {
       setDirectRejectingId('');
     }
+  };
+
+  const deleteReport = async (report) => {
+    if (!report) return;
+    const title = report.title || report.projectName || 'بدون عنوان';
+    if (!window.confirm(`هل أنت متأكد من حذف التقرير "${title}"؟\nلا يمكن التراجع عن هذا الإجراء.`)) return;
+
+    setDeletingId(String(report._id));
+    setError('');
+    setInfo('');
+    try {
+      await api.delete(`/work-reports/${report._id}`);
+      setInfo('تم حذف التقرير بنجاح.');
+      if (selectedReportId === report._id) {
+        setSelectedReportId('');
+        setInlineAction(null);
+      }
+      await load();
+    } catch (err) {
+      setError(err.message || 'فشل حذف التقرير');
+    } finally {
+      setDeletingId('');
+    }
+  };
+
+  const canDeleteReport = (report) => {
+    if (!report) return false;
+    const isOwner = isOwnReport(report);
+    const isGM = currentUser?.role === 'GENERAL_MANAGER';
+    if (report.status === 'APPROVED') return isGM;
+    return isOwner || isGM;
   };
 
   /* ── Detail Panel Helpers ────────────────────────────────────────────────── */
@@ -1326,6 +1358,17 @@ export default function WorkReportsPage() {
                             {report.status === 'SUBMITTED' ? 'تذكير واتساب' : 'إرسال واتساب'}
                           </button>
                         ) : null}
+                        {canDeleteReport(report) ? (
+                          <button
+                            className="btn btn-soft"
+                            type="button"
+                            style={{ color: 'var(--danger)' }}
+                            onClick={() => deleteReport(report)}
+                            disabled={deletingId === String(report._id)}
+                          >
+                            {deletingId === String(report._id) ? 'جارٍ الحذف...' : 'حذف'}
+                          </button>
+                        ) : null}
                       </div>
                     </td>
                   </tr>
@@ -1368,6 +1411,17 @@ export default function WorkReportsPage() {
               {canShareReportViaWhatsapp(selectedReport) ? (
                 <button type="button" className="btn btn-soft" onClick={() => sendReportPdfToWhatsApp(selectedReport)}>
                   {selectedReport.status === 'SUBMITTED' ? 'تذكير واتساب' : 'واتساب'}
+                </button>
+              ) : null}
+              {canDeleteReport(selectedReport) ? (
+                <button
+                  type="button"
+                  className="btn btn-soft"
+                  style={{ color: 'var(--danger)' }}
+                  onClick={() => deleteReport(selectedReport)}
+                  disabled={deletingId === String(selectedReport._id)}
+                >
+                  {deletingId === String(selectedReport._id) ? 'جارٍ الحذف...' : 'حذف التقرير'}
                 </button>
               ) : null}
               <button

@@ -10,6 +10,7 @@ import {
   workReportWhatsappLink,
   approveWorkReport,
   rejectWorkReport,
+  deleteWorkReport,
 } from '../controllers/workReportController.js';
 import { requireAuth } from '../middlewares/authMiddleware.js';
 import {
@@ -55,5 +56,6 @@ workReportsRoutes.post(
 );
 workReportsRoutes.patch('/:id/approve', approveWorkReport);
 workReportsRoutes.patch('/:id/reject', rejectWorkReport);
+workReportsRoutes.delete('/:id', deleteWorkReport);
 
 export default workReportsRoutes;
