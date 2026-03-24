@@ -274,7 +274,7 @@ export default function WorkReportsPage() {
     if (!files.length) return;
 
     const currentCount = attachments.length;
-    const remaining = Math.max(0, 10 - currentCount);
+    const remaining = Math.max(0, 50 - currentCount);
     if (!remaining) return;
     const selected = files.slice(0, remaining);
 
@@ -385,41 +385,62 @@ export default function WorkReportsPage() {
         throw new Error('يرجى الانتظار حتى اكتمال ضغط الصور.');
       }
 
-      const payload = new FormData();
-      payload.append('projectName', form.projectName);
-      payload.append('activityType', form.activityType);
-      payload.append('title', form.title);
-      payload.append('details', form.details);
-      payload.append('progressPercent', String(form.progressPercent));
-      payload.append('hoursSpent', String(form.hoursSpent));
-      payload.append('workDate', form.workDate);
-      payload.append('accomplishments', form.accomplishments);
-      payload.append('challenges', form.challenges);
-      payload.append('nextSteps', form.nextSteps);
-      payload.append('participantCount', String(normalizedCount));
-      payload.append('participantIds', JSON.stringify(participantIds));
-
-      attachments.forEach((item) => payload.append('images', item.file));
-      payload.append('imageComments', JSON.stringify(attachments.map((item) => item.comment || '')));
-
       const hasImages = attachments.length > 0;
+      const BATCH_SIZE = 3;
 
+      // ── Step 1: Create the report (text only, no images) ──
+      const textPayload = new FormData();
+      textPayload.append('projectName', form.projectName);
+      textPayload.append('activityType', form.activityType);
+      textPayload.append('title', form.title);
+      textPayload.append('details', form.details);
+      textPayload.append('progressPercent', String(form.progressPercent));
+      textPayload.append('hoursSpent', String(form.hoursSpent));
+      textPayload.append('workDate', form.workDate);
+      textPayload.append('accomplishments', form.accomplishments);
+      textPayload.append('challenges', form.challenges);
+      textPayload.append('nextSteps', form.nextSteps);
+      textPayload.append('participantCount', String(normalizedCount));
+      textPayload.append('participantIds', JSON.stringify(participantIds));
+
+      const createResponse = await api.post('/work-reports', textPayload);
+      const reportId = createResponse?.report?._id;
+
+      if (!reportId) {
+        throw new Error('فشل إنشاء التقرير — لم يتم الحصول على معرّف التقرير.');
+      }
+
+      // ── Step 2: Upload images in batches of BATCH_SIZE ──
       if (hasImages) {
-        // Mark all images as uploading
         uploadStarted = true;
         setIsUploading(true);
         setAttachments((prev) => prev.map((a) => ({ ...a, status: 'uploading', error: '' })));
-      }
 
-      // Use progress-tracked upload when images are present
-      const response = hasImages
-        ? await api.postWithProgress('/work-reports', payload, {
-            onProgress: ({ percent }) => setUploadProgress(percent),
-          })
-        : await api.post('/work-reports', payload);
+        const totalImages = attachments.length;
+        let uploadedCount = 0;
 
-      if (hasImages) {
-        setAttachments((prev) => prev.map((a) => ({ ...a, status: 'done' })));
+        for (let i = 0; i < totalImages; i += BATCH_SIZE) {
+          const batchItems = attachments.slice(i, i + BATCH_SIZE);
+          const batchPayload = new FormData();
+          batchItems.forEach((item) => batchPayload.append('images', item.file));
+          batchPayload.append('imageComments', JSON.stringify(batchItems.map((item) => item.comment || '')));
+
+          await api.patchWithProgress(`/work-reports/${reportId}/images`, batchPayload, {
+            onProgress: ({ percent }) => {
+              const batchWeight = batchItems.length / totalImages;
+              const baseProgress = (uploadedCount / totalImages) * 100;
+              setUploadProgress(Math.round(baseProgress + percent * batchWeight));
+            },
+          });
+
+          // Mark batch items as done
+          const batchIds = new Set(batchItems.map((item) => item.id));
+          setAttachments((prev) =>
+            prev.map((a) => (batchIds.has(a.id) ? { ...a, status: 'done' } : a)),
+          );
+          uploadedCount += batchItems.length;
+        }
+
         setUploadProgress(100);
       }
 
@@ -429,7 +450,6 @@ export default function WorkReportsPage() {
       await load();
     } catch (err) {
       setError(err.message || 'فشل إنشاء تقرير العمل');
-      // Mark images as error if upload was in progress
       if (uploadStarted) {
         setAttachments((prev) =>
           prev.map((a) =>
@@ -919,7 +939,7 @@ export default function WorkReportsPage() {
             {/* ── Section: الصور ── */}
             <div className="grid-span-full">
               <h3 style={{ margin: '8px 0 4px', color: 'var(--text-soft)', fontSize: 14, borderBottom: '1px solid var(--border)', paddingBottom: 6 }}>
-                صور الأعمال (حتى 10 صور)
+                صور الأعمال
               </h3>
               <p style={{ marginTop: 4, color: 'var(--text-soft)', fontSize: 12 }}>
                 يمكنك فتح كاميرا الموبايل مباشرة أو اختيار صور أو سحب وإفلات الصور هنا. يتم ضغط الصور تلقائيًا لتسريع الرفع.
@@ -969,7 +989,7 @@ export default function WorkReportsPage() {
                 </div>
                 {attachments.length > 0 && (
                   <p style={{ marginTop: 8, fontSize: 12, color: '#4d91ff' }}>
-                    {attachments.length} / 10 صور مضافة
+                    {attachments.length} صورة مضافة
                   </p>
                 )}
               </div>
@@ -1596,7 +1616,7 @@ export default function WorkReportsPage() {
           <div style={{ marginTop: 16 }}>
             <h3 style={{ marginBottom: 8 }}>الصور المرفقة ({(selectedReport.images || []).length})</h3>
             {(selectedReport.images || []).length ? (
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 220px))', gap: 12 }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))', gap: 10 }}>
                 {(selectedReport.images || []).map((image, index) => (
                   <a
                     key={`${selectedReport._id}-img-${index}`}
@@ -1607,21 +1627,21 @@ export default function WorkReportsPage() {
                   >
                     <div style={{
                       border: '1px solid var(--border)',
-                      borderRadius: 12,
-                      padding: 10,
+                      borderRadius: 10,
+                      padding: 8,
                       background: '#0e1a34',
                     }}>
                       <div style={{
                         width: '100%',
-                        height: 160,
-                        borderRadius: 8,
+                        height: 120,
+                        borderRadius: 6,
                         overflow: 'hidden',
                         background: '#0a1128',
                         display: 'flex',
                         alignItems: 'center',
                         justifyContent: 'center',
                         border: '1px solid var(--border)',
-                        marginBottom: 8,
+                        marginBottom: 6,
                       }}>
                         <img
                           src={resolveUploadUrl(image.publicUrl)}

@@ -1049,3 +1049,33 @@ export const deleteWorkReport = asyncHandler(async (req, res) => {
   res.json({ message: 'تم حذف التقرير بنجاح' });
 });
 
+export const addWorkReportImages = asyncHandler(async (req, res) => {
+  const report = await workReportRepository.findById(req.params.id);
+  if (!report) {
+    throw new AppError('تقرير العمل غير موجود', 404);
+  }
+
+  const ownerId = String(report.user?._id || report.user);
+  if (ownerId !== req.user.id) {
+    throw new AppError('لا يمكنك إضافة صور لتقرير لا يخصك', 403);
+  }
+
+  if (report.status === 'APPROVED') {
+    throw new AppError('لا يمكن إضافة صور لتقرير معتمد', 400);
+  }
+
+  const files = Array.isArray(req.files) ? req.files : [];
+  if (!files.length) {
+    throw new AppError('لم يتم إرسال أي صور', 400);
+  }
+
+  const comments = parseImageComments(req.body.imageComments);
+  const newImages = buildUploadedImages(files, comments);
+
+  const updated = await workReportRepository.updateById(report._id, {
+    $push: { images: { $each: newImages } },
+  });
+
+  res.json({ report: updated, addedCount: newImages.length });
+});
+

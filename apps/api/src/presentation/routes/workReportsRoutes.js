@@ -11,6 +11,7 @@ import {
   approveWorkReport,
   rejectWorkReport,
   deleteWorkReport,
+  addWorkReportImages,
 } from '../controllers/workReportController.js';
 import { requireAuth } from '../middlewares/authMiddleware.js';
 import {
@@ -51,11 +52,16 @@ workReportsRoutes.post('/:id/whatsapp-link', canSendReportsWhatsapp, workReportW
 workReportsRoutes.post(
   '/',
   requireAnyPermission(Permission.VIEW_OWN_WORK_REPORTS, Permission.VIEW_TEAM_WORK_REPORTS),
-  uploadWorkReportImagesMiddleware.array('images', 10),
+  uploadWorkReportImagesMiddleware.array('images', 50),
   createWorkReport,
 );
 workReportsRoutes.patch('/:id/approve', approveWorkReport);
 workReportsRoutes.patch('/:id/reject', rejectWorkReport);
+workReportsRoutes.patch(
+  '/:id/images',
+  uploadWorkReportImagesMiddleware.array('images', 50),
+  addWorkReportImages,
+);
 workReportsRoutes.delete('/:id', deleteWorkReport);
 
 export default workReportsRoutes;

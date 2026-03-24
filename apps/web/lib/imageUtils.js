@@ -5,11 +5,11 @@
  * Maintains aspect ratio while limiting max dimensions.
  * Returns the original file if compression doesn't reduce size.
  */
-export async function compressImage(file, { maxWidth = 1920, maxHeight = 1920, quality = 0.82 } = {}) {
+export async function compressImage(file, { maxWidth = 1280, maxHeight = 1280, quality = 0.75 } = {}) {
   if (!file || !file.type.startsWith('image/')) return file;
 
-  // Skip tiny files (< 300KB) — no real benefit
-  if (file.size < 300 * 1024) return file;
+  // Skip tiny files (< 200KB) — no real benefit
+  if (file.size < 200 * 1024) return file;
 
   // Skip GIF (would lose animation)
   if (file.type === 'image/gif') return file;
