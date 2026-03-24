@@ -61,6 +61,15 @@ import {
 
 const materialsRoutes = Router();
 
+/* ── Self-service routes: only requireAuth, no module permission gate ── */
+/* These let the assigned preparer or requestedFor employee act on a request
+   even if they don't hold a material-management permission. Each controller
+   verifies ownership / assignment. */
+materialsRoutes.patch('/requests/:id/confirm-receipt', requireAuth, confirmReceipt);
+materialsRoutes.patch('/requests/:id/supplier-approve', requireAuth, supplierApproveMaterialRequest);
+materialsRoutes.patch('/requests/:id/prepare', requireAuth, prepareMaterialRequest);
+
+/* ── Module-level permission gate for all other routes ── */
 const canAccessMaterialsModule = requireAnyPermission(
   Permission.MANAGE_MATERIAL_CATALOG,
   Permission.MANAGE_MATERIAL_INVENTORY,
@@ -92,10 +101,7 @@ materialsRoutes.get('/approvals/requests/pending', canReviewMaterialRequests, li
 materialsRoutes.post('/requests', canCreateMaterialRequests, createMaterialRequest);
 materialsRoutes.get('/requests/:id', getMaterialRequest);
 materialsRoutes.patch('/requests/:id/review', canReviewMaterialRequests, reviewMaterialRequest);
-materialsRoutes.patch('/requests/:id/supplier-approve', canPrepareMaterialRequests, supplierApproveMaterialRequest);
-materialsRoutes.patch('/requests/:id/prepare', canPrepareMaterialRequests, prepareMaterialRequest);
 materialsRoutes.patch('/requests/:id/dispatch', canDispatchMaterialRequests, dispatchMaterialRequest);
-materialsRoutes.patch('/requests/:id/confirm-receipt', requireAuth, confirmReceipt);
 materialsRoutes.patch('/requests/:id/archive', canReviewMaterialRequests, archiveMaterialRequest);
 materialsRoutes.post('/requests/:id/whatsapp-link', requestWhatsappLink);
 materialsRoutes.get('/requests/:id/pdf', exportRequestPdf);

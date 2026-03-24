@@ -481,7 +481,12 @@ export const prepareMaterialRequest = asyncHandler(async (req, res) => {
     throw new AppError('Material request not found', 404);
   }
 
-  await assertRequestReadable(req, request);
+  const myId = String(req.user.id);
+  const preparerId = String(request.assignedPreparer?._id || request.assignedPreparer || '');
+  const isGM = req.user.role === 'GENERAL_MANAGER';
+  if (preparerId !== myId && !isGM) {
+    throw new AppError('فقط المجهز المعيّن أو المدير العام يمكنه تجهيز الطلب', 403);
+  }
 
   if (!['APPROVED', 'PREPARING', 'PREPARED', 'DELIVERED', 'IN_PROGRESS', 'PENDING_SUPPLIER_APPROVAL'].includes(request.status)) {
     throw new AppError('Request is not ready for preparation', 409);
@@ -993,7 +998,12 @@ export const supplierApproveMaterialRequest = asyncHandler(async (req, res) => {
     throw new AppError('Material request not found', 404);
   }
 
-  await assertRequestReadable(req, request);
+  const myId = String(req.user.id);
+  const preparerId = String(request.assignedPreparer?._id || request.assignedPreparer || '');
+  const isGM = req.user.role === 'GENERAL_MANAGER';
+  if (preparerId !== myId && !isGM) {
+    throw new AppError('فقط المجهز المعيّن أو المدير العام يمكنه قبول أو رفض الطلب', 403);
+  }
 
   if (!['PENDING_SUPPLIER_APPROVAL', 'APPROVED'].includes(request.status)) {
     throw new AppError('هذا الطلب ليس بانتظار اعتماد المجهز', 409);
