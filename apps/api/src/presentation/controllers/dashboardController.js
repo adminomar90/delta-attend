@@ -7,20 +7,23 @@ import { MaterialRequestModel } from '../../infrastructure/db/models/MaterialReq
 import { MaterialReconciliationModel } from '../../infrastructure/db/models/MaterialReconciliationModel.js';
 import { FinancialDisbursementModel } from '../../infrastructure/db/models/FinancialDisbursementModel.js';
 import { MaintenanceReportModel } from '../../infrastructure/db/models/MaintenanceReportModel.js';
+import { MaintenancePlanRepository } from '../../infrastructure/db/repositories/MaintenancePlanRepository.js';
 import { UserModel } from '../../infrastructure/db/models/UserModel.js';
 import { GoalModel, GoalStatus } from '../../infrastructure/db/models/GoalModel.js';
 import { NotificationModel } from '../../infrastructure/db/models/NotificationModel.js';
 import { PointsLedgerRepository } from '../../infrastructure/db/repositories/PointsLedgerRepository.js';
 import { UserRepository } from '../../infrastructure/db/repositories/UserRepository.js';
 import { AttendanceRepository } from '../../infrastructure/db/repositories/AttendanceRepository.js';
+import { summarizeMaintenancePlans } from '../../application/services/maintenancePlanService.js';
 import { applyManagedScopeOnFilter, resolveManagedUserIds } from '../../shared/accessScope.js';
 import { Permission, Roles, TaskStatus } from '../../shared/constants.js';
-import { hasPermission } from '../../shared/permissions.js';
+import { hasAnyPermission, hasPermission } from '../../shared/permissions.js';
 import { asyncHandler } from '../../shared/errors.js';
 
 const pointsLedgerRepository = new PointsLedgerRepository();
 const userRepository = new UserRepository();
 const attendanceRepository = new AttendanceRepository();
+const maintenancePlanRepository = new MaintenancePlanRepository();
 
 export const dashboardSummary = asyncHandler(async (req, res) => {
   const taskFilter = {};
@@ -51,6 +54,16 @@ export const dashboardSummary = asyncHandler(async (req, res) => {
   const canReviewMaintenanceReports = hasPermission(req.user, Permission.REVIEW_MAINTENANCE_REPORTS);
   const canReviewFinancialDisbursements = hasPermission(req.user, Permission.REVIEW_FINANCIAL_DISBURSEMENTS);
   const canApproveWorkReports = canApproveTasks || hasPermission(req.user, Permission.VIEW_TEAM_WORK_REPORTS);
+  const canViewPeriodicMaintenance = hasAnyPermission(req.user, [
+    Permission.VIEW_MAINTENANCE_PLANS,
+    Permission.CREATE_MAINTENANCE_PLANS,
+    Permission.MANAGE_MAINTENANCE_PLANS,
+    Permission.REGISTER_MAINTENANCE_VISITS,
+  ]);
+  const canSeeAllPeriodicMaintenance = req.user.role === Roles.GENERAL_MANAGER
+    || hasPermission(req.user, Permission.CREATE_MAINTENANCE_PLANS)
+    || hasPermission(req.user, Permission.MANAGE_MAINTENANCE_PLANS)
+    || [Roles.PROJECT_MANAGER, Roles.ASSISTANT_PROJECT_MANAGER].includes(req.user.role);
 
   const directReportUserIds = req.user.role === Roles.GENERAL_MANAGER || !canApproveWorkReports
     ? []
@@ -61,6 +74,14 @@ export const dashboardSummary = asyncHandler(async (req, res) => {
       }).distinct('_id');
 
   const canSeeLeaderboard = hasPermission(req.user, Permission.VIEW_LEADERBOARD);
+  const maintenancePlansFilter = canSeeAllPeriodicMaintenance
+    ? {}
+    : {
+        $or: [
+          { assignedEmployee: req.user.id },
+          { createdBy: req.user.id },
+        ],
+      };
 
   const taskPendingApprovalsPromise = canApproveTasks
     ? TaskModel.countDocuments({
@@ -181,6 +202,9 @@ export const dashboardSummary = asyncHandler(async (req, res) => {
 
     return FinancialDisbursementModel.countDocuments({ $or: pendingFilters });
   })();
+  const maintenancePlansPromise = canViewPeriodicMaintenance
+    ? maintenancePlanRepository.list(maintenancePlansFilter)
+    : Promise.resolve([]);
 
   const [
     totalTasks,
@@ -192,6 +216,7 @@ export const dashboardSummary = asyncHandler(async (req, res) => {
     materialReconciliationPendingApprovals,
     maintenancePendingApprovals,
     financialPendingApprovals,
+    maintenancePlans,
     inProgress,
     approvedTasks,
     activeProjects,
@@ -208,6 +233,7 @@ export const dashboardSummary = asyncHandler(async (req, res) => {
     materialReconciliationApprovalsPromise,
     maintenancePendingApprovalsPromise,
     financialPendingApprovalsPromise,
+    maintenancePlansPromise,
     TaskModel.countDocuments({ ...taskFilter, status: TaskStatus.IN_PROGRESS }),
     TaskModel.countDocuments({ ...taskFilter, status: TaskStatus.APPROVED }),
     ProjectModel.countDocuments({ status: 'ACTIVE' }),
@@ -242,6 +268,9 @@ export const dashboardSummary = asyncHandler(async (req, res) => {
     { $match: taskFilter },
     { $group: { _id: '$status', count: { $sum: 1 } } },
   ]);
+  const maintenanceDueSummary = summarizeMaintenancePlans(maintenancePlans || [], {
+    dueLimit: 5,
+  });
 
   const attendanceSummary = attendanceAggregates.reduce(
     (acc, item) => {
@@ -284,6 +313,20 @@ export const dashboardSummary = asyncHandler(async (req, res) => {
     },
     taskStatusBreakdown,
     goals,
+    maintenanceDue: {
+      dueToday: maintenanceDueSummary.dueToday,
+      overdue: maintenanceDueSummary.overdue,
+      upcoming: maintenanceDueSummary.upcoming,
+      featured: (maintenanceDueSummary.featuredDuePlans || []).map(({ plan, summary }) => ({
+        id: String(plan._id || plan.id),
+        customerName: plan.customerName || '',
+        location: plan.location || '',
+        maintenanceType: plan.maintenanceType || '',
+        nextVisitDate: summary.nextVisitDate || null,
+        nextVisitState: summary.nextVisitState || '',
+        status: summary.status || plan.status || '',
+      })),
+    },
     leaderboard: canSeeLeaderboard
       ? leaderboard.map((item, index) => ({ rank: index + 1, ...item }))
       : [],

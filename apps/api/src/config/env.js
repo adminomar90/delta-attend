@@ -35,6 +35,8 @@ export const env = {
   lockMinutes: Number(process.env.AUTH_LOCK_MINUTES || 15),
   otpMinutes: Number(process.env.OTP_EXPIRY_MINUTES || 10),
   uploadsDir: process.env.UPLOADS_DIR || 'uploads',
+  privateUploadsDir: process.env.PRIVATE_UPLOADS_DIR || 'private-uploads',
+  networkSecretKey: process.env.NETWORK_SECRET_KEY || process.env.JWT_SECRET,
   smtpHost: process.env.SMTP_HOST || '',
   smtpPort: Number(process.env.SMTP_PORT || 587),
   smtpSecure: String(process.env.SMTP_SECURE || 'false').toLowerCase() === 'true',
@@ -58,4 +60,3 @@ export const env = {
   sessionMaxAgeDays: toNumberOr(process.env.SESSION_MAX_AGE_DAYS, 7),
   cookieDomain: process.env.COOKIE_DOMAIN || undefined,
 };
-

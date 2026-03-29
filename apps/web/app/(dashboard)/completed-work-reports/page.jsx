@@ -4,6 +4,8 @@ import { useEffect, useMemo, useState } from 'react';
 import { api, assetUrl } from '../../../lib/api';
 import { authStorage } from '../../../lib/auth';
 import { Permission, hasPermission } from '../../../lib/permissions';
+import MaintenancePlanModal from '../../../components/maintenance/MaintenancePlanModal';
+import { buildPlanDefaultsFromReport } from '../../../lib/maintenancePlans';
 import { calculateWorkReportDistribution } from '../../../lib/workReportPoints';
 
 const statusLabelMap = {
@@ -49,6 +51,10 @@ export default function CompletedWorkReportsPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [info, setInfo] = useState('');
+  const [maintenancePlanInfo, setMaintenancePlanInfo] = useState(null);
+  const [technicians, setTechnicians] = useState([]);
+  const [maintenanceModalOpen, setMaintenanceModalOpen] = useState(false);
+  const [maintenanceSaving, setMaintenanceSaving] = useState(false);
 
   const canAccess = useMemo(() => {
     return hasPermission(currentUser, Permission.VIEW_COMPLETED_WORK_REPORTS);
@@ -56,6 +62,14 @@ export default function CompletedWorkReportsPage() {
 
   const canSendWhatsApp = useMemo(() => {
     return hasPermission(currentUser, Permission.SEND_REPORTS_WHATSAPP);
+  }, [currentUser?.role, currentUser?.customPermissions, currentUser?.permissions]);
+
+  const canActivateMaintenance = useMemo(() => {
+    return hasPermission(currentUser, Permission.CREATE_MAINTENANCE_PLANS);
+  }, [currentUser?.role, currentUser?.customPermissions, currentUser?.permissions]);
+
+  const canOverrideDuplicatePlan = useMemo(() => {
+    return hasPermission(currentUser, Permission.OVERRIDE_MAINTENANCE_PLAN_DUPLICATES);
   }, [currentUser?.role, currentUser?.customPermissions, currentUser?.permissions]);
 
   const selectedReport = useMemo(() => {
@@ -87,6 +101,66 @@ export default function CompletedWorkReportsPage() {
   useEffect(() => {
     load();
   }, [canAccess]);
+
+  useEffect(() => {
+    const loadMaintenanceInfo = async () => {
+      if (!selectedReport?._id || !canActivateMaintenance) {
+        setMaintenancePlanInfo(null);
+        return;
+      }
+
+      try {
+        const response = await api.get(`/maintenance-plans?workReportId=${selectedReport._id}`);
+        setMaintenancePlanInfo((response.plans || [])[0] || null);
+      } catch {
+        setMaintenancePlanInfo(null);
+      }
+    };
+
+    loadMaintenanceInfo();
+  }, [selectedReport?._id, canActivateMaintenance]);
+
+  const openMaintenanceModal = async () => {
+    if (!selectedReport) {
+      return;
+    }
+
+    setError('');
+    try {
+      if (!technicians.length) {
+        const response = await api.get('/maintenance-plans/technicians');
+        setTechnicians(response.technicians || []);
+      }
+      setMaintenanceModalOpen(true);
+    } catch (err) {
+      setError(err.message || 'تعذر تحميل قائمة الفنيين');
+    }
+  };
+
+  const activateMaintenancePlan = async (payload) => {
+    setMaintenanceSaving(true);
+    setError('');
+    setInfo('');
+    try {
+      await api.post('/maintenance-plans', {
+        ...payload,
+        workReportId: selectedReport._id,
+        ...(maintenancePlanInfo && canOverrideDuplicatePlan ? { forceDuplicate: true } : {}),
+      });
+      setMaintenanceModalOpen(false);
+      setInfo('تم تفعيل الصيانة الدورية وربطها بالتقرير بنجاح.');
+      const [reportsResponse, plansResponse] = await Promise.all([
+        api.get('/work-reports/completed'),
+        api.get(`/maintenance-plans?workReportId=${selectedReport._id}`),
+      ]);
+      setReports(reportsResponse.reports || []);
+      setMaintenancePlanInfo((plansResponse.plans || [])[0] || null);
+    } catch (err) {
+      setError(err.message || 'تعذر تفعيل الصيانة الدورية');
+    } finally {
+      setMaintenanceSaving(false);
+    }
+  };
 
   const openPdf = async (report, { print = false } = {}) => {
     setError('');
@@ -282,8 +356,42 @@ export default function CompletedWorkReportsPage() {
                   إرسال عبر واتساب
                 </button>
               ) : null}
+              {false ? (
+                maintenancePlanInfo ? (
+                  <>
+                    <button type="button" className="btn btn-soft" disabled>
+                      تم تفعيل الصيانة الدورية
+                    </button>
+                    {canOverrideDuplicatePlan ? (
+                      <button type="button" className="btn btn-soft" onClick={openMaintenanceModal}>
+                        إنشاء خطة إضافية
+                      </button>
+                    ) : null}
+                  </>
+                ) : (
+                  <button
+                    type="button"
+                    className="btn btn-primary"
+                    onClick={openMaintenanceModal}
+                  >
+                    تفعيل الصيانة الدورية
+                  </button>
+                )
+              ) : null}
             </div>
           </div>
+
+          {maintenancePlanInfo ? (
+            <div className="maintenance-link-card" style={{ marginTop: 16 }}>
+              <div>
+                <strong>الصيانة الدورية مفعلة</strong>
+                <div className="maintenance-card-subtitle">
+                  الفني المسؤول: {maintenancePlanInfo.assignedEmployee?.fullName || 'غير معين'} - الزيارة القادمة: {formatDate(maintenancePlanInfo.nextVisitDate)}
+                </div>
+              </div>
+              <a href="/maintenance-plans" className="btn btn-soft">عرض الخطة</a>
+            </div>
+          ) : null}
 
           <div className="grid-3" style={{ marginTop: 16 }}>
             <label>
@@ -435,6 +543,17 @@ export default function CompletedWorkReportsPage() {
           </div>
         </section>
       ) : null}
+
+      <MaintenancePlanModal
+        open={maintenanceModalOpen}
+        title={maintenancePlanInfo && canOverrideDuplicatePlan ? 'إنشاء خطة صيانة إضافية' : 'تفعيل الصيانة الدورية'}
+        subtitle={selectedReport ? `${selectedReport.project?.name || selectedReport.projectName || 'بدون مشروع'} - ${selectedReport.employeeName || selectedReport.user?.fullName || '-'}` : ''}
+        initialForm={buildPlanDefaultsFromReport(selectedReport || {})}
+        technicians={technicians}
+        saving={maintenanceSaving}
+        onClose={() => setMaintenanceModalOpen(false)}
+        onSubmit={activateMaintenancePlan}
+      />
     </>
   );
 }

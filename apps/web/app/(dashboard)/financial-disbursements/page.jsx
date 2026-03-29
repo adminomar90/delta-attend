@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { api, assetUrl } from '../../../lib/api';
 import { authStorage } from '../../../lib/auth';
 import { Permission, hasPermission } from '../../../lib/permissions';
@@ -93,10 +93,13 @@ export default function FinancialDisbursementsPage() {
   const [rowNotes, setRowNotes] = useState({});
   const [rowApprovedAmounts, setRowApprovedAmounts] = useState({});
   const [selectedRequest, setSelectedRequest] = useState(null);
+  const detailsRef = useRef(null);
+  const tableRef = useRef(null);
   const [saving, setSaving] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [info, setInfo] = useState('');
+  const [statusFilter, setStatusFilter] = useState(null);
 
   const ownRequests = useMemo(
     () => requests.filter((request) => String(request.employee?.id || '') === String(currentUser?.id || '')),
@@ -430,6 +433,7 @@ export default function FinancialDisbursementsPage() {
     setSelectedRequest(request);
     setInfo('تم فتح تفاصيل المعاملة.');
     setError('');
+    setTimeout(() => detailsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 0);
   };
 
   const downloadTransactionPdf = async (request) => {
@@ -494,15 +498,21 @@ export default function FinancialDisbursementsPage() {
 
   const [searchText, setSearchText] = useState('');
   const filteredRequests = useMemo(() => {
-    if (!searchText) return requests;
-    const lower = searchText.toLowerCase();
-    return requests.filter(r =>
-      String(r.requestNo || '').toLowerCase().includes(lower) ||
-      String(r.employee?.fullName || '').toLowerCase().includes(lower) ||
-      String(typeLabelMap[r.requestType] || r.requestType).toLowerCase().includes(lower) ||
-      String(r.description || '').toLowerCase().includes(lower)
-    );
-  }, [searchText, requests]);
+    let result = requests;
+    if (statusFilter) {
+      result = result.filter(r => statusFilter.includes(r.status));
+    }
+    if (searchText) {
+      const lower = searchText.toLowerCase();
+      result = result.filter(r =>
+        String(r.requestNo || '').toLowerCase().includes(lower) ||
+        String(r.employee?.fullName || '').toLowerCase().includes(lower) ||
+        String(typeLabelMap[r.requestType] || r.requestType).toLowerCase().includes(lower) ||
+        String(r.description || '').toLowerCase().includes(lower)
+      );
+    }
+    return result;
+  }, [searchText, statusFilter, requests]);
 
   const [finSK, setFinSK] = useState('');
   const [finSD, setFinSD] = useState('asc');
@@ -555,10 +565,33 @@ export default function FinancialDisbursementsPage() {
 
       {(canReview || canDisburse || canViewFinancial || currentUser?.role === 'GENERAL_MANAGER') && summary ? (
         <section className="grid-4" style={{ marginBottom: 16 }}>
-          <article className="card section"><p style={{ marginTop: 0, color: 'var(--text-soft)' }}>إجمالي الطلبات</p><h2>{summary.total || 0}</h2></article>
-          <article className="card section"><p style={{ marginTop: 0, color: 'var(--text-soft)' }}>بانتظار مدير المشاريع</p><h2>{summary.pendingProjectManager || 0}</h2></article>
-          <article className="card section"><p style={{ marginTop: 0, color: 'var(--text-soft)' }}>بانتظار المدير المالي</p><h2>{summary.pendingFinancialManager || 0}</h2></article>
-          <article className="card section"><p style={{ marginTop: 0, color: 'var(--text-soft)' }}>جاهزة للتسليم</p><h2>{summary.readyForDisbursement || 0}</h2></article>
+          {[
+            { key: null, label: 'إجمالي الطلبات', count: summary.total || 0 },
+            { key: ['PENDING_PROJECT_MANAGER_APPROVAL'], label: 'بانتظار مدير المشاريع', count: summary.pendingProjectManager || 0 },
+            { key: ['PENDING_FINANCIAL_MANAGER_APPROVAL', 'PENDING_GENERAL_MANAGER_APPROVAL'], label: 'بانتظار المدير المالي', count: summary.pendingFinancialManager || 0 },
+            { key: ['READY_FOR_DISBURSEMENT'], label: 'جاهزة للتسليم', count: summary.readyForDisbursement || 0 },
+          ].map((item) => {
+            const isActive = statusFilter === item.key || (statusFilter === null && item.key === null);
+            return (
+              <article
+                key={item.label}
+                className="card section"
+                onClick={() => {
+                  const next = isActive && item.key !== null ? null : item.key;
+                  setStatusFilter(next);
+                  setTimeout(() => tableRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 0);
+                }}
+                style={{
+                  cursor: 'pointer',
+                  outline: isActive && item.key !== null ? '2px solid var(--accent)' : 'none',
+                  transition: 'outline .15s, transform .15s',
+                }}
+              >
+                <p style={{ marginTop: 0, color: 'var(--text-soft)' }}>{item.label}</p>
+                <h2>{item.count}</h2>
+              </article>
+            );
+          })}
         </section>
       ) : null}
 
@@ -665,64 +698,81 @@ export default function FinancialDisbursementsPage() {
       ) : null}
 
       {selectedRequest ? (
-        <section className="card section" style={{ marginBottom: 16 }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
-            <h2 style={{ margin: 0 }}>تفاصيل المعاملة قبل الصرف</h2>
-            <button className="btn btn-soft" type="button" onClick={() => setSelectedRequest(null)}>إغلاق</button>
-          </div>
-
-          <div className="grid-3" style={{ marginTop: 12 }}>
-            <div><strong>رقم الطلب:</strong> {selectedRequest.requestNo}</div>
-            <div><strong>رقم المعاملة:</strong> {selectedRequest.transactionNo || '-'}</div>
-            <div><strong>تاريخ المعاملة:</strong> {formatDateTime(selectedRequest.transactionDate || selectedRequest.createdAt)}</div>
-            <div><strong>نوع الصرف:</strong> {typeLabelMap[selectedRequest.requestType] || selectedRequest.requestType}</div>
-            <div><strong>المبلغ المطلوب:</strong> {selectedRequest.amount} {selectedRequest.currency}</div>
-            <div>
-              <strong>المبلغ المعتمد:</strong>{' '}
-              {selectedRequest.approvedAmount != null
-                ? `${selectedRequest.approvedAmount} ${selectedRequest.currency}`
-                : 'لم يحدد بعد'}
+        <div
+          className="modal-backdrop"
+          onClick={(e) => { if (e.target === e.currentTarget) setSelectedRequest(null); }}
+        >
+          <div
+            ref={detailsRef}
+            className="modal-panel"
+            style={{ animation: 'fadeIn .2s ease' }}
+          >
+            <div className="modal-header">
+              <h3 style={{ margin: 0 }}>تفاصيل المعاملة قبل الصرف</h3>
+              <button className="modal-close" type="button" onClick={() => setSelectedRequest(null)}>✕</button>
             </div>
-            <div><strong>إجمالي المعاملة:</strong> {selectedRequest.transactionTotalAmount || selectedRequest.amount} {selectedRequest.currency}</div>
-          </div>
 
-          <div style={{ marginTop: 10 }}>
-            <strong>الوصف:</strong>
-            <p style={{ marginTop: 6 }}>{selectedRequest.description || '-'}</p>
-          </div>
-
-          <div style={{ marginTop: 10 }}>
-            <strong>سجل الإجراءات:</strong>
-            {(selectedRequest.workflowTrail || []).length ? (
-              <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 6 }}>
-                {selectedRequest.workflowTrail.map((entry) => (
-                  <div key={entry.id || `${entry.action}-${entry.occurredAt}`} style={{ border: '1px solid var(--stroke)', borderRadius: 8, padding: 8 }}>
-                    <div><strong>{entry.action}</strong> - {entry.actor?.fullName || '-'} - {formatDateTime(entry.occurredAt)}</div>
-                    <div style={{ color: 'var(--text-soft)', fontSize: 12 }}>
-                      {entry.beforeStatusLabel || entry.beforeStatus || '-'} {' -> '} {entry.afterStatusLabel || entry.afterStatus || '-'}
-                    </div>
-                    {entry.notes ? <div style={{ marginTop: 4 }}>{entry.notes}</div> : null}
-                  </div>
-                ))}
+            <div className="grid-3" style={{ gap: 10 }}>
+              <div><strong>رقم الطلب:</strong> {selectedRequest.requestNo}</div>
+              <div><strong>رقم المعاملة:</strong> {selectedRequest.transactionNo || '-'}</div>
+              <div><strong>تاريخ المعاملة:</strong> {formatDateTime(selectedRequest.transactionDate || selectedRequest.createdAt)}</div>
+              <div><strong>نوع الصرف:</strong> {typeLabelMap[selectedRequest.requestType] || selectedRequest.requestType}</div>
+              <div><strong>المبلغ المطلوب:</strong> {selectedRequest.amount} {selectedRequest.currency}</div>
+              <div>
+                <strong>المبلغ المعتمد:</strong>{' '}
+                {selectedRequest.approvedAmount != null
+                  ? `${selectedRequest.approvedAmount} ${selectedRequest.currency}`
+                  : 'لم يحدد بعد'}
               </div>
-            ) : (
-              <p style={{ color: 'var(--text-soft)', marginTop: 6 }}>لا يوجد سجل إجراءات بعد.</p>
-            )}
-          </div>
+              <div><strong>إجمالي المعاملة:</strong> {selectedRequest.transactionTotalAmount || selectedRequest.amount} {selectedRequest.currency}</div>
+            </div>
 
-          <div className="form-actions" style={{ marginTop: 12 }}>
-            <button className="btn btn-primary" type="button" onClick={() => downloadTransactionPdf(selectedRequest)}>
-              تحميل مستند الصرف PDF
-            </button>
-            <button className="btn btn-soft" type="button" onClick={() => sendWhatsapp(selectedRequest)}>
-              مشاركة عبر واتساب
-            </button>
+            <div style={{ marginTop: 10 }}>
+              <strong>الوصف:</strong>
+              <p style={{ marginTop: 6 }}>{selectedRequest.description || '-'}</p>
+            </div>
+
+            <div style={{ marginTop: 10 }}>
+              <strong>سجل الإجراءات:</strong>
+              {(selectedRequest.workflowTrail || []).length ? (
+                <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  {selectedRequest.workflowTrail.map((entry) => (
+                    <div key={entry.id || `${entry.action}-${entry.occurredAt}`} style={{ border: '1px solid var(--stroke)', borderRadius: 8, padding: 8 }}>
+                      <div style={{ fontSize: 13 }}><strong>{entry.action}</strong> - {entry.actor?.fullName || '-'} - {formatDateTime(entry.occurredAt)}</div>
+                      <div style={{ color: 'var(--text-soft)', fontSize: 12 }}>
+                        {entry.beforeStatusLabel || entry.beforeStatus || '-'} {' -> '} {entry.afterStatusLabel || entry.afterStatus || '-'}
+                      </div>
+                      {entry.notes ? <div style={{ marginTop: 4 }}>{entry.notes}</div> : null}
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p style={{ color: 'var(--text-soft)', marginTop: 6 }}>لا يوجد سجل إجراءات بعد.</p>
+              )}
+            </div>
+
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 14 }}>
+              <button className="btn btn-primary" type="button" onClick={() => downloadTransactionPdf(selectedRequest)}>
+                تحميل PDF
+              </button>
+              <button className="btn btn-soft" type="button" onClick={() => sendWhatsapp(selectedRequest)}>
+                مشاركة واتساب
+              </button>
+              <button className="btn btn-soft" type="button" onClick={() => setSelectedRequest(null)}>إغلاق</button>
+            </div>
           </div>
-        </section>
+        </div>
       ) : null}
 
-      <section className="card section">
-        <h2>طلبات الصرف المالي</h2>
+      <section ref={tableRef} className="card section">
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8, marginBottom: 12 }}>
+          <h2 style={{ margin: 0 }}>طلبات الصرف المالي {statusFilter ? `(${filteredRequests.length})` : ''}</h2>
+          {statusFilter ? (
+            <button className="btn btn-soft" type="button" style={{ fontSize: 13 }} onClick={() => setStatusFilter(null)}>
+              ✕ إلغاء الفلتر
+            </button>
+          ) : null}
+        </div>
         <div style={{ marginBottom: 12 }}>
           <input
             className="input"

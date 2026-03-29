@@ -662,6 +662,22 @@ export const exportWorkReportPdf = asyncHandler(async (req, res) => {
 
   await assertWorkReportAccess(req, report);
 
+  /* If ?regenerate=1, force a fresh build (e.g. after template changes). */
+  if (req.query.regenerate === '1') {
+    const fresh = await createStoredWorkReportPdf({ report, req });
+    const pdfFile = buildStoredWorkReportPdfPayload({
+      publicUrl: fresh.pdfUrl,
+      filename: fresh.filename,
+      absolutePath: fresh.absolutePath,
+    });
+    await workReportRepository.updateById(report._id, { pdfFile });
+
+    const disposition = req.query.download === '1' ? 'attachment' : 'inline';
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `${disposition}; filename="${fresh.filename}"`);
+    return res.sendFile(fresh.absolutePath);
+  }
+
   const stored = await ensureStoredWorkReportPdf({
     report,
     req,

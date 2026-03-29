@@ -9,6 +9,8 @@ import {
   formatWorkReportPoints,
 } from '../../../lib/workReportPoints';
 import { compressImage, formatFileSize } from '../../../lib/imageUtils';
+import MaintenancePlanModal from '../../../components/maintenance/MaintenancePlanModal';
+import { buildPlanDefaultsFromReport } from '../../../lib/maintenancePlans';
 
 /* ── Constants ─────────────────────────────────────────────────────────────── */
 
@@ -89,6 +91,15 @@ const downloadBlob = (blob, filename) => {
 
 const resolveReportNumber = (report) => `#${String(report?._id || '').slice(-8).toUpperCase()}`;
 
+const buildMaintenancePlansByReportId = (plans = []) =>
+  (plans || []).reduce((accumulator, plan) => {
+    const workReportId = String(plan?.workReportId || '').trim();
+    if (workReportId && !accumulator[workReportId]) {
+      accumulator[workReportId] = plan;
+    }
+    return accumulator;
+  }, {});
+
 /* ── Component ─────────────────────────────────────────────────────────────── */
 
 export default function WorkReportsPage() {
@@ -118,6 +129,11 @@ export default function WorkReportsPage() {
   const [directApprovingId, setDirectApprovingId] = useState('');
   const [directRejectingId, setDirectRejectingId] = useState('');
   const [deletingId, setDeletingId] = useState('');
+  const [maintenancePlansByReportId, setMaintenancePlansByReportId] = useState({});
+  const [maintenanceTechnicians, setMaintenanceTechnicians] = useState([]);
+  const [maintenanceModalOpen, setMaintenanceModalOpen] = useState(false);
+  const [maintenanceSaving, setMaintenanceSaving] = useState(false);
+  const [maintenanceTargetReport, setMaintenanceTargetReport] = useState(null);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [isUploading, setIsUploading] = useState(false);
   const [dragActive, setDragActive] = useState(false);
@@ -133,6 +149,14 @@ export default function WorkReportsPage() {
 
   const canSendWhatsapp = useMemo(() => {
     return hasPermission(currentUser, Permission.SEND_REPORTS_WHATSAPP);
+  }, [currentUser?.role, currentUser?.customPermissions, currentUser?.permissions]);
+
+  const canActivateMaintenance = useMemo(() => {
+    return hasPermission(currentUser, Permission.CREATE_MAINTENANCE_PLANS);
+  }, [currentUser?.role, currentUser?.customPermissions, currentUser?.permissions]);
+
+  const canOverrideDuplicatePlan = useMemo(() => {
+    return hasPermission(currentUser, Permission.OVERRIDE_MAINTENANCE_PLAN_DUPLICATES);
   }, [currentUser?.role, currentUser?.customPermissions, currentUser?.permissions]);
 
   /* derived data */
@@ -185,6 +209,11 @@ export default function WorkReportsPage() {
     return reports.find((r) => r._id === selectedReportId) || null;
   }, [reports, selectedReportId]);
 
+  const maintenanceTargetPlan = useMemo(() => {
+    const reportId = String(maintenanceTargetReport?._id || maintenanceTargetReport?.id || '').trim();
+    return reportId ? maintenancePlansByReportId[reportId] || null : null;
+  }, [maintenancePlansByReportId, maintenanceTargetReport]);
+
   const participantCount = Math.max(0, Number(form.participantCount || 0));
   const participantSlots = Array.from({ length: participantCount }, (_, i) => i);
 
@@ -210,14 +239,18 @@ export default function WorkReportsPage() {
     setLoading(true);
     setError('');
     try {
-      const [projectsRes, reportsRes, employeesRes] = await Promise.all([
+      const [projectsRes, reportsRes, employeesRes, maintenancePlansRes] = await Promise.all([
         api.get('/projects'),
         api.get('/work-reports'),
         api.get('/work-reports/employees'),
+        canActivateMaintenance
+          ? api.get('/maintenance-plans').catch(() => ({ plans: [] }))
+          : Promise.resolve({ plans: [] }),
       ]);
       setProjects(projectsRes.projects || []);
       setReports(reportsRes.reports || []);
       setEmployees(employeesRes.employees || []);
+      setMaintenancePlansByReportId(buildMaintenancePlansByReportId(maintenancePlansRes.plans || []));
     } catch (err) {
       setError(err.message || 'تعذر تحميل تقارير العمل');
     } finally {
@@ -522,7 +555,7 @@ export default function WorkReportsPage() {
   const openReportPdf = async (report) => {
     setError('');
     try {
-      const blob = await api.get(`/work-reports/${report._id}/pdf`);
+      const blob = await api.get(`/work-reports/${report._id}/pdf?regenerate=1`);
       const url = window.URL.createObjectURL(blob);
       window.open(url, '_blank', 'noopener,noreferrer');
       setTimeout(() => window.URL.revokeObjectURL(url), 30000);
@@ -534,7 +567,7 @@ export default function WorkReportsPage() {
   const downloadReportPdf = async (report) => {
     setError('');
     try {
-      const blob = await api.get(`/work-reports/${report._id}/pdf`);
+      const blob = await api.get(`/work-reports/${report._id}/pdf?regenerate=1`);
       const label = (report.employeeCode || report.user?.employeeCode || 'employee').replace(/[^\w-]/g, '');
       const fileName = `work-report-${label}-${String(report._id).slice(-6)}.pdf`;
       downloadBlob(blob, fileName);
@@ -603,6 +636,55 @@ export default function WorkReportsPage() {
   };
 
   const canShareReportViaWhatsapp = (report) => isOwnReport(report) || canSendWhatsapp;
+
+  const openMaintenanceModal = async (report) => {
+    if (!report || !canActivateMaintenance) {
+      return;
+    }
+
+    setMaintenanceTargetReport(report);
+    setSelectedReportId(String(report._id));
+    setInlineAction(null);
+    setError('');
+    setInfo('');
+
+    try {
+      if (!maintenanceTechnicians.length) {
+        const response = await api.get('/maintenance-plans/technicians');
+        setMaintenanceTechnicians(response.technicians || []);
+      }
+      setMaintenanceModalOpen(true);
+    } catch (err) {
+      setError(err.message || 'تعذر تحميل قائمة الفنيين');
+    }
+  };
+
+  const activateMaintenancePlan = async (payload) => {
+    if (!maintenanceTargetReport?._id) {
+      return;
+    }
+
+    const existingPlan = maintenancePlansByReportId[String(maintenanceTargetReport._id)] || null;
+
+    setMaintenanceSaving(true);
+    setError('');
+    setInfo('');
+    try {
+      await api.post('/maintenance-plans', {
+        ...payload,
+        workReportId: maintenanceTargetReport._id,
+        ...(existingPlan && canOverrideDuplicatePlan ? { forceDuplicate: true } : {}),
+      });
+      const plansResponse = await api.get('/maintenance-plans');
+      setMaintenancePlansByReportId(buildMaintenancePlansByReportId(plansResponse.plans || []));
+      setMaintenanceModalOpen(false);
+      setInfo('تم تفعيل الصيانة الدورية وربطها بتقرير العمل بنجاح.');
+    } catch (err) {
+      setError(err.message || 'تعذر تفعيل الصيانة الدورية');
+    } finally {
+      setMaintenanceSaving(false);
+    }
+  };
 
   const directApproveReport = async (report) => {
     if (!report || report.status !== 'SUBMITTED' || isOwnReport(report) || !canApprove) {
@@ -682,6 +764,94 @@ export default function WorkReportsPage() {
     if (report.status === 'APPROVED') return isGM;
     return isOwner || isGM;
   };
+
+  const renderReportProgress = (pct) => (
+    <div className="work-report-progress">
+      <div className="work-report-progress-track">
+        <div
+          className="work-report-progress-bar"
+          style={{
+            width: `${Math.min(100, pct)}%`,
+            background: pct >= 80 ? '#27ae60' : pct >= 50 ? '#2980b9' : '#e67e22',
+          }}
+        />
+      </div>
+      <span className="work-report-progress-value">{pct}%</span>
+    </div>
+  );
+
+  const renderReportActions = ({
+    report,
+    canDirectApprove,
+    canWhatsapp,
+    maintenancePlanInfo,
+    canShowMaintenanceAction,
+    mobile = false,
+  }) => (
+    <div className={`work-report-actions${mobile ? ' work-report-actions-mobile' : ''}`}>
+      <button className="btn btn-soft" type="button" onClick={() => openDetails(report)}>
+        تفاصيل
+      </button>
+      <button className="btn btn-soft" type="button" onClick={() => openReportPdf(report)}>
+        PDF
+      </button>
+      {canDirectApprove ? (
+        <>
+          <button
+            className="btn btn-soft"
+            type="button"
+            onClick={() => directApproveReport(report)}
+            disabled={directApprovingId === String(report._id)}
+          >
+            {directApprovingId === String(report._id) ? 'جارٍ الاعتماد...' : 'اعتماد مباشر'}
+          </button>
+          <button
+            className="btn btn-soft"
+            type="button"
+            style={{ color: 'var(--danger)' }}
+            onClick={() => directRejectReport(report)}
+            disabled={directRejectingId === String(report._id)}
+          >
+            {directRejectingId === String(report._id) ? 'جارٍ الرفض...' : 'رفض مباشر'}
+          </button>
+        </>
+      ) : null}
+      {canWhatsapp ? (
+        <button className="btn btn-soft" type="button" onClick={() => sendReportPdfToWhatsApp(report)}>
+          {report.status === 'SUBMITTED' ? 'تذكير واتساب' : 'إرسال واتساب'}
+        </button>
+      ) : null}
+      {canShowMaintenanceAction ? (
+        maintenancePlanInfo ? (
+          <>
+            <button className="btn btn-soft" type="button" disabled>
+              تم تفعيل الصيانة الدورية
+            </button>
+            {canOverrideDuplicatePlan ? (
+              <button className="btn btn-soft" type="button" onClick={() => openMaintenanceModal(report)}>
+                إنشاء خطة إضافية
+              </button>
+            ) : null}
+          </>
+        ) : (
+          <button className="btn btn-primary" type="button" onClick={() => openMaintenanceModal(report)}>
+            تفعيل الصيانة الدورية
+          </button>
+        )
+      ) : null}
+      {canDeleteReport(report) ? (
+        <button
+          className="btn btn-soft"
+          type="button"
+          style={{ color: 'var(--danger)' }}
+          onClick={() => deleteReport(report)}
+          disabled={deletingId === String(report._id)}
+        >
+          {deletingId === String(report._id) ? 'جارٍ الحذف...' : 'حذف'}
+        </button>
+      ) : null}
+    </div>
+  );
 
   /* ── Detail Panel Helpers ────────────────────────────────────────────────── */
 
@@ -1281,132 +1451,144 @@ export default function WorkReportsPage() {
         {loading ? <p style={{ color: 'var(--text-soft)' }}>جارٍ تحميل التقارير...</p> : null}
 
         {!loading ? (
-          <table className="table">
-            <thead>
-              <tr>
-                <th>#</th>
-                <th>الموظف</th>
-                <th>المشروع</th>
-                <th>العنوان</th>
-                <th style={{ minWidth: 100, whiteSpace: 'nowrap' }}>تاريخ العمل</th>
-                <th style={{ minWidth: 120, whiteSpace: 'nowrap' }}>الإنجاز</th>
-                <th>الكادر</th>
-                <th>الحالة</th>
-                <th>النقاط</th>
-                <th>إجراءات</th>
-              </tr>
-            </thead>
-            <tbody>
+          <>
+            <div className="work-reports-table-shell">
+              <table className="table">
+                <thead>
+                  <tr>
+                    <th>#</th>
+                    <th>الموظف</th>
+                    <th>المشروع</th>
+                    <th>العنوان</th>
+                    <th style={{ minWidth: 100, whiteSpace: 'nowrap' }}>تاريخ العمل</th>
+                    <th style={{ minWidth: 120, whiteSpace: 'nowrap' }}>الإنجاز</th>
+                    <th>الكادر</th>
+                    <th>الحالة</th>
+                    <th>النقاط</th>
+                    <th>إجراءات</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredReports.length ? filteredReports.map((report, idx) => {
+                    const isSelected = selectedReportId === report._id;
+                    const reportParticipantCount = Number(report.participantCount || report.participants?.length || 0);
+                    const pct = Number(report.progressPercent || 0);
+                    const canDirectApprove = canApprove && report.status === 'SUBMITTED' && !isOwnReport(report);
+                    const canWhatsapp = canShareReportViaWhatsapp(report);
+                    const maintenancePlanInfo = maintenancePlansByReportId[String(report._id)] || null;
+                    const canShowMaintenanceAction = canActivateMaintenance
+                      && (maintenancePlanInfo || (report.status === 'APPROVED' && pct === 100));
+
+                    return (
+                      <tr
+                        key={report._id}
+                        style={isSelected ? { background: 'rgba(77, 145, 255, 0.08)' } : undefined}
+                      >
+                        <td>{idx + 1}</td>
+                        <td>
+                          <strong>{report.employeeName || report.user?.fullName || '-'}</strong>
+                          <div style={{ fontSize: 11, color: 'var(--text-soft)' }}>
+                            {report.employeeCode || report.user?.employeeCode || ''}
+                          </div>
+                        </td>
+                        <td>{report.project?.name || report.projectName || '-'}</td>
+                        <td>{report.title || '-'}</td>
+                        <td style={{ whiteSpace: 'nowrap' }}>{formatDate(report.workDate || report.createdAt)}</td>
+                        <td>{renderReportProgress(pct)}</td>
+                        <td>{reportParticipantCount}</td>
+                        <td>
+                          <span className={`status-pill ${statusClassMap[report.status] || 'status-todo'}`}>
+                            {statusLabelMap[report.status] || report.status}
+                          </span>
+                        </td>
+                        <td>{formatWorkReportPoints(report.pointsAwarded || 0)}</td>
+                        <td>
+                          {renderReportActions({
+                            report,
+                            canDirectApprove,
+                            canWhatsapp,
+                            maintenancePlanInfo,
+                            canShowMaintenanceAction,
+                          })}
+                        </td>
+                      </tr>
+                    );
+                  }) : (
+                    <tr>
+                      <td colSpan={10} style={{ color: 'var(--text-soft)' }}>لا توجد تقارير عمل مطابقة.</td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+
+            <div className="work-reports-mobile-list">
               {filteredReports.length ? filteredReports.map((report, idx) => {
                 const isSelected = selectedReportId === report._id;
                 const reportParticipantCount = Number(report.participantCount || report.participants?.length || 0);
                 const pct = Number(report.progressPercent || 0);
                 const canDirectApprove = canApprove && report.status === 'SUBMITTED' && !isOwnReport(report);
                 const canWhatsapp = canShareReportViaWhatsapp(report);
+                const maintenancePlanInfo = maintenancePlansByReportId[String(report._id)] || null;
+                const canShowMaintenanceAction = canActivateMaintenance
+                  && (maintenancePlanInfo || (report.status === 'APPROVED' && pct === 100));
 
                 return (
-                  <tr
-                    key={report._id}
-                    style={isSelected ? { background: 'rgba(77, 145, 255, 0.08)' } : undefined}
+                  <article
+                    key={`${report._id}-mobile`}
+                    className={`work-report-mobile-card${isSelected ? ' work-report-mobile-card-active' : ''}`}
                   >
-                    <td>{idx + 1}</td>
-                    <td>
-                      <strong>{report.employeeName || report.user?.fullName || '-'}</strong>
-                      <div style={{ fontSize: 11, color: 'var(--text-soft)' }}>
-                        {report.employeeCode || report.user?.employeeCode || ''}
-                      </div>
-                    </td>
-                    <td>{report.project?.name || report.projectName || '-'}</td>
-                    <td>{report.title || '-'}</td>
-                    <td style={{ whiteSpace: 'nowrap' }}>{formatDate(report.workDate || report.createdAt)}</td>
-                    <td>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, direction: 'ltr', minWidth: 110 }}>
-                        <div
-                          style={{
-                            flex: 1,
-                            height: 8,
-                            borderRadius: 4,
-                            background: '#1e2d4d',
-                            overflow: 'hidden',
-                            minWidth: 50,
-                          }}
-                        >
-                          <div
-                            style={{
-                              width: `${Math.min(100, pct)}%`,
-                              height: '100%',
-                              borderRadius: 4,
-                              background: pct >= 80 ? '#27ae60' : pct >= 50 ? '#2980b9' : '#e67e22',
-                              transition: 'width 0.3s',
-                            }}
-                          />
+                    <div className="work-report-mobile-head">
+                      <div>
+                        <strong>{report.title || 'بدون عنوان'}</strong>
+                        <div className="work-report-mobile-subtitle">
+                          {resolveReportNumber(report)} - {report.project?.name || report.projectName || '-'}
                         </div>
-                        <span style={{ fontSize: 12, fontVariantNumeric: 'tabular-nums', minWidth: 36, textAlign: 'right', whiteSpace: 'nowrap' }}>{pct}%</span>
+                        <div className="work-report-mobile-subtitle">
+                          {report.employeeName || report.user?.fullName || '-'}
+                        </div>
                       </div>
-                    </td>
-                    <td>{reportParticipantCount}</td>
-                    <td>
                       <span className={`status-pill ${statusClassMap[report.status] || 'status-todo'}`}>
                         {statusLabelMap[report.status] || report.status}
                       </span>
-                    </td>
-                    <td>{formatWorkReportPoints(report.pointsAwarded || 0)}</td>
-                    <td>
-                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                        <button className="btn btn-soft" type="button" onClick={() => openDetails(report)}>
-                          تفاصيل
-                        </button>
-                        <button className="btn btn-soft" type="button" onClick={() => openReportPdf(report)}>
-                          PDF
-                        </button>
-                        {canDirectApprove ? (
-                          <>
-                            <button
-                              className="btn btn-soft"
-                              type="button"
-                              onClick={() => directApproveReport(report)}
-                              disabled={directApprovingId === String(report._id)}
-                            >
-                              {directApprovingId === String(report._id) ? 'جارٍ الاعتماد...' : 'اعتماد مباشر'}
-                            </button>
-                            <button
-                              className="btn btn-soft"
-                              type="button"
-                              style={{ color: 'var(--danger)' }}
-                              onClick={() => directRejectReport(report)}
-                              disabled={directRejectingId === String(report._id)}
-                            >
-                              {directRejectingId === String(report._id) ? 'جارٍ الرفض...' : 'رفض مباشر'}
-                            </button>
-                          </>
-                        ) : null}
-                        {canWhatsapp ? (
-                          <button className="btn btn-soft" type="button" onClick={() => sendReportPdfToWhatsApp(report)}>
-                            {report.status === 'SUBMITTED' ? 'تذكير واتساب' : 'إرسال واتساب'}
-                          </button>
-                        ) : null}
-                        {canDeleteReport(report) ? (
-                          <button
-                            className="btn btn-soft"
-                            type="button"
-                            style={{ color: 'var(--danger)' }}
-                            onClick={() => deleteReport(report)}
-                            disabled={deletingId === String(report._id)}
-                          >
-                            {deletingId === String(report._id) ? 'جارٍ الحذف...' : 'حذف'}
-                          </button>
-                        ) : null}
+                    </div>
+
+                    {renderReportProgress(pct)}
+
+                    <div className="work-report-mobile-grid">
+                      <div>
+                        <span>التاريخ</span>
+                        <strong>{formatDate(report.workDate || report.createdAt)}</strong>
                       </div>
-                    </td>
-                  </tr>
+                      <div>
+                        <span>الكادر</span>
+                        <strong>{reportParticipantCount}</strong>
+                      </div>
+                      <div>
+                        <span>النقاط</span>
+                        <strong>{formatWorkReportPoints(report.pointsAwarded || 0)}</strong>
+                      </div>
+                      <div>
+                        <span>الترتيب</span>
+                        <strong>#{idx + 1}</strong>
+                      </div>
+                    </div>
+
+                    {renderReportActions({
+                      report,
+                      canDirectApprove,
+                      canWhatsapp,
+                      maintenancePlanInfo,
+                      canShowMaintenanceAction,
+                      mobile: true,
+                    })}
+                  </article>
                 );
               }) : (
-                <tr>
-                  <td colSpan={10} style={{ color: 'var(--text-soft)' }}>لا توجد تقارير عمل مطابقة.</td>
-                </tr>
+                <p className="work-report-mobile-empty">لا توجد تقارير عمل مطابقة.</p>
               )}
-            </tbody>
-          </table>
+            </div>
+          </>
         ) : null}
       </section>
 
@@ -1428,7 +1610,7 @@ export default function WorkReportsPage() {
                 {selectedReport.project?.name || selectedReport.projectName || '-'}
               </p>
             </div>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+            <div className="work-report-detail-actions" style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
               <button type="button" className="btn btn-soft" onClick={() => openReportPdf(selectedReport)}>
                 عرض PDF
               </button>
@@ -1835,6 +2017,20 @@ export default function WorkReportsPage() {
           ) : null}
         </section>
       ) : null}
+
+      <MaintenancePlanModal
+        open={maintenanceModalOpen}
+        title={maintenanceTargetPlan && canOverrideDuplicatePlan ? 'إنشاء خطة صيانة إضافية' : 'تفعيل الصيانة الدورية'}
+        subtitle={maintenanceTargetReport ? `${maintenanceTargetReport.project?.name || maintenanceTargetReport.projectName || 'بدون مشروع'} - ${maintenanceTargetReport.employeeName || maintenanceTargetReport.user?.fullName || '-'}` : ''}
+        initialForm={buildPlanDefaultsFromReport(maintenanceTargetReport || {})}
+        technicians={maintenanceTechnicians}
+        saving={maintenanceSaving}
+        onClose={() => {
+          setMaintenanceModalOpen(false);
+          setMaintenanceTargetReport(null);
+        }}
+        onSubmit={activateMaintenancePlan}
+      />
     </>
   );
 }

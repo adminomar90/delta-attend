@@ -14,6 +14,8 @@ import materialsRoutes from './materialsRoutes.js';
 import approvalHistoryRoutes from './approvalHistoryRoutes.js';
 import financialDisbursementsRoutes from './financialDisbursementsRoutes.js';
 import maintenanceReportsRoutes from './maintenanceReportsRoutes.js';
+import maintenancePlansRoutes from './maintenancePlansRoutes.js';
+import networkDocsRoutes from './networkDocsRoutes.js';
 
 const router = Router();
 
@@ -32,5 +34,7 @@ router.use('/materials', materialsRoutes);
 router.use('/approval-history', approvalHistoryRoutes);
 router.use('/financial-disbursements', financialDisbursementsRoutes);
 router.use('/maintenance-reports', maintenanceReportsRoutes);
+router.use('/maintenance-plans', maintenancePlansRoutes);
+router.use('/network-docs', networkDocsRoutes);
 
 export default router;

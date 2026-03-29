@@ -67,3 +67,30 @@ export const uploadImportFileMiddleware = multer({
     fileSize: 10 * 1024 * 1024,
   },
 });
+
+const blockedNetworkAttachmentMimeTypes = new Set([
+  'application/x-msdownload',
+  'application/x-dosexec',
+  'application/x-msdos-program',
+  'application/x-sh',
+  'application/x-bat',
+]);
+
+const networkAttachmentFilter = (_req, file, cb) => {
+  const mimeType = String(file.mimetype || '').toLowerCase();
+  if (blockedNetworkAttachmentMimeTypes.has(mimeType)) {
+    cb(new Error('This file type is not allowed'));
+    return;
+  }
+
+  cb(null, true);
+};
+
+export const uploadNetworkAttachmentMiddleware = multer({
+  storage: multer.memoryStorage(),
+  fileFilter: networkAttachmentFilter,
+  limits: {
+    fileSize: 25 * 1024 * 1024,
+    files: 10,
+  },
+});

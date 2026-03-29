@@ -5,7 +5,7 @@ import { api, assetUrl } from '../../../lib/api';
 import KpiCard from '../../../components/KpiCard';
 import { authStorage } from '../../../lib/auth';
 import { useNotifications } from '../../../lib/notifications';
-import { Permission, hasPermission } from '../../../lib/permissions';
+import { Permission, hasAnyPermission, hasPermission } from '../../../lib/permissions';
 
 const statusLabelMap = {
   TODO: 'جديدة',
@@ -186,6 +186,12 @@ export default function DashboardPage() {
   const canSeeAttendanceMonitor = hasPermission(currentUser, Permission.VIEW_ATTENDANCE_MONITOR);
   const canSeeHierarchy = hasPermission(currentUser, Permission.VIEW_EMPLOYEES_HIERARCHY);
   const canSeeLeaderboard = hasPermission(currentUser, Permission.VIEW_LEADERBOARD);
+  const canSeePeriodicMaintenance = hasAnyPermission(currentUser, [
+    Permission.VIEW_MAINTENANCE_PLANS,
+    Permission.CREATE_MAINTENANCE_PLANS,
+    Permission.MANAGE_MAINTENANCE_PLANS,
+    Permission.REGISTER_MAINTENANCE_VISITS,
+  ]);
   const { lastNotification, lastNotificationAt } = useNotifications();
   const [data, setData] = useState(null);
   const [me, setMe] = useState(null);
@@ -256,6 +262,44 @@ export default function DashboardPage() {
         <KpiCard label="قيد التنفيذ" value={data.summary.inProgress} hint="مهام نشطة الآن" />
         <KpiCard label="مشاريع نشطة" value={data.summary.activeProjects} hint="على مستوى الشركة" tone="warn" />
       </section>
+
+      {canSeePeriodicMaintenance ? (
+        <section className="card section" style={{ marginTop: 16 }}>
+          <div className="section-header">
+            <div>
+              <h2 style={{ marginBottom: 6 }}>الصيانات الدورية المستحقة</h2>
+              <p style={{ margin: 0, color: 'var(--text-soft)' }}>ملخص سريع للزيارات التي تحتاج متابعة الآن.</p>
+            </div>
+            <a href="/maintenance-plans" className="btn btn-soft">عرض الكل</a>
+          </div>
+          <div className="grid-3">
+            <article className="maintenance-info-box"><span>اليوم</span><strong>{data.maintenanceDue?.dueToday || 0}</strong></article>
+            <article className="maintenance-info-box"><span>متأخرة</span><strong>{data.maintenanceDue?.overdue || 0}</strong></article>
+            <article className="maintenance-info-box"><span>قريبة</span><strong>{data.maintenanceDue?.upcoming || 0}</strong></article>
+          </div>
+          {(data.maintenanceDue?.featured || []).length ? (
+            <div className="maintenance-widget-list">
+              {data.maintenanceDue.featured.map((item) => (
+                <a key={item.id} href="/maintenance-plans" className="maintenance-widget-item">
+                  <div>
+                    <strong>{item.customerName || 'خطة صيانة'}</strong>
+                    <div className="maintenance-card-subtitle">{item.location || '-'}</div>
+                  </div>
+                  <div className="maintenance-chip-row">
+                    <span className={`status-pill ${item.nextVisitState === 'OVERDUE' ? 'status-rejected' : item.nextVisitState === 'TODAY' ? 'status-submitted' : 'status-inprogress'}`}>
+                      {item.nextVisitState === 'OVERDUE' ? 'متأخرة' : item.nextVisitState === 'TODAY' ? 'اليوم' : 'قريبة'}
+                    </span>
+                    <span className="status-pill status-todo">{item.maintenanceType === 'FREE' ? 'مجانية' : 'مدفوعة'}</span>
+                    <span className="status-pill status-approved">{item.nextVisitDate ? new Date(item.nextVisitDate).toLocaleDateString('ar-IQ') : '-'}</span>
+                  </div>
+                </a>
+              ))}
+            </div>
+          ) : (
+            <p style={{ color: 'var(--text-soft)', marginBottom: 0 }}>لا توجد صيانات مستحقة أو متأخرة حاليًا.</p>
+          )}
+        </section>
+      ) : null}
 
       {attendanceMeta ? (
         <section className="grid-3" style={{ marginTop: 16 }}>

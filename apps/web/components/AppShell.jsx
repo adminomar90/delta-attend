@@ -43,6 +43,10 @@ const titleByPath = {
     title: 'سجل الاعتمادات',
     subtitle: 'أرشيف العمليات المعتمدة بالكامل مع تفاصيل المسار والموافقات والتصدير',
   },
+  '/maintenance-plans': {
+    title: 'الصيانة الدورية',
+    subtitle: 'خطط صيانة دورية، زيارات مجدولة، صيانات مستحقة، وأرشيف تنفيذ متكامل',
+  },
   '/projects': {
     title: 'المشاريع',
     subtitle: 'إدارة المشاريع والفرق وربط المهام بالأهداف',
@@ -70,6 +74,10 @@ const titleByPath = {
   '/audit-log': {
     title: 'سجل التدقيق',
     subtitle: 'توثيق كامل للإجراءات الحساسة داخل النظام',
+  },
+  '/network-documentation': {
+    title: 'توثيق شبكات الزبائن',
+    subtitle: 'توثيق الفروع والأجهزة و IP/VLAN/WAN/VPN والمرفقات وسجل التغيير',
   },
 };
 
@@ -104,6 +112,12 @@ const routePermissionRules = {
   ],
   '/completed-work-reports': [Permission.VIEW_COMPLETED_WORK_REPORTS],
   '/approval-history': [Permission.VIEW_APPROVAL_HISTORY],
+  '/maintenance-plans': [
+    Permission.VIEW_MAINTENANCE_PLANS,
+    Permission.CREATE_MAINTENANCE_PLANS,
+    Permission.MANAGE_MAINTENANCE_PLANS,
+    Permission.REGISTER_MAINTENANCE_VISITS,
+  ],
   '/leaderboard': [Permission.VIEW_LEADERBOARD],
   '/reports': [
     Permission.VIEW_ANALYTICS,
@@ -111,6 +125,18 @@ const routePermissionRules = {
     Permission.VIEW_FINANCIAL_REPORTS,
   ],
   '/audit-log': [Permission.VIEW_AUDIT_LOGS],
+  '/network-documentation': [
+    Permission.VIEW_NETWORK_DOCUMENTATION,
+    Permission.MANAGE_NETWORK_CUSTOMERS,
+    Permission.MANAGE_NETWORK_BRANCHES,
+    Permission.MANAGE_NETWORK_DEVICES,
+    Permission.MANAGE_NETWORK_IP_PLAN,
+    Permission.MANAGE_NETWORK_VLANS,
+    Permission.MANAGE_NETWORK_WAN,
+    Permission.MANAGE_NETWORK_VPN,
+    Permission.MANAGE_NETWORK_WIFI,
+    Permission.MANAGE_NETWORK_ATTACHMENTS,
+  ],
 };
 
 const resolveRouteValue = (pathname, config) =>

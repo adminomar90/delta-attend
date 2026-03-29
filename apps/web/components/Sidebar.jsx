@@ -13,6 +13,7 @@ const menuIcons = {
   '/materials': '🏗️',
   '/financial-disbursements': '💸',
   '/maintenance-reports': '🛠️',
+  '/maintenance-plans': '🗓️',
   '/approvals': '✅',
   '/work-reports': '📝',
   '/completed-work-reports': '📚',
@@ -25,6 +26,7 @@ const menuIcons = {
   '/points-admin': '⚙️',
   '/reports': '📈',
   '/audit-log': '🔍',
+  '/network-documentation': '🌐',
 };
 
 const menu = [
@@ -61,6 +63,16 @@ const menu = [
       Permission.HANDLE_MAINTENANCE_REPORTS,
       Permission.REVIEW_MAINTENANCE_REPORTS,
       Permission.VIEW_MAINTENANCE_REPORTS,
+    ],
+  },
+  {
+    href: '/maintenance-plans',
+    label: 'الصيانة الدورية',
+    anyPermissions: [
+      Permission.VIEW_MAINTENANCE_PLANS,
+      Permission.CREATE_MAINTENANCE_PLANS,
+      Permission.MANAGE_MAINTENANCE_PLANS,
+      Permission.REGISTER_MAINTENANCE_VISITS,
     ],
   },
   {
@@ -116,6 +128,22 @@ const menu = [
     ],
   },
   { href: '/audit-log', label: 'سجل التدقيق', anyPermissions: [Permission.VIEW_AUDIT_LOGS] },
+  {
+    href: '/network-documentation',
+    label: 'توثيق الشبكات',
+    anyPermissions: [
+      Permission.VIEW_NETWORK_DOCUMENTATION,
+      Permission.MANAGE_NETWORK_CUSTOMERS,
+      Permission.MANAGE_NETWORK_BRANCHES,
+      Permission.MANAGE_NETWORK_DEVICES,
+      Permission.MANAGE_NETWORK_IP_PLAN,
+      Permission.MANAGE_NETWORK_VLANS,
+      Permission.MANAGE_NETWORK_WAN,
+      Permission.MANAGE_NETWORK_VPN,
+      Permission.MANAGE_NETWORK_WIFI,
+      Permission.MANAGE_NETWORK_ATTACHMENTS,
+    ],
+  },
 ];
 
 export default function Sidebar({ mobileOpen, onClose }) {
