@@ -1,0 +1,243 @@
+'use client';
+
+import { useEffect, useState } from 'react';
+import {
+  createPlanFormDefaults,
+  dailyWorkPlanPriorityOptions,
+  dailyWorkPlanTaskTypeOptions,
+} from '../../lib/dailyWorkPlans';
+import DailyWorkPlanAssigneePicker from './DailyWorkPlanAssigneePicker';
+
+export default function DailyWorkPlanModal({
+  open,
+  initialForm,
+  users,
+  projects,
+  saving,
+  title,
+  subtitle,
+  onClose,
+  onSubmit,
+}) {
+  const [form, setForm] = useState(createPlanFormDefaults());
+
+  useEffect(() => {
+    if (open) {
+      setForm(createPlanFormDefaults(initialForm));
+    }
+  }, [open, initialForm]);
+
+  if (!open) return null;
+
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <div className="modal-panel daily-plan-modal-panel" onClick={(e) => e.stopPropagation()}>
+        <div className="modal-header">
+          <div>
+            <h3>{title || 'بلان العمل اليومي'}</h3>
+            {subtitle ? <p className="daily-plan-modal-subtitle">{subtitle}</p> : null}
+          </div>
+          <button type="button" className="modal-close" onClick={onClose}>&times;</button>
+        </div>
+
+        <form
+          className="daily-plan-form"
+          onSubmit={(event) => {
+            event.preventDefault();
+            onSubmit(form);
+          }}
+        >
+          <div className="daily-plan-form-section">
+            <div className="daily-plan-form-grid">
+              <label>
+                عنوان البلان
+                <input
+                  className="input"
+                  value={form.title}
+                  onChange={(e) => setForm((prev) => ({ ...prev, title: e.target.value }))}
+                  required
+                />
+              </label>
+
+              <label>
+                اسم المشروع أو الزبون
+                <input
+                  className="input"
+                  value={form.customerName}
+                  onChange={(e) => setForm((prev) => ({ ...prev, customerName: e.target.value }))}
+                />
+              </label>
+
+              <label>
+                المشروع المرتبط
+                <select
+                  className="select"
+                  value={form.project}
+                  onChange={(e) => setForm((prev) => ({ ...prev, project: e.target.value }))}
+                >
+                  <option value="">بدون ربط</option>
+                  {(projects || []).map((project) => (
+                    <option key={project._id || project.id} value={project._id || project.id}>
+                      {project.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <label>
+                المشرف المسؤول
+                <select
+                  className="select"
+                  value={form.supervisor}
+                  onChange={(e) => setForm((prev) => ({ ...prev, supervisor: e.target.value }))}
+                >
+                  <option value="">اختيار تلقائي</option>
+                  {(users || []).map((user) => (
+                    <option key={user.id} value={user.id}>
+                      {user.fullName}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <label>
+                قائد الفريق
+                <select
+                  className="select"
+                  value={form.teamLeader}
+                  onChange={(e) => setForm((prev) => ({ ...prev, teamLeader: e.target.value }))}
+                >
+                  <option value="">اختيار قائد الفريق</option>
+                  {(users || []).map((user) => (
+                    <option key={user.id} value={user.id}>
+                      {user.fullName}
+                    </option>
+                  ))}
+                </select>
+                <small style={{ color: 'var(--text-soft)', display: 'block', marginTop: 4 }}>
+                  قائد الفريق هو المسؤول عن تحديث نسبة الإنجاز وإرسال البلان للاعتماد.
+                </small>
+              </label>
+
+              <label>
+                تاريخ التنفيذ
+                <input
+                  className="input"
+                  type="date"
+                  value={form.planDate}
+                  onChange={(e) => setForm((prev) => ({ ...prev, planDate: e.target.value }))}
+                  required
+                />
+              </label>
+
+              <label>
+                وقت البداية
+                <input
+                  className="input"
+                  type="time"
+                  value={form.startTime}
+                  onChange={(e) => setForm((prev) => ({ ...prev, startTime: e.target.value }))}
+                />
+              </label>
+
+              <label>
+                وقت النهاية المتوقع
+                <input
+                  className="input"
+                  type="time"
+                  value={form.expectedEndTime}
+                  onChange={(e) => setForm((prev) => ({ ...prev, expectedEndTime: e.target.value }))}
+                />
+              </label>
+
+              <label>
+                الأولوية
+                <select
+                  className="select"
+                  value={form.priority}
+                  onChange={(e) => setForm((prev) => ({ ...prev, priority: e.target.value }))}
+                >
+                  {dailyWorkPlanPriorityOptions.map(([value, label]) => (
+                    <option key={value} value={value}>{label}</option>
+                  ))}
+                </select>
+              </label>
+
+              <label>
+                نوع المهمة
+                <select
+                  className="select"
+                  value={form.taskType}
+                  onChange={(e) => setForm((prev) => ({ ...prev, taskType: e.target.value }))}
+                >
+                  {dailyWorkPlanTaskTypeOptions.map(([value, label]) => (
+                    <option key={value} value={value}>{label}</option>
+                  ))}
+                </select>
+              </label>
+
+              <label>
+                الموقع
+                <input
+                  className="input"
+                  value={form.location}
+                  onChange={(e) => setForm((prev) => ({ ...prev, location: e.target.value }))}
+                />
+              </label>
+
+              <div className="grid-span-full">
+                <DailyWorkPlanAssigneePicker
+                  users={users}
+                  selectedIds={form.assigneeIds}
+                  onChange={(assigneeIds) => setForm((prev) => ({ ...prev, assigneeIds }))}
+                />
+                {!form.assigneeIds?.length ? (
+                  <small style={{ color: 'var(--danger)', display: 'block', marginTop: 8 }}>
+                    يجب اختيار موظف واحد على الأقل.
+                  </small>
+                ) : null}
+              </div>
+
+              <label className="grid-span-full">
+                وصف العمل بالتفصيل
+                <textarea
+                  className="textarea"
+                  rows={4}
+                  value={form.description}
+                  onChange={(e) => setForm((prev) => ({ ...prev, description: e.target.value }))}
+                />
+              </label>
+
+              <label className="grid-span-full">
+                ملاحظات الإدارة
+                <textarea
+                  className="textarea"
+                  rows={3}
+                  value={form.adminNotes}
+                  onChange={(e) => setForm((prev) => ({ ...prev, adminNotes: e.target.value }))}
+                />
+              </label>
+
+              <label className="grid-span-full">
+                مرفقات أو صور
+                <input
+                  className="input"
+                  type="file"
+                  multiple
+                  onChange={(e) => setForm((prev) => ({ ...prev, attachments: Array.from(e.target.files || []) }))}
+                />
+              </label>
+            </div>
+          </div>
+
+          <div className="maintenance-modal-actions">
+            <button type="button" className="btn btn-soft" onClick={onClose}>إلغاء</button>
+            <button type="submit" className="btn btn-primary" disabled={saving || !form.assigneeIds?.length}>
+              {saving ? 'جارٍ الحفظ...' : 'حفظ البلان'}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}

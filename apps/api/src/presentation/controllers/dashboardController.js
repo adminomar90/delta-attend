@@ -8,6 +8,7 @@ import { MaterialReconciliationModel } from '../../infrastructure/db/models/Mate
 import { FinancialDisbursementModel } from '../../infrastructure/db/models/FinancialDisbursementModel.js';
 import { MaintenanceReportModel } from '../../infrastructure/db/models/MaintenanceReportModel.js';
 import { MaintenancePlanRepository } from '../../infrastructure/db/repositories/MaintenancePlanRepository.js';
+import { DailyWorkPlanRepository } from '../../infrastructure/db/repositories/DailyWorkPlanRepository.js';
 import { UserModel } from '../../infrastructure/db/models/UserModel.js';
 import { GoalModel, GoalStatus } from '../../infrastructure/db/models/GoalModel.js';
 import { NotificationModel } from '../../infrastructure/db/models/NotificationModel.js';
@@ -15,6 +16,11 @@ import { PointsLedgerRepository } from '../../infrastructure/db/repositories/Poi
 import { UserRepository } from '../../infrastructure/db/repositories/UserRepository.js';
 import { AttendanceRepository } from '../../infrastructure/db/repositories/AttendanceRepository.js';
 import { summarizeMaintenancePlans } from '../../application/services/maintenancePlanService.js';
+import {
+  buildDailyProductivitySummary,
+  buildDailyWorkPlanSummary,
+  syncOverdueDailyWorkPlans,
+} from '../../application/services/dailyWorkPlanService.js';
 import { applyManagedScopeOnFilter, resolveManagedUserIds } from '../../shared/accessScope.js';
 import { Permission, Roles, TaskStatus } from '../../shared/constants.js';
 import { hasAnyPermission, hasPermission } from '../../shared/permissions.js';
@@ -24,6 +30,7 @@ const pointsLedgerRepository = new PointsLedgerRepository();
 const userRepository = new UserRepository();
 const attendanceRepository = new AttendanceRepository();
 const maintenancePlanRepository = new MaintenancePlanRepository();
+const dailyWorkPlanRepository = new DailyWorkPlanRepository();
 
 export const dashboardSummary = asyncHandler(async (req, res) => {
   const taskFilter = {};
@@ -60,6 +67,13 @@ export const dashboardSummary = asyncHandler(async (req, res) => {
     Permission.MANAGE_MAINTENANCE_PLANS,
     Permission.REGISTER_MAINTENANCE_VISITS,
   ]);
+  const canViewDailyWorkPlans = hasAnyPermission(req.user, [
+    Permission.VIEW_DAILY_WORK_PLANS,
+    Permission.CREATE_DAILY_WORK_PLANS,
+    Permission.MANAGE_DAILY_WORK_PLANS,
+    Permission.UPDATE_ASSIGNED_DAILY_WORK_PLANS,
+    Permission.APPROVE_DAILY_WORK_PLANS,
+  ]);
   const canSeeAllPeriodicMaintenance = req.user.role === Roles.GENERAL_MANAGER
     || hasPermission(req.user, Permission.CREATE_MAINTENANCE_PLANS)
     || hasPermission(req.user, Permission.MANAGE_MAINTENANCE_PLANS)
@@ -82,6 +96,11 @@ export const dashboardSummary = asyncHandler(async (req, res) => {
           { createdBy: req.user.id },
         ],
       };
+  const dailyWorkPlansFilter = Array.isArray(managedUserIds)
+    ? {
+        'assignees.user': { $in: managedUserIds },
+      }
+    : {};
 
   const taskPendingApprovalsPromise = canApproveTasks
     ? TaskModel.countDocuments({
@@ -205,6 +224,15 @@ export const dashboardSummary = asyncHandler(async (req, res) => {
   const maintenancePlansPromise = canViewPeriodicMaintenance
     ? maintenancePlanRepository.list(maintenancePlansFilter)
     : Promise.resolve([]);
+  const dailyWorkPlansPromise = canViewDailyWorkPlans
+    ? (async () => {
+        await syncOverdueDailyWorkPlans({
+          repository: dailyWorkPlanRepository,
+          now: new Date(),
+        });
+        return dailyWorkPlanRepository.list(dailyWorkPlansFilter, { limit: 200 });
+      })()
+    : Promise.resolve([]);
 
   const [
     totalTasks,
@@ -217,6 +245,7 @@ export const dashboardSummary = asyncHandler(async (req, res) => {
     maintenancePendingApprovals,
     financialPendingApprovals,
     maintenancePlans,
+    dailyWorkPlans,
     inProgress,
     approvedTasks,
     activeProjects,
@@ -234,6 +263,7 @@ export const dashboardSummary = asyncHandler(async (req, res) => {
     maintenancePendingApprovalsPromise,
     financialPendingApprovalsPromise,
     maintenancePlansPromise,
+    dailyWorkPlansPromise,
     TaskModel.countDocuments({ ...taskFilter, status: TaskStatus.IN_PROGRESS }),
     TaskModel.countDocuments({ ...taskFilter, status: TaskStatus.APPROVED }),
     ProjectModel.countDocuments({ status: 'ACTIVE' }),
@@ -271,6 +301,11 @@ export const dashboardSummary = asyncHandler(async (req, res) => {
   const maintenanceDueSummary = summarizeMaintenancePlans(maintenancePlans || [], {
     dueLimit: 5,
   });
+  const dailyWorkPlansSummary = buildDailyWorkPlanSummary(dailyWorkPlans || [], {
+    today: new Date(),
+    featuredLimit: 5,
+  });
+  const dailyWorkProductivity = buildDailyProductivitySummary(dailyWorkPlans || []);
 
   const attendanceSummary = attendanceAggregates.reduce(
     (acc, item) => {
@@ -324,8 +359,35 @@ export const dashboardSummary = asyncHandler(async (req, res) => {
         maintenanceType: plan.maintenanceType || '',
         nextVisitDate: summary.nextVisitDate || null,
         nextVisitState: summary.nextVisitState || '',
-        status: summary.status || plan.status || '',
+          status: summary.status || plan.status || '',
+        })),
+    },
+    dailyWorkPlans: {
+      totalToday: dailyWorkPlansSummary.totalToday,
+      completed: dailyWorkPlansSummary.completed,
+      inProgress: dailyWorkPlansSummary.inProgress,
+      overdue: dailyWorkPlansSummary.overdue,
+      postponed: dailyWorkPlansSummary.postponed,
+      pendingApproval: dailyWorkPlansSummary.pendingApproval,
+      featured: (dailyWorkPlansSummary.featuredPlans || []).map((plan) => ({
+        id: String(plan._id || plan.id),
+        title: plan.title || '',
+        customerName: plan.customerName || '',
+        projectName: plan.project?.name || plan.projectNameSnapshot || '',
+        location: plan.location || '',
+        planDate: plan.planDate || null,
+        status: plan.status || '',
+        priority: plan.priority || '',
+        progressPercent: Number(plan.progressPercent || 0),
+        assigneesLabel: (plan.assignees || [])
+          .map((item) => item.user?.fullName || '')
+          .filter(Boolean)
+          .join('، '),
       })),
+      topPerformers: dailyWorkProductivity.slice(0, 5),
+      delayedEmployees: dailyWorkProductivity
+        .filter((item) => item.overdueAssignments > 0)
+        .slice(0, 5),
     },
     leaderboard: canSeeLeaderboard
       ? leaderboard.map((item, index) => ({ rank: index + 1, ...item }))

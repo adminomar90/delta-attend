@@ -14,6 +14,7 @@ const menuIcons = {
   '/financial-disbursements': '💸',
   '/maintenance-reports': '🛠️',
   '/maintenance-plans': '🗓️',
+  '/daily-work-plans': '🧭',
   '/approvals': '✅',
   '/work-reports': '📝',
   '/completed-work-reports': '📚',
@@ -73,6 +74,17 @@ const menu = [
       Permission.CREATE_MAINTENANCE_PLANS,
       Permission.MANAGE_MAINTENANCE_PLANS,
       Permission.REGISTER_MAINTENANCE_VISITS,
+    ],
+  },
+  {
+    href: '/daily-work-plans',
+    label: 'بلان العمل اليومي',
+    anyPermissions: [
+      Permission.VIEW_DAILY_WORK_PLANS,
+      Permission.CREATE_DAILY_WORK_PLANS,
+      Permission.MANAGE_DAILY_WORK_PLANS,
+      Permission.UPDATE_ASSIGNED_DAILY_WORK_PLANS,
+      Permission.APPROVE_DAILY_WORK_PLANS,
     ],
   },
   {

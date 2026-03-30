@@ -21,6 +21,7 @@ const pointsLedgerSchema = new mongoose.Schema(
       enum: [
         'TASK_APPROVAL',
         'WORK_REPORT_APPROVAL',
+        'DAILY_WORK_PLAN_APPROVAL',
         'PROJECT_APPROVAL',
         'ATTENDANCE_APPROVAL',
         'MATERIAL_RECONCILIATION',
@@ -38,10 +39,6 @@ const pointsLedgerSchema = new mongoose.Schema(
     auditLog: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'AuditLog',
-      default: null,
-      index: true,
-      unique: true,
-      sparse: true,
     },
     sourceAction: {
       type: String,

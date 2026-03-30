@@ -61,6 +61,15 @@ export const uploadWorkReportImagesMiddleware = multer({
   },
 });
 
+export const uploadDailyWorkPlanAttachmentsMiddleware = multer({
+  storage: diskStorage,
+  fileFilter: workReportImageFilter,
+  limits: {
+    fileSize: 10 * 1024 * 1024,
+    files: 20,
+  },
+});
+
 export const uploadImportFileMiddleware = multer({
   storage: multer.memoryStorage(),
   limits: {

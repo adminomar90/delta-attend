@@ -3,7 +3,9 @@ import { PointsLedgerModel } from '../models/PointsLedgerModel.js';
 
 export class PointsLedgerRepository {
   async create(payload) {
-    return PointsLedgerModel.create(payload);
+    const data = { ...payload };
+    if (!data.auditLog) delete data.auditLog;
+    return PointsLedgerModel.create(data);
   }
 
   async findByAuditLog(auditLogId) {

@@ -384,4 +384,25 @@ export const notificationService = {
       },
     });
   },
+
+  async notifyDailyWorkPlanEvent(userIds, payload = {}) {
+    const recipients = Array.isArray(userIds) ? userIds : [userIds];
+
+    return createManyAndPush(recipients, {
+      createdBy: payload.createdBy || null,
+      type: payload.type || 'DAILY_WORK_PLAN_UPDATED',
+      titleAr: payload.titleAr || 'تحديث بلان العمل اليومي',
+      messageAr: payload.messageAr || '',
+      metadata: {
+        planId: payload.planId || null,
+        planTitle: payload.planTitle || '',
+        status: payload.status || '',
+        planDate: payload.planDate || null,
+        progressPercent: payload.progressPercent ?? null,
+        actorId: payload.actorId || null,
+        action: payload.action || '',
+        ...payload.metadata,
+      },
+    });
+  },
 };

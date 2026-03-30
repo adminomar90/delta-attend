@@ -192,6 +192,13 @@ export default function DashboardPage() {
     Permission.MANAGE_MAINTENANCE_PLANS,
     Permission.REGISTER_MAINTENANCE_VISITS,
   ]);
+  const canSeeDailyWorkPlans = hasAnyPermission(currentUser, [
+    Permission.VIEW_DAILY_WORK_PLANS,
+    Permission.CREATE_DAILY_WORK_PLANS,
+    Permission.MANAGE_DAILY_WORK_PLANS,
+    Permission.UPDATE_ASSIGNED_DAILY_WORK_PLANS,
+    Permission.APPROVE_DAILY_WORK_PLANS,
+  ]);
   const { lastNotification, lastNotificationAt } = useNotifications();
   const [data, setData] = useState(null);
   const [me, setMe] = useState(null);
@@ -233,7 +240,17 @@ export default function DashboardPage() {
       return;
     }
 
-    if (['ATTENDANCE_ACTIVITY', 'WORK_REPORT_CREATED', 'OPERATION_ACTIVITY'].includes(lastNotification.type)) {
+    if ([
+      'ATTENDANCE_ACTIVITY',
+      'WORK_REPORT_CREATED',
+      'OPERATION_ACTIVITY',
+      'DAILY_WORK_PLAN_CREATED',
+      'DAILY_WORK_PLAN_UPDATED',
+      'DAILY_WORK_PLAN_PROGRESS_UPDATED',
+      'DAILY_WORK_PLAN_POSTPONED',
+      'DAILY_WORK_PLAN_COMPLETED',
+      'DAILY_WORK_PLAN_APPROVED',
+    ].includes(lastNotification.type)) {
       load();
     }
   }, [lastNotification?.type, lastNotificationAt, load]);
@@ -297,6 +314,47 @@ export default function DashboardPage() {
             </div>
           ) : (
             <p style={{ color: 'var(--text-soft)', marginBottom: 0 }}>لا توجد صيانات مستحقة أو متأخرة حاليًا.</p>
+          )}
+        </section>
+      ) : null}
+
+      {canSeeDailyWorkPlans ? (
+        <section className="card section" style={{ marginTop: 16 }}>
+          <div className="section-header">
+            <div>
+              <h2 style={{ marginBottom: 6 }}>بلان العمل اليومي</h2>
+              <p style={{ margin: 0, color: 'var(--text-soft)' }}>ملخص مباشر للخطط اليومية والتأخير والاعتماد.</p>
+            </div>
+            <a href="/daily-work-plans" className="btn btn-soft">عرض الكل</a>
+          </div>
+          <div className="grid-4">
+            <article className="maintenance-info-box"><span>اليوم</span><strong>{data.dailyWorkPlans?.totalToday || 0}</strong></article>
+            <article className="maintenance-info-box"><span>قيد التنفيذ</span><strong>{data.dailyWorkPlans?.inProgress || 0}</strong></article>
+            <article className="maintenance-info-box"><span>بانتظار الاعتماد</span><strong>{data.dailyWorkPlans?.pendingApproval || 0}</strong></article>
+            <article className="maintenance-info-box"><span>متأخرة</span><strong>{data.dailyWorkPlans?.overdue || 0}</strong></article>
+          </div>
+          {(data.dailyWorkPlans?.featured || []).length ? (
+            <div className="maintenance-widget-list">
+              {data.dailyWorkPlans.featured.map((item) => (
+                <a key={item.id} href="/daily-work-plans" className="maintenance-widget-item">
+                  <div>
+                    <strong>{item.title || 'بلان يومي'}</strong>
+                    <div className="maintenance-card-subtitle">{item.projectName || item.customerName || '-'} - {item.location || '-'}</div>
+                  </div>
+                  <div className="maintenance-chip-row">
+                    <span className={`status-pill ${item.status === 'OVERDUE' ? 'status-rejected' : item.status === 'PENDING_APPROVAL' ? 'status-submitted' : item.status === 'COMPLETED' ? 'status-approved' : 'status-inprogress'}`}>
+                      {item.status === 'OVERDUE' ? 'متأخرة' : item.status === 'PENDING_APPROVAL' ? 'بانتظار الاعتماد' : item.status === 'COMPLETED' ? 'مكتملة' : 'قيد التنفيذ'}
+                    </span>
+                    <span className={`status-pill ${item.priority === 'URGENT' ? 'status-rejected' : item.priority === 'HIGH' ? 'status-submitted' : item.priority === 'MEDIUM' ? 'status-inprogress' : 'status-todo'}`}>
+                      {item.priority === 'URGENT' ? 'عاجل' : item.priority === 'HIGH' ? 'عالي' : item.priority === 'MEDIUM' ? 'متوسط' : 'منخفض'}
+                    </span>
+                    <span className="status-pill status-approved">{item.progressPercent || 0}%</span>
+                  </div>
+                </a>
+              ))}
+            </div>
+          ) : (
+            <p style={{ color: 'var(--text-soft)', marginBottom: 0 }}>لا توجد بلانات يومية بارزة الآن.</p>
           )}
         </section>
       ) : null}

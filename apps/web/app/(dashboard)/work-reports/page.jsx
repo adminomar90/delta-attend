@@ -10,6 +10,7 @@ import {
 } from '../../../lib/workReportPoints';
 import { compressImage, formatFileSize } from '../../../lib/imageUtils';
 import MaintenancePlanModal from '../../../components/maintenance/MaintenancePlanModal';
+import ProgressGauge from '../../../components/ProgressGauge';
 import { buildPlanDefaultsFromReport } from '../../../lib/maintenancePlans';
 
 /* ── Constants ─────────────────────────────────────────────────────────────── */
@@ -765,20 +766,7 @@ export default function WorkReportsPage() {
     return isOwner || isGM;
   };
 
-  const renderReportProgress = (pct) => (
-    <div className="work-report-progress">
-      <div className="work-report-progress-track">
-        <div
-          className="work-report-progress-bar"
-          style={{
-            width: `${Math.min(100, pct)}%`,
-            background: pct >= 80 ? '#27ae60' : pct >= 50 ? '#2980b9' : '#e67e22',
-          }}
-        />
-      </div>
-      <span className="work-report-progress-value">{pct}%</span>
-    </div>
-  );
+  const renderReportProgress = (pct) => <ProgressGauge value={pct} />;
 
   const renderReportActions = ({
     report,

@@ -1261,6 +1261,724 @@ textarea:disabled {
   margin-top: 14px;
 }
 
+.daily-plan-hero {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.daily-plan-toolbar {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.daily-plan-filter-grid,
+.daily-plan-form-grid,
+.daily-plan-detail-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 14px;
+}
+
+.daily-plan-card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(290px, 1fr));
+  gap: 14px;
+}
+
+.daily-plan-card {
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 14px;
+  background: linear-gradient(180deg, rgba(12, 23, 45, 0.95), rgba(8, 16, 31, 0.95));
+}
+
+.daily-plan-card-subtitle,
+.daily-plan-modal-subtitle {
+  color: var(--text-soft);
+  font-size: 13px;
+  margin-top: 4px;
+}
+
+.daily-plan-chip-row,
+.daily-plan-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.daily-plan-mini-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.daily-plan-mini-grid > div,
+.daily-plan-info-box,
+.daily-plan-productivity-card {
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: rgba(16, 33, 64, 0.7);
+  border: 1px solid rgba(78, 111, 167, 0.22);
+}
+
+.daily-plan-mini-grid span,
+.daily-plan-info-box span,
+.daily-plan-productivity-card span {
+  display: block;
+  color: var(--text-soft);
+  font-size: 12px;
+  margin-bottom: 4px;
+}
+
+.daily-plan-progress-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 14px;
+}
+
+.daily-plan-calendar-panel {
+  overflow: hidden;
+}
+
+.daily-plan-calendar-header,
+.daily-plan-calendar-selected-head,
+.daily-plan-calendar-group-head,
+.daily-plan-calendar-task-head,
+.daily-plan-calendar-task-footer,
+.daily-plan-calendar-month-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.daily-plan-calendar-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.daily-plan-calendar-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.35fr) minmax(320px, 0.95fr);
+  gap: 18px;
+  margin-top: 18px;
+}
+
+.daily-plan-calendar-board,
+.daily-plan-calendar-sidebar,
+.daily-plan-calendar-group,
+.daily-plan-calendar-task {
+  border: 1px solid rgba(78, 111, 167, 0.24);
+  border-radius: 18px;
+  background: rgba(10, 19, 36, 0.88);
+}
+
+.daily-plan-calendar-board,
+.daily-plan-calendar-sidebar {
+  padding: 16px;
+}
+
+.daily-plan-calendar-month-row {
+  margin-bottom: 12px;
+  color: var(--text-soft);
+  font-size: 13px;
+}
+
+.daily-plan-calendar-month-row strong {
+  color: var(--text);
+  font-size: 16px;
+}
+
+.daily-plan-calendar-weekdays,
+.daily-plan-calendar-grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.daily-plan-calendar-weekdays {
+  margin-bottom: 8px;
+}
+
+.daily-plan-calendar-weekdays span {
+  text-align: center;
+  color: var(--text-soft);
+  font-size: 12px;
+  padding: 4px 0;
+}
+
+.daily-plan-calendar-day {
+  min-height: 112px;
+  width: 100%;
+  border-radius: 16px;
+  border: 1px solid rgba(78, 111, 167, 0.18);
+  background: linear-gradient(180deg, rgba(16, 30, 58, 0.94), rgba(9, 18, 35, 0.94));
+  padding: 10px;
+  text-align: right;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  color: var(--text);
+  cursor: pointer;
+  transition: transform 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease;
+}
+
+.daily-plan-calendar-day:hover {
+  transform: translateY(-1px);
+  border-color: rgba(196, 215, 67, 0.34);
+}
+
+.daily-plan-calendar-day-active {
+  border-color: rgba(196, 215, 67, 0.56);
+  box-shadow: inset 0 0 0 1px rgba(196, 215, 67, 0.18);
+}
+
+.daily-plan-calendar-day-today {
+  box-shadow: inset 0 0 0 1px rgba(101, 236, 162, 0.22);
+}
+
+.daily-plan-calendar-day-busy {
+  background: linear-gradient(180deg, rgba(18, 36, 69, 0.96), rgba(9, 18, 35, 0.94));
+}
+
+.daily-plan-calendar-day-empty {
+  min-height: 112px;
+  border-radius: 16px;
+  background: transparent;
+  border: 1px dashed rgba(78, 111, 167, 0.08);
+}
+
+.daily-plan-calendar-day-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.daily-plan-calendar-day-head strong {
+  font-size: 16px;
+}
+
+.daily-plan-calendar-day-head small {
+  min-width: 22px;
+  height: 22px;
+  border-radius: 999px;
+  background: rgba(196, 215, 67, 0.14);
+  color: #dbe88a;
+  display: grid;
+  place-items: center;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.daily-plan-calendar-day-counts {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 11px;
+}
+
+.daily-plan-calendar-completed {
+  color: #a9f7c6;
+}
+
+.daily-plan-calendar-open {
+  color: #ffd0a6;
+}
+
+.daily-plan-calendar-markers {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: auto;
+}
+
+.daily-plan-calendar-marker {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  display: inline-flex;
+  flex-shrink: 0;
+}
+
+.daily-plan-calendar-marker.status-todo {
+  background: #b3c4e5;
+}
+
+.daily-plan-calendar-marker.status-inprogress {
+  background: #d4df86;
+}
+
+.daily-plan-calendar-marker.status-submitted {
+  background: #9bc8ff;
+}
+
+.daily-plan-calendar-marker.status-approved {
+  background: #a9f7c6;
+}
+
+.daily-plan-calendar-marker.status-rejected {
+  background: #ffb1b1;
+}
+
+.daily-plan-calendar-day-empty-label {
+  margin-top: auto;
+  color: var(--text-soft);
+  font-size: 11px;
+}
+
+.daily-plan-calendar-sidebar {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.daily-plan-calendar-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.daily-plan-calendar-day-lists {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.daily-plan-calendar-group {
+  padding: 14px;
+}
+
+.daily-plan-calendar-group-head {
+  margin-bottom: 12px;
+}
+
+.daily-plan-calendar-group-head span {
+  color: var(--text-soft);
+  font-size: 12px;
+}
+
+.daily-plan-calendar-task {
+  padding: 14px;
+}
+
+.daily-plan-calendar-task + .daily-plan-calendar-task {
+  margin-top: 10px;
+}
+
+.daily-plan-calendar-task-completed {
+  border-color: rgba(101, 236, 162, 0.22);
+}
+
+.daily-plan-calendar-task-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 10px;
+  color: var(--text-soft);
+  font-size: 12px;
+}
+
+@media (max-width: 1100px) {
+  .daily-plan-calendar-layout {
+    grid-template-columns: 1fr;
+  }
+}
+
+.daily-plan-productivity-grid,
+.daily-plan-assignee-list,
+.daily-plan-timeline {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.daily-plan-assignee-item,
+.daily-plan-timeline-item {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  border-radius: 14px;
+  background: rgba(10, 19, 36, 0.86);
+  border: 1px solid rgba(78, 111, 167, 0.24);
+}
+
+.daily-plan-timeline-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--accent);
+  margin-top: 6px;
+  flex-shrink: 0;
+}
+
+.daily-plan-timeline-content {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 1;
+}
+
+.daily-plan-timeline-content span {
+  color: var(--text-soft);
+  font-size: 12px;
+}
+
+.daily-plan-note-block {
+  margin-top: 14px;
+  padding: 14px;
+  border-radius: 16px;
+  border: 1px solid rgba(78, 111, 167, 0.24);
+  background: rgba(10, 19, 36, 0.82);
+}
+
+.daily-plan-note-block strong {
+  display: block;
+  margin-bottom: 8px;
+}
+
+.daily-plan-note-block p {
+  margin: 0;
+  color: var(--text-soft);
+  line-height: 1.8;
+  white-space: pre-wrap;
+}
+
+.daily-plan-attachment-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+}
+
+.daily-plan-attachment-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  border-radius: 14px;
+  border: 1px solid rgba(78, 111, 167, 0.24);
+  background: rgba(10, 19, 36, 0.82);
+}
+
+.daily-plan-attachment-card img {
+  width: 100%;
+  height: 180px;
+  object-fit: cover;
+  border-radius: 12px;
+}
+
+.daily-plan-attachment-card span {
+  color: var(--text-soft);
+  font-size: 12px;
+}
+
+.daily-plan-attachment-file {
+  display: grid;
+  place-items: center;
+  min-height: 140px;
+  border-radius: 12px;
+  background: rgba(16, 33, 64, 0.85);
+  color: var(--text-soft);
+  font-weight: 700;
+}
+
+.daily-plan-modal-panel {
+  width: min(100%, 960px);
+}
+
+.daily-plan-form {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.daily-plan-form-section {
+  border: 1px solid rgba(78, 111, 167, 0.2);
+  border-radius: 16px;
+  padding: 14px;
+  background: rgba(6, 13, 26, 0.65);
+}
+
+.daily-plan-section-title {
+  margin: 18px 0 10px;
+}
+
+.daily-plan-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.daily-plan-picker-toolbar,
+.daily-plan-selected-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.daily-plan-picker-hint {
+  color: var(--text-soft);
+  font-size: 12px;
+  margin-top: 4px;
+}
+
+.daily-plan-picker-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.daily-plan-picker-search {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.daily-plan-approval-panel {
+  padding: 14px;
+  border-radius: 16px;
+  border: 1px solid rgba(78, 111, 167, 0.24);
+  background: rgba(10, 19, 36, 0.82);
+}
+
+.daily-plan-approval-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.daily-plan-approval-head strong {
+  display: block;
+}
+
+.daily-plan-approval-total {
+  min-width: 160px;
+  padding: 10px 12px;
+  border-radius: 14px;
+  border: 1px solid rgba(196, 215, 67, 0.24);
+  background: rgba(20, 39, 74, 0.72);
+}
+
+.daily-plan-approval-total span {
+  display: block;
+  color: var(--text-soft);
+  font-size: 12px;
+  margin-bottom: 4px;
+}
+
+.daily-plan-approval-total strong {
+  font-size: 24px;
+  color: var(--accent);
+}
+
+.daily-plan-approval-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 14px;
+}
+
+.daily-plan-approval-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 12px;
+  border-radius: 16px;
+  border: 1px solid rgba(78, 111, 167, 0.2);
+  background: rgba(6, 13, 26, 0.6);
+}
+
+.daily-plan-approval-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  flex: 1;
+}
+
+.daily-plan-approval-meta span,
+.daily-plan-approval-meta small {
+  color: var(--text-soft);
+}
+
+.daily-plan-approval-input {
+  width: min(100%, 148px);
+  flex-shrink: 0;
+}
+
+.daily-plan-approval-input span {
+  display: block;
+  color: var(--text-soft);
+  font-size: 12px;
+  margin-bottom: 6px;
+}
+
+.daily-plan-selected-panel {
+  padding: 12px;
+  border-radius: 16px;
+  background: rgba(10, 19, 36, 0.82);
+  border: 1px solid rgba(78, 111, 167, 0.24);
+}
+
+.daily-plan-selected-head span {
+  color: var(--text-soft);
+  font-size: 12px;
+}
+
+.daily-plan-selected-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.daily-plan-selected-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(196, 215, 67, 0.2);
+  background: rgba(20, 39, 74, 0.75);
+  color: var(--text);
+  cursor: pointer;
+}
+
+.daily-plan-selected-chip span,
+.daily-plan-selected-chip small {
+  display: block;
+}
+
+.daily-plan-selected-chip small {
+  color: var(--text-soft);
+  font-size: 11px;
+}
+
+.daily-plan-selected-chip strong {
+  font-size: 16px;
+  color: var(--accent);
+  line-height: 1;
+}
+
+.daily-plan-selected-avatar,
+.daily-plan-user-avatar {
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  object-fit: cover;
+  border: 2px solid rgba(196, 215, 67, 0.25);
+  flex-shrink: 0;
+}
+
+.daily-plan-selected-avatar-fallback,
+.daily-plan-user-avatar-fallback {
+  display: inline-grid;
+  place-items: center;
+  font-size: 13px;
+  font-weight: 700;
+  background: rgba(255, 255, 255, 0.12);
+  color: var(--text);
+}
+
+.daily-plan-user-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
+}
+
+.daily-plan-user-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px;
+  border-radius: 16px;
+  border: 1px solid rgba(78, 111, 167, 0.24);
+  background: rgba(10, 19, 36, 0.82);
+  color: var(--text);
+  cursor: pointer;
+  transition: transform 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
+  text-align: right;
+}
+
+.daily-plan-user-card:hover {
+  transform: translateY(-1px);
+  border-color: rgba(196, 215, 67, 0.28);
+}
+
+.daily-plan-user-card-active {
+  border-color: rgba(196, 215, 67, 0.55);
+  box-shadow: 0 0 0 1px rgba(196, 215, 67, 0.14);
+  background: linear-gradient(135deg, rgba(20, 39, 74, 0.95), rgba(13, 24, 46, 0.95));
+}
+
+.daily-plan-user-card-main {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.daily-plan-user-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.daily-plan-user-meta strong,
+.daily-plan-user-meta span,
+.daily-plan-user-meta small {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.daily-plan-user-meta span,
+.daily-plan-user-meta small {
+  color: var(--text-soft);
+}
+
+.daily-plan-user-meta small {
+  font-size: 11px;
+}
+
+.daily-plan-user-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 78px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: rgba(16, 33, 64, 0.9);
+  border: 1px solid rgba(78, 111, 167, 0.24);
+  color: var(--text-soft);
+  font-size: 12px;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+.daily-plan-user-toggle-active {
+  background: rgba(196, 215, 67, 0.16);
+  color: #d4df86;
+  border-color: rgba(196, 215, 67, 0.24);
+}
+
 .work-reports-table-shell {
   display: block;
 }
@@ -1326,31 +2044,60 @@ textarea:disabled {
 .work-report-progress {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
   direction: ltr;
-  min-width: 110px;
+  min-width: 168px;
+}
+
+.work-report-progress-main {
+  flex: 1;
+  min-width: 72px;
+}
+
+.work-report-progress-gauge {
+  --progress-value: 0%;
+  --progress-color: #2980b9;
+  width: 42px;
+  height: 42px;
+  border-radius: 999px;
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  background:
+    radial-gradient(circle at center, rgba(10, 18, 34, 0.96) 58%, transparent 60%),
+    conic-gradient(var(--progress-color) var(--progress-value), rgba(255, 255, 255, 0.12) 0);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08);
+}
+
+.work-report-progress-gauge span {
+  font-size: 11px;
+  font-weight: 800;
+  color: #f5f8ff;
+  font-variant-numeric: tabular-nums;
 }
 
 .work-report-progress-track {
-  flex: 1;
-  min-width: 50px;
-  height: 8px;
+  width: 100%;
+  height: 10px;
   border-radius: 999px;
   background: #1e2d4d;
   overflow: hidden;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.05);
 }
 
 .work-report-progress-bar {
   height: 100%;
   border-radius: 999px;
-  transition: width 0.3s ease;
+  transition: width 0.3s ease, background 0.3s ease;
 }
 
 .work-report-progress-value {
-  min-width: 36px;
+  min-width: 42px;
   text-align: right;
   white-space: nowrap;
   font-size: 12px;
+  color: var(--text);
+  font-weight: 800;
   font-variant-numeric: tabular-nums;
 }
 
@@ -1404,6 +2151,11 @@ textarea:disabled {
   .maintenance-mini-grid {
     grid-template-columns: 1fr;
   }
+
+  .daily-plan-mini-grid,
+  .daily-plan-detail-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 @media (max-width: 700px) {
@@ -1429,6 +2181,10 @@ textarea:disabled {
   .work-report-actions-mobile .btn,
   .maintenance-modal-actions .btn,
   .maintenance-visit-actions .btn {
+    width: 100%;
+  }
+
+  .daily-plan-actions .btn {
     width: 100%;
   }
 
@@ -1471,6 +2227,51 @@ textarea:disabled {
 
   .maintenance-visit-image-card img {
     height: 150px;
+  }
+
+  .daily-plan-progress-row,
+  .daily-plan-assignee-item,
+  .daily-plan-approval-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .daily-plan-user-card,
+  .daily-plan-picker-toolbar,
+  .daily-plan-selected-head,
+  .daily-plan-approval-head,
+  .daily-plan-calendar-header,
+  .daily-plan-calendar-selected-head,
+  .daily-plan-calendar-group-head,
+  .daily-plan-calendar-task-head,
+  .daily-plan-calendar-task-footer,
+  .daily-plan-calendar-month-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .daily-plan-selected-chip {
+    width: 100%;
+    border-radius: 16px;
+    justify-content: flex-start;
+  }
+
+  .daily-plan-calendar-summary-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .daily-plan-calendar-day {
+    min-height: 96px;
+    padding: 8px;
+  }
+
+  .daily-plan-calendar-day-head strong {
+    font-size: 14px;
+  }
+
+  .daily-plan-calendar-day-counts,
+  .daily-plan-calendar-day-empty-label {
+    font-size: 10px;
   }
 }
 
@@ -1548,6 +2349,12 @@ textarea:disabled {
 
   .grid-span-2 {
     grid-column: span 2;
+  }
+
+  .daily-plan-filter-grid,
+  .daily-plan-form-grid,
+  .daily-plan-detail-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 

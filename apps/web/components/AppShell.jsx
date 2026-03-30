@@ -47,6 +47,10 @@ const titleByPath = {
     title: 'الصيانة الدورية',
     subtitle: 'خطط صيانة دورية، زيارات مجدولة، صيانات مستحقة، وأرشيف تنفيذ متكامل',
   },
+  '/daily-work-plans': {
+    title: 'بلان العمل اليومي',
+    subtitle: 'تخطيط المهام اليومية، متابعة التقدم، والتحديث المباشر للفِرق والموظفين',
+  },
   '/projects': {
     title: 'المشاريع',
     subtitle: 'إدارة المشاريع والفرق وربط المهام بالأهداف',
@@ -117,6 +121,13 @@ const routePermissionRules = {
     Permission.CREATE_MAINTENANCE_PLANS,
     Permission.MANAGE_MAINTENANCE_PLANS,
     Permission.REGISTER_MAINTENANCE_VISITS,
+  ],
+  '/daily-work-plans': [
+    Permission.VIEW_DAILY_WORK_PLANS,
+    Permission.CREATE_DAILY_WORK_PLANS,
+    Permission.MANAGE_DAILY_WORK_PLANS,
+    Permission.UPDATE_ASSIGNED_DAILY_WORK_PLANS,
+    Permission.APPROVE_DAILY_WORK_PLANS,
   ],
   '/leaderboard': [Permission.VIEW_LEADERBOARD],
   '/reports': [
