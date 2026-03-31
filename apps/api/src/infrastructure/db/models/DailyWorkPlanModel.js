@@ -235,6 +235,20 @@ const dailyWorkPlanSchema = new mongoose.Schema(
       type: Boolean,
       default: false,
     },
+    archived: {
+      type: Boolean,
+      default: false,
+      index: true,
+    },
+    archivedAt: {
+      type: Date,
+      default: null,
+    },
+    archivedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+      default: null,
+    },
     adminNotes: {
       type: String,
       default: '',
@@ -287,6 +301,7 @@ const dailyWorkPlanSchema = new mongoose.Schema(
 );
 
 dailyWorkPlanSchema.index({ planDate: -1, status: 1 });
+dailyWorkPlanSchema.index({ archived: 1, archivedAt: -1 });
 dailyWorkPlanSchema.index({ 'assignees.user': 1, planDate: -1 });
 dailyWorkPlanSchema.index({ createdBy: 1, planDate: -1 });
 dailyWorkPlanSchema.index({ supervisor: 1, planDate: -1 });

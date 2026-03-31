@@ -327,6 +327,7 @@ export const buildDailyWorkPlanSummary = (plans = [], { today = new Date(), feat
     overdue: 0,
     postponed: 0,
     pendingApproval: 0,
+    archived: 0,
     urgent: 0,
     byStatus: {},
     featuredPlans: [],
@@ -369,6 +370,7 @@ export const buildDailyWorkPlanSummary = (plans = [], { today = new Date(), feat
       summary.urgent += 1;
     }
 
+    if (plan.archived) summary.archived += 1;
     if (status === DailyWorkPlanStatus.COMPLETED) summary.completed += 1;
     if (status === DailyWorkPlanStatus.IN_PROGRESS) summary.inProgress += 1;
     if (status === DailyWorkPlanStatus.OVERDUE) summary.overdue += 1;
@@ -508,6 +510,9 @@ export const buildDailyWorkPlanExportRows = (plans = []) =>
     priorityLabel: dailyWorkPlanPriorityLabelMap[plan.priority] || plan.priority || '',
     taskTypeLabel: dailyWorkPlanTaskTypeLabelMap[plan.taskType] || plan.taskType || '',
     progressPercent: clampProgress(plan.progressPercent),
+    archivedLabel: plan.archived ? 'Yes' : 'No',
+    archivedAt: toDateObject(plan.archivedAt),
+    archivedByName: plan.archivedBy?.fullName || '',
     assigneesLabel: (plan.assignees || []).map((item) => item.user?.fullName || item.fullName || '').filter(Boolean).join('، '),
     lastUpdatedAt: toDateObject(plan.lastUpdatedAt),
   }));

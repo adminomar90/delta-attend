@@ -196,6 +196,9 @@ const snapshotPlan = (plan) => ({
   })),
   approvedAt: plan?.approvedAt || null,
   approvedBy: toId(plan?.approvedBy),
+  archived: !!plan?.archived,
+  archivedAt: plan?.archivedAt || null,
+  archivedBy: toId(plan?.archivedBy),
   postponedTo: plan?.postponedTo || null,
 });
 
@@ -207,6 +210,24 @@ const userCanManageDailyWorkPlans = (user) =>
 const userCanUpdateAssignments = (user) =>
   hasPermission(user, Permission.UPDATE_ASSIGNED_DAILY_WORK_PLANS)
   || userCanManageDailyWorkPlans(user);
+
+const userCanApproveDailyWorkPlans = (user) =>
+  hasPermission(user, Permission.APPROVE_DAILY_WORK_PLANS);
+
+const isPlanReadyForArchive = (plan) =>
+  Number(plan?.progressPercent || 0) >= 100
+  || [DailyWorkPlanStatus.PENDING_APPROVAL, DailyWorkPlanStatus.COMPLETED].includes(plan?.status);
+
+const userCanArchivePlan = (user, plan) => {
+  const actorId = toId(user?.id);
+  return (
+    userCanManageDailyWorkPlans(user)
+    || userCanApproveDailyWorkPlans(user)
+    || actorId === toId(plan?.teamLeader)
+    || actorId === toId(plan?.supervisor)
+    || actorId === toId(plan?.createdBy)
+  );
+};
 
 const ensureManagedUsers = async (req) =>
   resolveManagedUserIds({
@@ -247,6 +268,13 @@ const buildFilterFromQuery = async (req) => {
   if (req.query.taskType) filter.taskType = req.query.taskType;
   if (req.query.project) filter.project = req.query.project;
   if (req.query.supervisor) filter.supervisor = req.query.supervisor;
+
+  const archivedQuery = toCleanString(req.query.archived).toLowerCase();
+  if (archivedQuery === 'true') {
+    filter.archived = true;
+  } else if (archivedQuery !== 'all') {
+    filter.archived = { $ne: true };
+  }
 
   if (planDate) {
     const from = combinePlanDateTime(planDate, '00:00', '00:00');
@@ -1236,6 +1264,115 @@ export const approveDailyWorkPlan = asyncHandler(async (req, res) => {
     pointsAwards,
     ...(pointsErrors.length ? { pointsErrors } : {}),
   });
+});
+
+export const archiveDailyWorkPlan = asyncHandler(async (req, res) => {
+  const plan = await loadPlanOrThrow(req.params.id);
+  await ensurePlanVisibleToActor(req, plan);
+
+  if (!userCanArchivePlan(req.user, plan)) {
+    throw new AppError('You are not allowed to archive this daily work plan', 403);
+  }
+  if (plan.archived) {
+    throw new AppError('Daily work plan is already archived', 409);
+  }
+  if (!isPlanReadyForArchive(plan)) {
+    throw new AppError('Only 100% completed plans can be archived', 400);
+  }
+
+  const archivedAt = new Date();
+  const updatedPlan = await dailyWorkPlanRepository.archiveById(
+    req.params.id,
+    req.user.id,
+    buildTimelineEntry({
+      type: 'PLAN_ARCHIVED',
+      actorId: req.user.id,
+      actorName: actorLabel(req),
+      actorRole: req.user.role,
+      message: 'تمت أرشفة البلان ونقله إلى قائمة الأرشيف.',
+      metadata: {
+        archivedAt,
+      },
+    }),
+    {
+      lastUpdatedAt: archivedAt,
+    },
+  );
+
+  await auditService.log({
+    actorId: req.user.id,
+    action: 'DAILY_WORK_PLAN_ARCHIVED',
+    entityType: 'DAILY_WORK_PLAN',
+    entityId: toId(updatedPlan),
+    before: snapshotPlan(plan),
+    after: snapshotPlan(updatedPlan),
+    req,
+  });
+
+  await notifyPlanEvent({
+    req,
+    plan: updatedPlan,
+    type: 'DAILY_WORK_PLAN_ARCHIVED',
+    titleAr: 'أرشفة بلان عمل يومي',
+    messageAr: `تمت أرشفة البلان "${updatedPlan.title}" ونقله إلى قائمة الأرشيف.`,
+    action: 'DAILY_WORK_PLAN_ARCHIVED',
+    metadata: {
+      archivedAt: updatedPlan.archivedAt,
+    },
+  });
+
+  res.json({ plan: updatedPlan });
+});
+
+export const unarchiveDailyWorkPlan = asyncHandler(async (req, res) => {
+  const plan = await loadPlanOrThrow(req.params.id);
+  await ensurePlanVisibleToActor(req, plan);
+
+  if (!userCanArchivePlan(req.user, plan)) {
+    throw new AppError('You are not allowed to restore this daily work plan', 403);
+  }
+  if (!plan.archived) {
+    throw new AppError('Daily work plan is not archived', 400);
+  }
+
+  const restoredAt = new Date();
+  const updatedPlan = await dailyWorkPlanRepository.unarchiveById(
+    req.params.id,
+    buildTimelineEntry({
+      type: 'PLAN_UNARCHIVED',
+      actorId: req.user.id,
+      actorName: actorLabel(req),
+      actorRole: req.user.role,
+      message: 'تمت إعادة البلان من الأرشيف إلى القائمة الرئيسية.',
+      metadata: {
+        restoredAt,
+      },
+    }),
+    {
+      lastUpdatedAt: restoredAt,
+    },
+  );
+
+  await auditService.log({
+    actorId: req.user.id,
+    action: 'DAILY_WORK_PLAN_UNARCHIVED',
+    entityType: 'DAILY_WORK_PLAN',
+    entityId: toId(updatedPlan),
+    before: snapshotPlan(plan),
+    after: snapshotPlan(updatedPlan),
+    req,
+  });
+
+  await notifyPlanEvent({
+    req,
+    plan: updatedPlan,
+    type: 'DAILY_WORK_PLAN_UNARCHIVED',
+    titleAr: 'استرجاع بلان عمل يومي',
+    messageAr: `تمت إعادة البلان "${updatedPlan.title}" من الأرشيف.`,
+    action: 'DAILY_WORK_PLAN_UNARCHIVED',
+  });
+
+  res.json({ plan: updatedPlan });
 });
 
 export const deleteDailyWorkPlan = asyncHandler(async (req, res) => {

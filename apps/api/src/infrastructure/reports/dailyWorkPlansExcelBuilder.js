@@ -19,12 +19,18 @@ export const buildDailyWorkPlansExcelBuffer = async (plans = []) => {
     { header: 'Type', key: 'taskTypeLabel', width: 18 },
     { header: 'Progress %', key: 'progressPercent', width: 12 },
     { header: 'Assignees', key: 'assigneesLabel', width: 32 },
+    { header: 'Archived', key: 'archivedLabel', width: 12 },
+    { header: 'Archived At', key: 'archivedAtLabel', width: 22 },
+    { header: 'Archived By', key: 'archivedByName', width: 24 },
     { header: 'Last Updated', key: 'lastUpdatedLabel', width: 20 },
   ];
 
   rows.forEach((row) => {
     worksheet.addRow({
       ...row,
+      archivedAtLabel: row.archivedAt
+        ? new Date(row.archivedAt).toLocaleString('ar-IQ')
+        : '-',
       lastUpdatedLabel: row.lastUpdatedAt
         ? new Date(row.lastUpdatedAt).toLocaleString('ar-IQ')
         : '-',

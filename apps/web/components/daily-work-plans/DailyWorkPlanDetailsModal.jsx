@@ -63,6 +63,18 @@ export default function DailyWorkPlanDetailsModal({
               <strong>{formatDateTime(plan.postponedTo)}</strong>
             </div>
           ) : null}
+          {plan.archivedAt ? (
+            <div className="daily-plan-info-box">
+              <span>تاريخ الأرشفة</span>
+              <strong>{formatDateTime(plan.archivedAt)}</strong>
+            </div>
+          ) : null}
+          {plan.archivedBy?.fullName ? (
+            <div className="daily-plan-info-box">
+              <span>تمت الأرشفة بواسطة</span>
+              <strong>{plan.archivedBy.fullName}</strong>
+            </div>
+          ) : null}
         </div>
 
         <div className="daily-plan-note-block">

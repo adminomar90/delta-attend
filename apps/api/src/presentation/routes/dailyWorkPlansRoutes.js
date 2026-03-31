@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import {
+  archiveDailyWorkPlan,
   approveDailyWorkPlan,
   createDailyWorkPlan,
   deleteDailyWorkPlan,
@@ -14,6 +15,7 @@ import {
   updateDailyWorkPlan,
   updateDailyWorkPlanProgress,
   updateDailyWorkPlanStatus,
+  unarchiveDailyWorkPlan,
 } from '../controllers/dailyWorkPlanController.js';
 import { requireAuth } from '../middlewares/authMiddleware.js';
 import {
@@ -53,6 +55,8 @@ dailyWorkPlansRoutes.patch('/:id/progress', uploadDailyWorkPlanAttachmentsMiddle
 dailyWorkPlansRoutes.post('/:id/postpone', uploadDailyWorkPlanAttachmentsMiddleware.array('attachments', 20), postponeDailyWorkPlan);
 dailyWorkPlansRoutes.post('/:id/rollover', canManageDailyWorkPlans, rolloverDailyWorkPlan);
 dailyWorkPlansRoutes.patch('/:id/approve', canApproveDailyWorkPlans, approveDailyWorkPlan);
+dailyWorkPlansRoutes.patch('/:id/archive', archiveDailyWorkPlan);
+dailyWorkPlansRoutes.patch('/:id/unarchive', unarchiveDailyWorkPlan);
 dailyWorkPlansRoutes.delete('/:id', canManageDailyWorkPlans, deleteDailyWorkPlan);
 
 export default dailyWorkPlansRoutes;

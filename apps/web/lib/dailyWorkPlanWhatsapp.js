@@ -121,3 +121,48 @@ export const buildDailyWorkPlanWhatsappMessage = (plan = {}) => {
 
   return lines.join('\n');
 };
+
+export const buildDailyWorkPlanArchiveWhatsappMessage = (plans = [], { search = '' } = {}) => {
+  const archivedPlans = Array.isArray(plans) ? plans : [];
+  const approvedCount = archivedPlans.filter((plan) => plan.isApproved || plan.status === DailyWorkPlanStatus.COMPLETED).length;
+  const pendingApprovalCount = archivedPlans.filter((plan) => plan.status === DailyWorkPlanStatus.PENDING_APPROVAL).length;
+  const todayKey = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Baghdad' });
+  const archivedTodayCount = archivedPlans.filter((plan) => {
+    if (!plan.archivedAt) return false;
+    return new Date(plan.archivedAt).toLocaleDateString('en-CA', { timeZone: 'Asia/Baghdad' }) === todayKey;
+  }).length;
+
+  const lines = [
+    '[ أرشيف البلان اليومي - Delta Plus ]',
+    '----------------------------------',
+    `عدد البلانات المؤرشفة: ${archivedPlans.length}`,
+    `المكتملة/المعتمدة: ${approvedCount}`,
+    `بانتظار الاعتماد: ${pendingApprovalCount}`,
+    `المؤرشفة اليوم: ${archivedTodayCount}`,
+  ];
+
+  if (search) {
+    lines.push(`مرشح البحث: ${search}`);
+  }
+
+  lines.push('', 'آخر البلانات المؤرشفة:');
+
+  if (!archivedPlans.length) {
+    lines.push('- لا توجد بلانات مؤرشفة مطابقة.');
+  } else {
+    archivedPlans.slice(0, 15).forEach((plan, index) => {
+      const statusLabel = plan.statusLabel || dailyWorkPlanStatusLabelMap[plan.status] || plan.status || '-';
+      const archivedAtLabel = formatDateTime12(plan.archivedAt);
+      lines.push(
+        `${index + 1}. ${plan.title || '-'} | ${formatDate(plan.planDate)} | ${statusLabel} | ${Number(plan.progressPercent || 0)}% | أرشفة: ${archivedAtLabel}`,
+      );
+    });
+  }
+
+  if (archivedPlans.length > 15) {
+    lines.push(`... وباقي ${archivedPlans.length - 15} بلان/بلانات أخرى.`);
+  }
+
+  lines.push('----------------------------------', '[ رسالة جاهزة من نظام Delta Plus ]');
+  return lines.join('\n');
+};

@@ -8,6 +8,7 @@ const applyPopulate = (query) =>
     .populate('supervisor', 'fullName role jobTitle')
     .populate('teamLeader', 'fullName role jobTitle department email phone avatarUrl pointsTotal level')
     .populate('approvedBy', 'fullName role jobTitle')
+    .populate('archivedBy', 'fullName role jobTitle employeeCode phone')
     .populate('assignees.user', 'fullName role jobTitle department email phone avatarUrl pointsTotal level');
 
 export class DailyWorkPlanRepository {
@@ -44,9 +45,46 @@ export class DailyWorkPlanRepository {
     return DailyWorkPlanModel.findByIdAndDelete(id);
   }
 
+  async archiveById(id, userId, timelineEntry = null, extraSet = {}) {
+    return applyPopulate(
+      DailyWorkPlanModel.findByIdAndUpdate(
+        id,
+        {
+          $set: {
+            ...extraSet,
+            archived: true,
+            archivedAt: new Date(),
+            archivedBy: userId,
+          },
+          ...(timelineEntry ? { $push: { timeline: timelineEntry } } : {}),
+        },
+        { new: true },
+      ),
+    );
+  }
+
+  async unarchiveById(id, timelineEntry = null, extraSet = {}) {
+    return applyPopulate(
+      DailyWorkPlanModel.findByIdAndUpdate(
+        id,
+        {
+          $set: {
+            ...extraSet,
+            archived: false,
+            archivedAt: null,
+            archivedBy: null,
+          },
+          ...(timelineEntry ? { $push: { timeline: timelineEntry } } : {}),
+        },
+        { new: true },
+      ),
+    );
+  }
+
   async listOverdueCandidates(now = new Date(), limit = 500) {
     return this.list(
       {
+        archived: { $ne: true },
         dueAt: { $lt: now },
         status: {
           $in: [

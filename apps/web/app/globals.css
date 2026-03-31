@@ -619,6 +619,11 @@ textarea:disabled {
   color: #a9f7c6;
 }
 
+.status-archived {
+  background: rgba(158, 177, 214, 0.18);
+  color: #d6e2ff;
+}
+
 .status-rejected {
   background: rgba(242, 135, 135, 0.2);
   color: #ffb1b1;
@@ -1269,6 +1274,12 @@ textarea:disabled {
   flex-wrap: wrap;
 }
 
+.daily-plan-view-switch {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 .daily-plan-toolbar {
   display: flex;
   flex-direction: column;
@@ -1296,11 +1307,25 @@ textarea:disabled {
   background: linear-gradient(180deg, rgba(12, 23, 45, 0.95), rgba(8, 16, 31, 0.95));
 }
 
+.daily-plan-card-archived {
+  background: linear-gradient(180deg, rgba(17, 28, 50, 0.94), rgba(10, 18, 34, 0.94));
+  border-color: rgba(126, 148, 191, 0.28);
+}
+
 .daily-plan-card-subtitle,
 .daily-plan-modal-subtitle {
   color: var(--text-soft);
   font-size: 13px;
   margin-top: 4px;
+}
+
+.daily-plan-archive-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 10px;
+  color: var(--text-soft);
+  font-size: 12px;
 }
 
 .daily-plan-chip-row,
