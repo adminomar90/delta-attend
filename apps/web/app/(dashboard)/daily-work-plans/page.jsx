@@ -545,7 +545,7 @@ export default function DailyWorkPlansPage() {
                   {canUpdateAssigned && isTeamLeaderOfPlan(plan) && plan.status === 'NEW' ? <button className="btn btn-soft btn-sm" onClick={() => quickStatusUpdate(plan, 'IN_PROGRESS')}>بدء</button> : null}
                   {canUpdateAssigned && isTeamLeaderOfPlan(plan) && ['IN_PROGRESS', 'OVERDUE', 'STOPPED'].includes(plan.status) ? <button className="btn btn-soft btn-sm" onClick={() => setActionState({ mode: 'finish', plan })}>إنهاء</button> : null}
                   {canUpdateAssigned && isTeamLeaderOfPlan(plan) ? <button className="btn btn-soft btn-sm" onClick={() => setActionState({ mode: 'postpone', plan })}>تأجيل</button> : null}
-                  {canApprove && plan.status === 'PENDING_APPROVAL' && !isTeamLeaderOfPlan(plan) ? <button className="btn btn-primary btn-sm" onClick={() => setActionState({ mode: 'approve', plan })}>اعتماد</button> : null}
+                  {canApprove && plan.status === 'PENDING_APPROVAL' && (!isTeamLeaderOfPlan(plan) || currentUser?.role === 'GENERAL_MANAGER') ? <button className="btn btn-primary btn-sm" onClick={() => setActionState({ mode: 'approve', plan })}>اعتماد</button> : null}
                   {canManage && ['POSTPONED', 'OVERDUE'].includes(plan.status) ? <button className="btn btn-soft btn-sm" onClick={() => rolloverPlan(plan)}>ترحيل</button> : null}
                   {canManage ? <button className="btn btn-soft btn-sm" onClick={() => deletePlan(plan)}>حذف</button> : null}
                 </div>

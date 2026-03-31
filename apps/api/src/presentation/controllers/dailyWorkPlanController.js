@@ -1085,7 +1085,7 @@ export const approveDailyWorkPlan = asyncHandler(async (req, res) => {
     throw new AppError('Only plans waiting for approval can be approved', 400);
   }
 
-  if (toId(plan.teamLeader) === toId(req.user.id)) {
+  if (toId(plan.teamLeader) === toId(req.user.id) && req.user.role !== 'GENERAL_MANAGER') {
     throw new AppError('قائد الفريق لا يمكنه اعتماد البلان الذي يقوده بنفسه', 403);
   }
 
