@@ -1550,6 +1550,10 @@ textarea:disabled {
   background: #a9f7c6;
 }
 
+.daily-plan-calendar-marker.status-archived {
+  background: #d6e2ff;
+}
+
 .daily-plan-calendar-marker.status-rejected {
   background: #ffb1b1;
 }
@@ -1601,6 +1605,11 @@ textarea:disabled {
 
 .daily-plan-calendar-task-completed {
   border-color: rgba(101, 236, 162, 0.22);
+}
+
+.daily-plan-calendar-task-archived {
+  border-color: rgba(126, 148, 191, 0.28);
+  background: linear-gradient(180deg, rgba(14, 24, 44, 0.98), rgba(10, 18, 34, 0.98));
 }
 
 .daily-plan-calendar-task-meta {

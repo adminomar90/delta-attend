@@ -117,6 +117,7 @@ export default function DailyWorkPlansPage() {
     const monthEnd = new Date(Date.UTC(monthStart.getUTCFullYear(), monthStart.getUTCMonth() + 1, 0, 12, 0, 0, 0));
     params.set('dateFrom', toDateInputValue(monthStart));
     params.set('dateTo', toDateInputValue(monthEnd));
+    params.set('archived', 'all');
     return params.toString();
   }, [calendarMonth, filters.employee, filters.priority, filters.project, filters.search, filters.supervisor, filters.taskType]);
 

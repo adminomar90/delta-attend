@@ -1408,6 +1408,71 @@ const loadPlansForExport = async (req) => {
   return dailyWorkPlanRepository.list(filter, { limit: 1000 });
 };
 
+const resolveExportUserLabel = async (userId) => {
+  const id = toCleanString(userId);
+  if (!id) return '';
+  try {
+    const user = await userRepository.findById(id);
+    return user?.fullName || user?.employeeCode || id;
+  } catch {
+    return id;
+  }
+};
+
+const resolveExportProjectLabel = async (projectId) => {
+  const id = toCleanString(projectId);
+  if (!id) return '';
+  try {
+    const project = await projectRepository.findById(id);
+    return project?.name || project?.code || id;
+  } catch {
+    return id;
+  }
+};
+
+const buildDailyWorkPlansExportContext = async (req) => {
+  const planDate = toCleanString(req.query.planDate || req.query.date);
+  const dateFrom = toCleanString(req.query.dateFrom);
+  const dateTo = toCleanString(req.query.dateTo);
+  const search = toCleanString(req.query.search);
+  const archivedQuery = toCleanString(req.query.archived).toLowerCase();
+  const employeeLabel = await resolveExportUserLabel(req.query.employee || req.query.assignee);
+  const supervisorLabel = await resolveExportUserLabel(req.query.supervisor);
+  const projectLabel = await resolveExportProjectLabel(req.query.project);
+  const filtersSummary = [];
+
+  filtersSummary.push(
+    `نطاق الأرشفة: ${
+      archivedQuery === 'true'
+        ? 'البلانات المؤرشفة فقط'
+        : archivedQuery === 'all'
+          ? 'جميع البلانات'
+          : 'البلانات النشطة فقط'
+    }`,
+  );
+
+  if (planDate) {
+    filtersSummary.push(`تاريخ البلان: ${planDate}`);
+  } else if (dateFrom || dateTo) {
+    filtersSummary.push(`الفترة الزمنية: من ${dateFrom || '-'} إلى ${dateTo || '-'}`);
+  }
+
+  if (search) filtersSummary.push(`كلمة البحث: ${search}`);
+  if (req.query.status) filtersSummary.push(`الحالة: ${dailyWorkPlanStatusLabelMap[req.query.status] || req.query.status}`);
+  if (req.query.priority) filtersSummary.push(`الأولوية: ${dailyWorkPlanPriorityLabelMap[req.query.priority] || req.query.priority}`);
+  if (req.query.taskType) filtersSummary.push(`نوع المهمة: ${dailyWorkPlanTaskTypeLabelMap[req.query.taskType] || req.query.taskType}`);
+  if (employeeLabel) filtersSummary.push(`الموظف: ${employeeLabel}`);
+  if (supervisorLabel) filtersSummary.push(`المشرف: ${supervisorLabel}`);
+  if (projectLabel) filtersSummary.push(`المشروع: ${projectLabel}`);
+
+  return {
+    generatedAt: new Date(),
+    generatedBy: actorLabel(req),
+    subtitle: 'نسخة تفصيلية مهيأة للعرض على الإدارة العليا والمتابعة الإدارية.',
+    filtersSummary,
+  };
+};
+
 export const exportDailyWorkPlansExcel = asyncHandler(async (req, res) => {
   const plans = await loadPlansForExport(req);
   const buffer = await buildDailyWorkPlansExcelBuffer(plans);
@@ -1419,7 +1484,8 @@ export const exportDailyWorkPlansExcel = asyncHandler(async (req, res) => {
 
 export const exportDailyWorkPlansPdf = asyncHandler(async (req, res) => {
   const plans = await loadPlansForExport(req);
-  const buffer = await buildDailyWorkPlansPdfBuffer(plans);
+  const exportContext = await buildDailyWorkPlansExportContext(req);
+  const buffer = await buildDailyWorkPlansPdfBuffer(plans, exportContext);
 
   res.setHeader('Content-Type', 'application/pdf');
   res.setHeader('Content-Disposition', `attachment; filename="daily-work-plans-${Date.now()}.pdf"`);

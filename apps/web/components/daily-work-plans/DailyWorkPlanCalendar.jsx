@@ -17,9 +17,7 @@ const toDateKey = (value) => toDateInputValue(value);
 
 const createDateFromKey = (value) => {
   const [year, month, day] = String(value || '').split('-').map(Number);
-  if (!year || !month || !day) {
-    return null;
-  }
+  if (!year || !month || !day) return null;
   return new Date(Date.UTC(year, month - 1, day, 12, 0, 0, 0));
 };
 
@@ -42,6 +40,14 @@ const shiftMonth = (value, step) => {
   ));
 };
 
+const isCompletedPlan = (plan) => plan.status === DailyWorkPlanStatus.COMPLETED;
+
+const resolveMarkerClass = (plan) => (
+  plan.archived
+    ? 'status-archived'
+    : (dailyWorkPlanStatusClassMap[plan.status] || 'status-todo')
+);
+
 const buildCalendarCells = ({ monthDate, plansByDay, selectedDate }) => {
   const monthAnchor = createMonthAnchor(monthDate);
   const year = monthAnchor.getUTCFullYear();
@@ -60,9 +66,10 @@ const buildCalendarCells = ({ monthDate, plansByDay, selectedDate }) => {
     const currentDate = new Date(Date.UTC(year, month, day, 12, 0, 0, 0));
     const dateKey = toDateKey(currentDate);
     const dayPlans = plansByDay.get(dateKey) || [];
-    const completedCount = dayPlans.filter((plan) => plan.status === DailyWorkPlanStatus.COMPLETED).length;
-    const openCount = Math.max(0, dayPlans.length - completedCount);
-    const statuses = [...new Set(dayPlans.map((plan) => plan.status).filter(Boolean))].slice(0, 4);
+    const archivedCount = dayPlans.filter((plan) => plan.archived).length;
+    const completedCount = dayPlans.filter((plan) => isCompletedPlan(plan)).length;
+    const openCount = dayPlans.filter((plan) => !isCompletedPlan(plan)).length;
+    const statusClasses = [...new Set(dayPlans.map(resolveMarkerClass).filter(Boolean))].slice(0, 4);
 
     cells.push({
       key: dateKey,
@@ -71,7 +78,8 @@ const buildCalendarCells = ({ monthDate, plansByDay, selectedDate }) => {
       totalCount: dayPlans.length,
       completedCount,
       openCount,
-      statuses,
+      archivedCount,
+      statusClasses,
       isSelected: dateKey === selectedDate,
       isToday: dateKey === todayKey,
       isPlaceholder: false,
@@ -80,8 +88,6 @@ const buildCalendarCells = ({ monthDate, plansByDay, selectedDate }) => {
 
   return cells;
 };
-
-const isCompletedPlan = (plan) => plan.status === DailyWorkPlanStatus.COMPLETED;
 
 export default function DailyWorkPlanCalendar({
   open,
@@ -100,9 +106,7 @@ export default function DailyWorkPlanCalendar({
     (plans || []).forEach((plan) => {
       const dateKey = toDateKey(plan.planDate);
       if (!dateKey) return;
-      if (!grouped.has(dateKey)) {
-        grouped.set(dateKey, []);
-      }
+      if (!grouped.has(dateKey)) grouped.set(dateKey, []);
       grouped.get(dateKey).push(plan);
     });
     return grouped;
@@ -118,13 +122,28 @@ export default function DailyWorkPlanCalendar({
     [plansByDay, selectedDate],
   );
 
+  const archivedPlans = useMemo(
+    () => selectedDayPlans.filter((plan) => plan.archived),
+    [selectedDayPlans],
+  );
+
+  const completedSummaryCount = useMemo(
+    () => selectedDayPlans.filter((plan) => isCompletedPlan(plan)).length,
+    [selectedDayPlans],
+  );
+
+  const pendingSummaryCount = useMemo(
+    () => selectedDayPlans.filter((plan) => !isCompletedPlan(plan)).length,
+    [selectedDayPlans],
+  );
+
   const completedPlans = useMemo(
-    () => selectedDayPlans.filter((plan) => isCompletedPlan(plan)),
+    () => selectedDayPlans.filter((plan) => !plan.archived && isCompletedPlan(plan)),
     [selectedDayPlans],
   );
 
   const pendingPlans = useMemo(
-    () => selectedDayPlans.filter((plan) => !isCompletedPlan(plan)),
+    () => selectedDayPlans.filter((plan) => !plan.archived && !isCompletedPlan(plan)),
     [selectedDayPlans],
   );
 
@@ -139,6 +158,49 @@ export default function DailyWorkPlanCalendar({
 
   const selectedDateLabel = selectedDate ? formatDate(selectedDate) : 'اختر يوما من التقويم';
 
+  const renderPlanCard = (plan, { completed = false } = {}) => (
+    <article
+      key={plan._id || plan.id}
+      className={[
+        'daily-plan-calendar-task',
+        completed ? 'daily-plan-calendar-task-completed' : '',
+        plan.archived ? 'daily-plan-calendar-task-archived' : '',
+      ].filter(Boolean).join(' ')}
+    >
+      <div className="daily-plan-calendar-task-head">
+        <div>
+          <strong>{plan.title}</strong>
+          <div className="daily-plan-card-subtitle">
+            {plan.customerName || plan.project?.name || 'بدون جهة'} - {plan.location || 'بدون موقع'}
+          </div>
+        </div>
+
+        <div className="daily-plan-chip-row">
+          {plan.archived ? <span className="status-pill status-archived">مؤرشف</span> : null}
+          <span className={`status-pill ${dailyWorkPlanStatusClassMap[plan.status] || (completed ? 'status-approved' : 'status-todo')}`}>
+            {plan.statusLabel || plan.status}
+          </span>
+          <span className={`status-pill ${dailyWorkPlanPriorityClassMap[plan.priority] || 'status-todo'}`}>
+            {plan.priorityLabel || plan.priority}
+          </span>
+        </div>
+      </div>
+
+      <div className="daily-plan-calendar-task-meta">
+        <span>المكلفون: {formatAssigneesSummary(plan.assignees, { maxVisible: 3 })}</span>
+        <span>الوقت: {[plan.startTime, plan.expectedEndTime].filter(Boolean).join(' - ') || '-'}</span>
+        {plan.archivedAt ? <span>الأرشفة: {formatDate(plan.archivedAt)}</span> : null}
+      </div>
+
+      <div className="daily-plan-calendar-task-footer">
+        <ProgressGauge value={plan.displayProgressPercent || plan.progressPercent || 0} />
+        <button type="button" className="btn btn-soft btn-sm" onClick={() => onOpenDetails(plan)}>
+          التفاصيل
+        </button>
+      </div>
+    </article>
+  );
+
   if (!open) return null;
 
   return (
@@ -147,7 +209,7 @@ export default function DailyWorkPlanCalendar({
         <div>
           <h2 style={{ margin: 0 }}>تقويم البلان اليومي</h2>
           <p className="daily-plan-modal-subtitle">
-            اختر اليوم المطلوب لعرض جميع الأعمال المنجزة وغير المنجزة مع تلوين الحالات.
+            اختر اليوم المطلوب لعرض جميع الأعمال المنجزة وغير المنجزة والمؤرشفة داخل التقويم.
           </p>
         </div>
 
@@ -205,13 +267,14 @@ export default function DailyWorkPlanCalendar({
                       <div className="daily-plan-calendar-day-counts">
                         <span className="daily-plan-calendar-completed">منجز {cell.completedCount}</span>
                         <span className="daily-plan-calendar-open">غير منجز {cell.openCount}</span>
+                        {cell.archivedCount ? <span className="status-pill status-archived">مؤرشف {cell.archivedCount}</span> : null}
                       </div>
 
                       <div className="daily-plan-calendar-markers">
-                        {cell.statuses.map((status) => (
+                        {cell.statusClasses.map((statusClass, index) => (
                           <span
-                            key={`${cell.dateKey}-${status}`}
-                            className={`daily-plan-calendar-marker ${dailyWorkPlanStatusClassMap[status] || 'status-todo'}`}
+                            key={`${cell.dateKey}-${statusClass}-${index}`}
+                            className={`daily-plan-calendar-marker ${statusClass}`}
                           />
                         ))}
                       </div>
@@ -256,54 +319,37 @@ export default function DailyWorkPlanCalendar({
                 </div>
                 <div className="daily-plan-info-box">
                   <span>منجزة</span>
-                  <strong>{completedPlans.length}</strong>
+                  <strong>{completedSummaryCount}</strong>
+                </div>
+                <div className="daily-plan-info-box">
+                  <span>مؤرشفة</span>
+                  <strong>{archivedPlans.length}</strong>
                 </div>
                 <div className="daily-plan-info-box">
                   <span>غير منجزة</span>
-                  <strong>{pendingPlans.length}</strong>
+                  <strong>{pendingSummaryCount}</strong>
                 </div>
               </div>
 
               <div className="daily-plan-calendar-day-lists">
                 <div className="daily-plan-calendar-group">
                   <div className="daily-plan-calendar-group-head">
+                    <strong>الأعمال المؤرشفة</strong>
+                    <span>{archivedPlans.length}</span>
+                  </div>
+
+                  {archivedPlans.length ? archivedPlans.map((plan) => renderPlanCard(plan, { completed: isCompletedPlan(plan) })) : (
+                    <p className="maintenance-empty">لا توجد أعمال مؤرشفة في هذا اليوم.</p>
+                  )}
+                </div>
+
+                <div className="daily-plan-calendar-group">
+                  <div className="daily-plan-calendar-group-head">
                     <strong>الأعمال غير المنجزة</strong>
                     <span>{pendingPlans.length}</span>
                   </div>
 
-                  {pendingPlans.length ? pendingPlans.map((plan) => (
-                    <article key={plan._id || plan.id} className="daily-plan-calendar-task">
-                      <div className="daily-plan-calendar-task-head">
-                        <div>
-                          <strong>{plan.title}</strong>
-                          <div className="daily-plan-card-subtitle">
-                            {plan.customerName || plan.project?.name || 'بدون جهة'} - {plan.location || 'بدون موقع'}
-                          </div>
-                        </div>
-
-                        <div className="daily-plan-chip-row">
-                          <span className={`status-pill ${dailyWorkPlanStatusClassMap[plan.status] || 'status-todo'}`}>
-                            {plan.statusLabel || plan.status}
-                          </span>
-                          <span className={`status-pill ${dailyWorkPlanPriorityClassMap[plan.priority] || 'status-todo'}`}>
-                            {plan.priorityLabel || plan.priority}
-                          </span>
-                        </div>
-                      </div>
-
-                      <div className="daily-plan-calendar-task-meta">
-                        <span>المكلفون: {formatAssigneesSummary(plan.assignees, { maxVisible: 3 })}</span>
-                        <span>الوقت: {[plan.startTime, plan.expectedEndTime].filter(Boolean).join(' - ') || '-'}</span>
-                      </div>
-
-                      <div className="daily-plan-calendar-task-footer">
-                        <ProgressGauge value={plan.displayProgressPercent || plan.progressPercent || 0} />
-                        <button type="button" className="btn btn-soft btn-sm" onClick={() => onOpenDetails(plan)}>
-                          التفاصيل
-                        </button>
-                      </div>
-                    </article>
-                  )) : (
+                  {pendingPlans.length ? pendingPlans.map((plan) => renderPlanCard(plan)) : (
                     <p className="maintenance-empty">لا توجد أعمال غير منجزة في هذا اليوم.</p>
                   )}
                 </div>
@@ -314,39 +360,7 @@ export default function DailyWorkPlanCalendar({
                     <span>{completedPlans.length}</span>
                   </div>
 
-                  {completedPlans.length ? completedPlans.map((plan) => (
-                    <article key={plan._id || plan.id} className="daily-plan-calendar-task daily-plan-calendar-task-completed">
-                      <div className="daily-plan-calendar-task-head">
-                        <div>
-                          <strong>{plan.title}</strong>
-                          <div className="daily-plan-card-subtitle">
-                            {plan.customerName || plan.project?.name || 'بدون جهة'} - {plan.location || 'بدون موقع'}
-                          </div>
-                        </div>
-
-                        <div className="daily-plan-chip-row">
-                          <span className={`status-pill ${dailyWorkPlanStatusClassMap[plan.status] || 'status-approved'}`}>
-                            {plan.statusLabel || plan.status}
-                          </span>
-                          <span className={`status-pill ${dailyWorkPlanPriorityClassMap[plan.priority] || 'status-todo'}`}>
-                            {plan.priorityLabel || plan.priority}
-                          </span>
-                        </div>
-                      </div>
-
-                      <div className="daily-plan-calendar-task-meta">
-                        <span>المكلفون: {formatAssigneesSummary(plan.assignees, { maxVisible: 3 })}</span>
-                        <span>الوقت: {[plan.startTime, plan.expectedEndTime].filter(Boolean).join(' - ') || '-'}</span>
-                      </div>
-
-                      <div className="daily-plan-calendar-task-footer">
-                        <ProgressGauge value={plan.displayProgressPercent || plan.progressPercent || 0} />
-                        <button type="button" className="btn btn-soft btn-sm" onClick={() => onOpenDetails(plan)}>
-                          التفاصيل
-                        </button>
-                      </div>
-                    </article>
-                  )) : (
+                  {completedPlans.length ? completedPlans.map((plan) => renderPlanCard(plan, { completed: true })) : (
                     <p className="maintenance-empty">لا توجد أعمال منجزة في هذا اليوم.</p>
                   )}
                 </div>
