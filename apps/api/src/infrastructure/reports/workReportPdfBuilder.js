@@ -4,6 +4,8 @@
  * participant table, cleaner sections, and better image grid.
  */
 
+import { workReportPointsService } from '../../application/services/workReportPointsService.js';
+
 import {
   createDoc, finalize, safe, fmtDate, fmtDateTime, fmtPoints,
   resolveLocalImagePath, resolveImageUrl,
@@ -73,25 +75,28 @@ export const buildWorkReportPdfBuffer = async (
      ═══════════════════════════════════════════════════════════════════════ */
   const participants = Array.isArray(report?.participants) ? report.participants : [];
   const participantCount = Number(report?.participantCount || participants.length || 0);
+  const awardsSummary = workReportPointsService.resolveStoredPointAwards(report);
+  const awardRows = awardsSummary.pointAwards || [];
 
   ctx.doc.moveDown(0.4);
-  drawSectionTitle(ctx, `الكادر المشارك  ( ${participantCount} )`);
+  drawSectionTitle(ctx, `توزيع النقاط على الكادر  ( ${awardRows.length || participantCount + 1} )`);
 
-  if (participants.length > 0) {
+  if (awardRows.length > 0) {
     drawDataTable(ctx, {
-      headers: ['#', 'الاسم', 'الرمز الوظيفي', 'النقاط'],
-      rows: participants.map((p, i) => [
+      headers: ['#', 'الاسم', 'الصفة', 'الرمز الوظيفي', 'النقاط'],
+      rows: awardRows.map((award, i) => [
         `${i + 1}`,
-        safe(p?.fullName || p?.user?.fullName),
-        safe(p?.employeeCode || p?.user?.employeeCode),
-        fmtPoints(report?.participantPointsAwarded || 0),
+        safe(award?.fullName || award?.user?.fullName),
+        award?.distributionRole === 'REPORT_OWNER' ? 'صاحب التقرير / قائد الفريق' : 'مشارك',
+        safe(award?.employeeCode || award?.user?.employeeCode),
+        fmtPoints(award?.pointsAwarded || 0),
       ]),
-      colWidths: [0.08, 0.42, 0.25, 0.25],
+      colWidths: [0.08, 0.34, 0.2, 0.18, 0.2],
     });
   } else {
     ctx.doc.font(ctx.F).fontSize(8.5).fillColor(COLORS.soft);
     ctx.doc.text(
-      participantCount > 0 ? `${participantCount} مشاركين` : 'لا يوجد مشاركون',
+      participantCount > 0 ? `${participantCount} مشاركين` : 'لا يوجد كادر مشارك',
       ctx.ML, ctx.doc.y, { width: ctx.CW, align: 'right', features: ['arab'] },
     );
     ctx.doc.moveDown(0.3);
@@ -100,8 +105,9 @@ export const buildWorkReportPdfBuffer = async (
 
   /* Points summary row */
   ctx.doc.moveDown(0.15);
-  drawTableRow(ctx, 'نقاط كاتب التقرير',  fmtPoints(report?.reporterPointsAwarded || report?.pointsAwarded || 0), 0);
-  drawTableRow(ctx, 'حصة كل مشارك',       participantCount ? fmtPoints(report?.participantPointsAwarded || 0) : '-', 1);
+  drawTableRow(ctx, 'نقاط صاحب التقرير / قائد الفريق', fmtPoints(awardsSummary.reporterPoints || 0), 0);
+  drawTableRow(ctx, 'إجمالي نقاط المشاركين', participantCount ? fmtPoints(awardsSummary.participantsTotalPoints || 0) : '-', 1);
+  drawTableRow(ctx, 'إجمالي نقاط التقرير', fmtPoints(awardsSummary.totalPoints || report?.pointsAwarded || 0), 2);
 
   /* ═══════════════════════════════════════════════════════════════════════
      6. WORK DETAILS

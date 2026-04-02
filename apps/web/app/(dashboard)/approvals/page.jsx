@@ -6,7 +6,9 @@ import { api } from '../../../lib/api';
 import { authStorage } from '../../../lib/auth';
 import { Permission, hasAnyPermission, hasPermission } from '../../../lib/permissions';
 import {
-  calculateWorkReportDistribution,
+  buildWorkReportApprovalPayload,
+  buildWorkReportApprovalPointsMap,
+  buildWorkReportAwardees,
   formatWorkReportPoints,
 } from '../../../lib/workReportPoints';
 
@@ -252,7 +254,7 @@ export default function ApprovalsPage() {
 
   const getWorkReportInput = (reportId) => {
     return workReportForm[reportId] || {
-      points: '',
+      pointsByUser: {},
       managerComment: '',
       reason: '',
     };
@@ -262,10 +264,33 @@ export default function ApprovalsPage() {
     setWorkReportForm((prev) => ({
       ...prev,
       [reportId]: {
-        ...getWorkReportInput(reportId),
+        ...(prev[reportId] || {
+          pointsByUser: {},
+          managerComment: '',
+          reason: '',
+        }),
         ...patch,
       },
     }));
+  };
+
+  const getWorkReportInputForReport = (report) => {
+    const reportId = report?._id || '';
+    return getWorkReportInput(reportId) || {
+      pointsByUser: buildWorkReportApprovalPointsMap(report),
+      managerComment: '',
+      reason: '',
+    };
+  };
+
+  const setWorkReportUserPoints = (report, userId, value) => {
+    const currentInput = getWorkReportInputForReport(report);
+    setWorkReportInput(report._id, {
+      pointsByUser: {
+        ...(currentInput.pointsByUser || {}),
+        [userId]: value,
+      },
+    });
   };
 
   const approveWorkReport = async (report) => {
@@ -275,7 +300,7 @@ export default function ApprovalsPage() {
       return;
     }
 
-    const input = getWorkReportInput(report._id);
+    const input = getWorkReportInputForReport(report);
     if (input.points === '') {
       setError('يرجى إدخال إجمالي نقاط تقرير العمل');
       return;
@@ -284,7 +309,12 @@ export default function ApprovalsPage() {
     setInfo('');
     try {
       await api.patch(`/work-reports/${report._id}/approve`, {
-        points: Number(input.points),
+        pointsByUser: buildWorkReportApprovalPayload(
+          {
+            ...buildWorkReportApprovalPointsMap(report),
+            ...(input.pointsByUser || {}),
+          },
+        ),
         managerComment: input.managerComment || '',
       });
       setWorkReports((prev) => prev.filter((r) => r._id !== report._id));
@@ -704,17 +734,22 @@ export default function ApprovalsPage() {
           </thead>
           <tbody>
             {workReports.length ? workReports.map((report) => {
-              const input = getWorkReportInput(report._id);
+              const input = getWorkReportInputForReport(report);
               const ownerId = String(report.user?._id || report.user?.id || report.user || '');
               const isOwnReport = ownerId && ownerId === String(currentUser?.id || '');
+              const awardees = buildWorkReportAwardees(report);
               const participantNames = (report.participants || [])
                 .map((participant) => participant.fullName || participant.user?.fullName || '')
                 .filter(Boolean);
               const participantCount = Number(report.participantCount || participantNames.length || 0);
-              const previewDistribution = calculateWorkReportDistribution(
-                input.points === '' ? 0 : Number(input.points),
-                participantCount,
-              );
+              const approvalTotalPoints = awardees.reduce((sum, awardee) => {
+                const parsed = Number(input.pointsByUser?.[awardee.userId]);
+                return sum + (Number.isFinite(parsed) ? Math.max(0, Math.round(parsed)) : 0);
+              }, 0);
+              const previewDistribution = {
+                reporterPoints: approvalTotalPoints,
+                participantPoints: 0,
+              };
               return (
                 <tr key={report._id}>
                   <td>
@@ -733,17 +768,39 @@ export default function ApprovalsPage() {
                   <td>{report.progressPercent || 0}%</td>
                   <td>{reportStatusLabelMap[report.status] || report.status}</td>
                   <td>
+                    <div style={{ display: 'grid', gap: 8, minWidth: 220, marginBottom: 6 }}>
+                      {awardees.map((awardee) => (
+                        <label key={`${report._id}-${awardee.userId}`} style={{ display: 'grid', gap: 4 }}>
+                          <span style={{ fontSize: 12, color: 'var(--text-soft)' }}>
+                            {awardee.fullName || 'مستخدم'}
+                            {awardee.distributionRole === 'REPORT_OWNER' ? ' (صاحب التقرير / قائد الفريق)' : ' (مشارك)'}
+                          </span>
+                          <input
+                            className="input"
+                            type="number"
+                            min={0}
+                            max={1000}
+                            value={input.pointsByUser?.[awardee.userId] ?? ''}
+                            onChange={(e) => setWorkReportUserPoints(report, awardee.userId, e.target.value)}
+                            disabled={!canApproveWorkReports}
+                          />
+                        </label>
+                      ))}
+                    </div>
+                    <div style={{ fontSize: 12, color: 'var(--text-soft)', marginBottom: 6 }}>
+                      إجمالي النقاط: {formatWorkReportPoints(approvalTotalPoints)}
+                    </div>
                     <input
                       className="input"
                       type="number"
                       min={1}
                       max={1000}
-                      value={input.points}
+                      value={input.points || ''}
                       onChange={(e) => setWorkReportInput(report._id, { points: e.target.value })}
-                      style={{ width: 100 }}
+                      style={{ display: 'none' }}
                       disabled={!canApproveWorkReports}
                     />
-                    <div style={{ fontSize: 12, color: 'var(--text-soft)', marginTop: 4 }}>
+                    <div style={{ display: 'none', fontSize: 12, color: 'var(--text-soft)', marginTop: 4 }}>
                       الكاتب: {formatWorkReportPoints(previewDistribution.reporterPoints)}
                       {participantCount
                         ? ` | لكل مشارك: ${formatWorkReportPoints(previewDistribution.participantPoints)}`

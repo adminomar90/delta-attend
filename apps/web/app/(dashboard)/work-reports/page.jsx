@@ -5,8 +5,11 @@ import { api, assetUrl } from '../../../lib/api';
 import { authStorage } from '../../../lib/auth';
 import { Permission, hasAnyPermission, hasPermission } from '../../../lib/permissions';
 import {
-  calculateWorkReportDistribution,
+  buildWorkReportApprovalPayload,
+  buildWorkReportApprovalPointsMap,
+  buildWorkReportAwardees,
   formatWorkReportPoints,
+  summarizeWorkReportPointAwards,
 } from '../../../lib/workReportPoints';
 import { compressImage, formatFileSize } from '../../../lib/imageUtils';
 import MaintenancePlanModal from '../../../components/maintenance/MaintenancePlanModal';
@@ -79,6 +82,36 @@ const formatDateTime = (value) => {
   return new Date(value).toLocaleString('ar-IQ');
 };
 
+const toDateInputValue = (value) => {
+  if (!value) {
+    return todayIso();
+  }
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return todayIso();
+  }
+
+  return date.toISOString().slice(0, 10);
+};
+
+const createWorkReportEditForm = (report) => ({
+  projectName: report?.project?.name || report?.projectName || '',
+  activityType: report?.activityType || '',
+  title: report?.title || '',
+  details: report?.details || '',
+  progressPercent: Number(report?.progressPercent || 0),
+  hoursSpent: Number(report?.hoursSpent || 0),
+  workDate: toDateInputValue(report?.workDate || report?.createdAt),
+  accomplishments: report?.accomplishments || '',
+  challenges: report?.challenges || '',
+  nextSteps: report?.nextSteps || '',
+  participantCount: Number(report?.participantCount || report?.participants?.length || 0),
+  participantIds: (report?.participants || [])
+    .map((participant) => String(participant.user?._id || participant.user || ''))
+    .filter(Boolean),
+});
+
 const makeAttachmentId = () => `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
 const downloadBlob = (blob, filename) => {
@@ -118,7 +151,12 @@ export default function WorkReportsPage() {
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [inlineAction, setInlineAction] = useState(null);
   const [approvalPoints, setApprovalPoints] = useState('');
+  const [approvalPointsByUser, setApprovalPointsByUser] = useState({});
   const [approvalComment, setApprovalComment] = useState('');
+  const [detailMode, setDetailMode] = useState('view');
+  const [managerEditForm, setManagerEditForm] = useState(defaultForm);
+  const [managerEditPointsByUser, setManagerEditPointsByUser] = useState({});
+  const [managerEditSaving, setManagerEditSaving] = useState(false);
   const [rejectionReason, setRejectionReason] = useState('');
   const [rejectionComment, setRejectionComment] = useState('');
   const [error, setError] = useState('');
@@ -210,6 +248,10 @@ export default function WorkReportsPage() {
     return reports.find((r) => r._id === selectedReportId) || null;
   }, [reports, selectedReportId]);
 
+  const selectedReportOwnerId = useMemo(() => {
+    return String(selectedReport?.user?._id || selectedReport?.user?.id || selectedReport?.user || '');
+  }, [selectedReport]);
+
   const maintenanceTargetPlan = useMemo(() => {
     const reportId = String(maintenanceTargetReport?._id || maintenanceTargetReport?.id || '').trim();
     return reportId ? maintenancePlansByReportId[reportId] || null : null;
@@ -218,21 +260,73 @@ export default function WorkReportsPage() {
   const participantCount = Math.max(0, Number(form.participantCount || 0));
   const participantSlots = Array.from({ length: participantCount }, (_, i) => i);
 
-  const selectedDistribution = useMemo(() => {
+  const selectedAwardsSummary = useMemo(() => {
     if (!selectedReport) return null;
-    return calculateWorkReportDistribution(
-      selectedReport.pointsAwarded || 0,
-      selectedReport.participantCount || selectedReport.participants?.length || 0,
-    );
+    return summarizeWorkReportPointAwards(selectedReport);
   }, [selectedReport]);
 
-  const approvalDistribution = useMemo(() => {
-    if (!selectedReport || !approvalPoints) return null;
-    return calculateWorkReportDistribution(
-      approvalPoints,
-      selectedReport.participantCount || selectedReport.participants?.length || 0,
-    );
-  }, [selectedReport, approvalPoints]);
+  const approvalAwardees = useMemo(() => {
+    if (!selectedReport) return [];
+    return buildWorkReportAwardees(selectedReport);
+  }, [selectedReport]);
+
+  const managerEditParticipantSlots = useMemo(
+    () => Array.from({ length: Math.max(0, Number(managerEditForm.participantCount || 0)) }, (_, i) => i),
+    [managerEditForm.participantCount],
+  );
+
+  const managerEditEmployeeOptions = useMemo(() => {
+    return (employees || []).filter((employee) => {
+      const employeeId = String(employee.id || employee._id || '');
+      return employeeId && employeeId !== selectedReportOwnerId;
+    });
+  }, [employees, selectedReportOwnerId]);
+
+  const managerEditAwardees = useMemo(() => {
+    if (!selectedReport) return [];
+
+    const participantIds = Array.from(
+      { length: Math.max(0, Number(managerEditForm.participantCount || 0)) },
+      (_, index) => String(managerEditForm.participantIds?.[index] || '').trim(),
+    ).filter(Boolean);
+
+    return buildWorkReportAwardees({
+      ...selectedReport,
+      participantCount: participantIds.length,
+      participants: participantIds.map((participantId) => {
+        const employee = (employees || []).find((item) => String(item.id || item._id || '') === participantId);
+        return {
+          user: participantId,
+          fullName: employee?.fullName || 'مشارك',
+          employeeCode: employee?.employeeCode || '',
+        };
+      }),
+    });
+  }, [employees, managerEditForm.participantCount, managerEditForm.participantIds, selectedReport]);
+
+  const approvalTotalPoints = useMemo(
+    () => Object.values(approvalPointsByUser || {}).reduce((sum, value) => {
+      const parsed = Number(value);
+      return sum + (Number.isFinite(parsed) ? Math.max(0, Math.round(parsed)) : 0);
+    }, 0),
+    [approvalPointsByUser],
+  );
+  const approvalDistribution = useMemo(
+    () => ({
+      reporterPoints: approvalTotalPoints,
+      participantPoints: 0,
+      participantCount: approvalAwardees.filter((award) => award.distributionRole === 'PARTICIPANT').length,
+    }),
+    [approvalAwardees, approvalTotalPoints],
+  );
+
+  const managerEditTotalPoints = useMemo(
+    () => Object.values(managerEditPointsByUser || {}).reduce((sum, value) => {
+      const parsed = Number(value);
+      return sum + (Number.isFinite(parsed) ? Math.max(0, Math.round(parsed)) : 0);
+    }, 0),
+    [managerEditPointsByUser],
+  );
 
   /* ── Data Loading ────────────────────────────────────────────────────────── */
 
@@ -287,6 +381,8 @@ export default function WorkReportsPage() {
       setSelectedReportId(String(reportId));
     }
   }, [reports]);
+
+  const scrollToDetailPanel = () => {};
 
   /* ── Attachment Helpers ──────────────────────────────────────────────────── */
 
@@ -510,10 +606,14 @@ export default function WorkReportsPage() {
     setError('');
     setInfo('');
     try {
-      const payload = {};
-      if (String(approvalPoints || '').trim()) {
-        payload.points = Number(approvalPoints);
-      }
+      const payload = {
+        pointsByUser: buildWorkReportApprovalPayload(
+          {
+            ...buildWorkReportApprovalPointsMap(selectedReport),
+            ...(approvalPointsByUser || {}),
+          },
+        ),
+      };
       if (String(approvalComment || '').trim()) {
         payload.managerComment = approvalComment;
       }
@@ -522,6 +622,7 @@ export default function WorkReportsPage() {
       setInfo('تم اعتماد التقرير وإضافة النقاط بنجاح.');
       setInlineAction(null);
       setApprovalPoints('');
+      setApprovalPointsByUser({});
       setApprovalComment('');
       await load();
     } catch (err) {
@@ -638,6 +739,32 @@ export default function WorkReportsPage() {
 
   const canShareReportViaWhatsapp = (report) => isOwnReport(report) || canSendWhatsapp;
 
+  const closeSelectedReport = () => {
+    setSelectedReportId('');
+    setInlineAction(null);
+    setDetailMode('view');
+    setApprovalPoints('');
+    setApprovalPointsByUser({});
+    setApprovalComment('');
+    setManagerEditForm(defaultForm);
+    setManagerEditPointsByUser({});
+    setRejectionReason('');
+    setRejectionComment('');
+  };
+
+  const hydrateSelectedReportState = (report, nextInlineAction = null) => {
+    setSelectedReportId(String(report._id));
+    setInlineAction(nextInlineAction);
+    setDetailMode('view');
+    setApprovalPoints('');
+    setApprovalPointsByUser(buildWorkReportApprovalPointsMap(report));
+    setApprovalComment('');
+    setManagerEditForm(createWorkReportEditForm(report));
+    setManagerEditPointsByUser(buildWorkReportApprovalPointsMap(report));
+    setRejectionReason('');
+    setRejectionComment('');
+  };
+
   const openMaintenanceModal = async (report) => {
     if (!report || !canActivateMaintenance) {
       return;
@@ -696,13 +823,20 @@ export default function WorkReportsPage() {
     setError('');
     setInfo('');
     try {
-      await api.patch(`/work-reports/${report._id}/approve`, {});
       setInfo('تم الاعتماد المباشر للتقرير بنجاح.');
       setSelectedReportId(String(report._id));
-      setInlineAction(null);
+      setInfo('');
+      setInlineAction('approve');
       setApprovalPoints('');
+      setApprovalPointsByUser(buildWorkReportApprovalPointsMap(report));
       setApprovalComment('');
-      await load();
+      setDetailMode('view');
+      setManagerEditForm(createWorkReportEditForm(report));
+      setManagerEditPointsByUser(buildWorkReportApprovalPointsMap(report));
+      setRejectionReason('');
+      setRejectionComment('');
+      setInfo('تم فتح تفاصيل الاعتماد ويمكنك الآن توزيع النقاط يدويًا.');
+      scrollToDetailPanel();
     } catch (err) {
       setError(err.message || 'فشل الاعتماد المباشر لتقرير العمل');
     } finally {
@@ -847,9 +981,63 @@ export default function WorkReportsPage() {
     setSelectedReportId(report._id);
     setInlineAction(null);
     setApprovalPoints('');
-    setApprovalComment('');
+    setApprovalPointsByUser(buildWorkReportApprovalPointsMap(report));
+    setApprovalComment(report.managerComment || '');
+    setDetailMode('view');
+    setManagerEditForm(createWorkReportEditForm(report));
+    setManagerEditPointsByUser(buildWorkReportApprovalPointsMap(report));
     setRejectionReason('');
     setRejectionComment('');
+    scrollToDetailPanel();
+  };
+
+  const updateApprovalUserPoints = (userId, value) => {
+    setApprovalPointsByUser((prev) => ({
+      ...prev,
+      [userId]: value,
+    }));
+  };
+
+  const syncManagerEditParticipantCount = (value) => {
+    const rawValue = String(value ?? '').trim();
+    if (!rawValue) {
+      setManagerEditForm((prev) => ({ ...prev, participantCount: '', participantIds: [] }));
+      return;
+    }
+
+    const nextCount = Math.max(0, Math.min(100, Number(rawValue) || 0));
+    setManagerEditForm((prev) => ({
+      ...prev,
+      participantCount: nextCount,
+      participantIds: Array.from({ length: nextCount }, (_, index) => prev.participantIds?.[index] || ''),
+    }));
+  };
+
+  const updateManagerEditParticipant = (index, value) => {
+    setManagerEditForm((prev) => {
+      const currentCount = Math.max(0, Number(prev.participantCount || 0));
+      const nextIds = Array.from({ length: currentCount }, (_, i) => prev.participantIds?.[i] || '');
+      nextIds[index] = value;
+      return { ...prev, participantIds: nextIds };
+    });
+  };
+
+  const updateManagerEditUserPoints = (userId, value) => {
+    setManagerEditPointsByUser((prev) => ({
+      ...prev,
+      [userId]: value,
+    }));
+  };
+
+  const cancelManagerEdit = () => {
+    if (!selectedReport) {
+      setDetailMode('view');
+      return;
+    }
+
+    setDetailMode('view');
+    setManagerEditForm(createWorkReportEditForm(selectedReport));
+    setManagerEditPointsByUser(buildWorkReportApprovalPointsMap(selectedReport));
   };
 
   const canModerateSelected = useMemo(() => {
@@ -857,6 +1045,62 @@ export default function WorkReportsPage() {
     const userId = resolveReportOwnerId(selectedReport);
     return userId !== currentUserId && selectedReport.status === 'SUBMITTED';
   }, [selectedReport, canApprove, currentUserId]);
+
+  const canManagerEditSelected = useMemo(() => {
+    if (!selectedReport || selectedReport.status !== 'APPROVED' || !canApprove) return false;
+    const userId = resolveReportOwnerId(selectedReport);
+    return userId !== currentUserId;
+  }, [selectedReport, canApprove, currentUserId]);
+
+  const submitManagerEdit = async () => {
+    if (!selectedReport || !canManagerEditSelected) return;
+
+    setManagerEditSaving(true);
+    setError('');
+    setInfo('');
+    try {
+      const payload = {
+        projectName: managerEditForm.projectName,
+        activityType: managerEditForm.activityType,
+        title: managerEditForm.title,
+        details: managerEditForm.details,
+        progressPercent: managerEditForm.progressPercent,
+        hoursSpent: managerEditForm.hoursSpent,
+        workDate: managerEditForm.workDate,
+        accomplishments: managerEditForm.accomplishments,
+        challenges: managerEditForm.challenges,
+        nextSteps: managerEditForm.nextSteps,
+        participantCount: managerEditForm.participantCount,
+        participantIds: Array.from(
+          { length: Math.max(0, Number(managerEditForm.participantCount || 0)) },
+          (_, index) => String(managerEditForm.participantIds?.[index] || '').trim(),
+        ).filter(Boolean),
+        managerComment: approvalComment,
+        pointsByUser: buildWorkReportApprovalPayload(managerEditPointsByUser),
+      };
+
+      const response = await api.patch(`/work-reports/${selectedReport._id}/manager-edit`, payload);
+      const updatedReport = response?.report || null;
+
+      if (updatedReport?._id) {
+        setReports((prev) => prev.map((report) => (report._id === updatedReport._id ? updatedReport : report)));
+        setSelectedReportId(String(updatedReport._id));
+        setManagerEditForm(createWorkReportEditForm(updatedReport));
+        setManagerEditPointsByUser(buildWorkReportApprovalPointsMap(updatedReport));
+        setApprovalPointsByUser(buildWorkReportApprovalPointsMap(updatedReport));
+        setApprovalComment(updatedReport.managerComment || '');
+      } else {
+        await load();
+      }
+
+      setDetailMode('view');
+      setInfo('تم حفظ تعديل التقرير المعتمد وتحديث النقاط بنجاح.');
+    } catch (err) {
+      setError(err.message || 'فشل حفظ تعديل التقرير المعتمد');
+    } finally {
+      setManagerEditSaving(false);
+    }
+  };
 
   /* ── Render ──────────────────────────────────────────────────────────────── */
 
@@ -1584,7 +1828,12 @@ export default function WorkReportsPage() {
           Detail Panel
           ══════════════════════════════════════════════════════════════════════ */}
       {selectedReport ? (
-        <section className="card section">
+        <div className="modal-backdrop" onClick={closeSelectedReport}>
+        <section
+          className="card section modal-panel daily-plan-modal-panel"
+          style={{ width: 'min(100%, 1100px)', maxHeight: '90dvh' }}
+          onClick={(event) => event.stopPropagation()}
+        >
           {/* Header */}
           <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
             <div>
@@ -1621,10 +1870,29 @@ export default function WorkReportsPage() {
                   {deletingId === String(selectedReport._id) ? 'جارٍ الحذف...' : 'حذف التقرير'}
                 </button>
               ) : null}
+              {canManagerEditSelected ? (
+                <button
+                  type="button"
+                  className="btn btn-soft"
+                  onClick={() => {
+                    if (detailMode === 'edit') {
+                      cancelManagerEdit();
+                      return;
+                    }
+
+                    setDetailMode('edit');
+                    setManagerEditForm(createWorkReportEditForm(selectedReport));
+                    setManagerEditPointsByUser(buildWorkReportApprovalPointsMap(selectedReport));
+                    setApprovalComment(selectedReport.managerComment || '');
+                  }}
+                >
+                  {detailMode === 'edit' ? 'إلغاء التعديل' : 'تعديل بعد الاعتماد'}
+                </button>
+              ) : null}
               <button
                 type="button"
                 className="btn btn-soft"
-                onClick={() => { setSelectedReportId(''); setInlineAction(null); }}
+                onClick={closeSelectedReport}
               >
                 إغلاق
               </button>
@@ -1711,22 +1979,48 @@ export default function WorkReportsPage() {
           })()}
 
           {/* Points Distribution */}
-          {selectedReport.status === 'APPROVED' && selectedDistribution ? (
+          {selectedReport.status === 'APPROVED' && selectedAwardsSummary ? (
             <div style={{ marginTop: 16 }}>
               <h3 style={{ marginBottom: 8 }}>توزيع النقاط</h3>
               <div className="grid-3">
                 <label>
                   نقاط كاتب التقرير
-                  <input className="input" value={formatWorkReportPoints(selectedReport.reporterPointsAwarded || selectedDistribution.reporterPoints)} disabled />
+                  <input className="input" value={formatWorkReportPoints(selectedAwardsSummary.ownerPoints)} disabled />
                 </label>
                 <label>
                   نقاط كل مشارك
-                  <input className="input" value={formatWorkReportPoints(selectedReport.participantPointsAwarded || selectedDistribution.participantPoints)} disabled />
+                  <input className="input" value={formatWorkReportPoints(selectedAwardsSummary.participantsTotalPoints)} disabled />
                 </label>
                 <label>
                   إجمالي نقاط المشاركين
-                  <input className="input" value={formatWorkReportPoints(selectedReport.participantsTotalAwarded || selectedDistribution.participantsTotalPoints || 0)} disabled />
+                  <input className="input" value={formatWorkReportPoints(selectedAwardsSummary.totalPoints)} disabled />
                 </label>
+              </div>
+              <div style={{ display: 'grid', gap: 8, marginTop: 12 }}>
+                {selectedAwardsSummary.pointAwards.map((award) => (
+                  <div
+                    key={`${selectedReport._id}-${award.userId}`}
+                    style={{
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      gap: 12,
+                      padding: '10px 12px',
+                      background: '#0e1a34',
+                      border: '1px solid var(--border)',
+                      borderRadius: 8,
+                      flexWrap: 'wrap',
+                    }}
+                  >
+                    <div>
+                      <strong>{award.fullName || 'مستخدم'}</strong>
+                      <div style={{ fontSize: 12, color: 'var(--text-soft)', marginTop: 2 }}>
+                        {award.distributionRole === 'REPORT_OWNER' ? 'صاحب التقرير / قائد الفريق' : 'مشارك'}
+                        {award.employeeCode ? ` | ${award.employeeCode}` : ''}
+                      </div>
+                    </div>
+                    <strong>{formatWorkReportPoints(award.pointsAwarded)} نقطة</strong>
+                  </div>
+                ))}
               </div>
             </div>
           ) : null}
@@ -1883,6 +2177,241 @@ export default function WorkReportsPage() {
           ) : null}
 
           {/* ── Inline Approve / Reject ── */}
+          {canManagerEditSelected && detailMode === 'edit' ? (
+            <div style={{ marginTop: 20, borderTop: '1px solid var(--border)', paddingTop: 16 }}>
+              <h3 style={{ margin: '0 0 10px' }}>تعديل التقرير المعتمد</h3>
+              <div className="grid-3" style={{ gap: 12 }}>
+                <label>
+                  اسم المشروع
+                  <input
+                    className="input"
+                    value={managerEditForm.projectName}
+                    onChange={(e) => setManagerEditForm((prev) => ({ ...prev, projectName: e.target.value }))}
+                    required
+                  />
+                </label>
+                <label>
+                  نوع النشاط
+                  <input
+                    className="input"
+                    value={managerEditForm.activityType}
+                    onChange={(e) => setManagerEditForm((prev) => ({ ...prev, activityType: e.target.value }))}
+                  />
+                </label>
+                <label>
+                  عنوان التقرير
+                  <input
+                    className="input"
+                    value={managerEditForm.title}
+                    onChange={(e) => setManagerEditForm((prev) => ({ ...prev, title: e.target.value }))}
+                  />
+                </label>
+                <label>
+                  تاريخ العمل
+                  <input
+                    className="input"
+                    type="date"
+                    value={managerEditForm.workDate}
+                    onChange={(e) => setManagerEditForm((prev) => ({ ...prev, workDate: e.target.value }))}
+                  />
+                </label>
+                <label>
+                  نسبة الإنجاز (%)
+                  <input
+                    className="input"
+                    type="number"
+                    min={0}
+                    max={100}
+                    value={managerEditForm.progressPercent}
+                    onChange={(e) => setManagerEditForm((prev) => ({ ...prev, progressPercent: e.target.value }))}
+                  />
+                </label>
+                <label>
+                  ساعات العمل
+                  <input
+                    className="input"
+                    type="number"
+                    min={0}
+                    max={24}
+                    step={0.5}
+                    value={managerEditForm.hoursSpent}
+                    onChange={(e) => setManagerEditForm((prev) => ({ ...prev, hoursSpent: e.target.value }))}
+                  />
+                </label>
+                <label>
+                  عدد الكادر المشارك
+                  <input
+                    className="input"
+                    type="number"
+                    min={0}
+                    max={Math.max(0, managerEditEmployeeOptions.length)}
+                    value={managerEditForm.participantCount}
+                    onChange={(e) => syncManagerEditParticipantCount(e.target.value)}
+                  />
+                </label>
+                <label className="grid-span-full">
+                  تعليق المدير
+                  <input
+                    className="input"
+                    value={approvalComment}
+                    onChange={(e) => setApprovalComment(e.target.value)}
+                  />
+                </label>
+                <label className="grid-span-full">
+                  تفاصيل العمل
+                  <textarea
+                    className="textarea"
+                    rows={4}
+                    value={managerEditForm.details}
+                    onChange={(e) => setManagerEditForm((prev) => ({ ...prev, details: e.target.value }))}
+                    required
+                  />
+                </label>
+                <label className="grid-span-full">
+                  ما تم إنجازه
+                  <textarea
+                    className="textarea"
+                    rows={3}
+                    value={managerEditForm.accomplishments}
+                    onChange={(e) => setManagerEditForm((prev) => ({ ...prev, accomplishments: e.target.value }))}
+                  />
+                </label>
+                <label className="grid-span-full">
+                  التحديات والمشاكل
+                  <textarea
+                    className="textarea"
+                    rows={3}
+                    value={managerEditForm.challenges}
+                    onChange={(e) => setManagerEditForm((prev) => ({ ...prev, challenges: e.target.value }))}
+                  />
+                </label>
+                <label className="grid-span-full">
+                  الخطوات القادمة
+                  <textarea
+                    className="textarea"
+                    rows={3}
+                    value={managerEditForm.nextSteps}
+                    onChange={(e) => setManagerEditForm((prev) => ({ ...prev, nextSteps: e.target.value }))}
+                  />
+                </label>
+              </div>
+
+              {managerEditParticipantSlots.length ? (
+                <div style={{ marginTop: 16 }}>
+                  <h4 style={{ margin: '0 0 10px' }}>المشاركون</h4>
+                  <div className="grid-3" style={{ gap: 12 }}>
+                    {managerEditParticipantSlots.map((slotIndex) => {
+                      const otherSelections = new Set(
+                        (managerEditForm.participantIds || [])
+                          .filter((_, currentIndex) => currentIndex !== slotIndex)
+                          .filter(Boolean),
+                      );
+
+                      return (
+                        <label key={`manager-participant-${slotIndex}`}>
+                          المشارك {slotIndex + 1}
+                          <select
+                            className="select"
+                            value={managerEditForm.participantIds?.[slotIndex] || ''}
+                            onChange={(e) => updateManagerEditParticipant(slotIndex, e.target.value)}
+                            required
+                          >
+                            <option value="">اختر الموظف</option>
+                            {managerEditEmployeeOptions.map((employee) => {
+                              const employeeId = String(employee.id || employee._id || '');
+                              const employeeCode = employee.employeeCode ? ` - ${employee.employeeCode}` : '';
+                              return (
+                                <option key={employeeId} value={employeeId} disabled={otherSelections.has(employeeId)}>
+                                  {employee.fullName}{employeeCode}
+                                </option>
+                              );
+                            })}
+                          </select>
+                        </label>
+                      );
+                    })}
+                  </div>
+                </div>
+              ) : null}
+
+              <div
+                style={{
+                  display: 'grid',
+                  gap: 10,
+                  marginTop: 16,
+                  padding: 12,
+                  borderRadius: 10,
+                  border: '1px solid var(--border)',
+                  background: '#0e1a34',
+                }}
+              >
+                <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
+                  <div>
+                    <strong>النقاط المحدثة</strong>
+                    <div style={{ fontSize: 12, color: 'var(--text-soft)', marginTop: 4 }}>
+                      يمكن للمدير تعديل نقاط صاحب التقرير والمشاركين ثم إعادة الحفظ.
+                    </div>
+                  </div>
+                  <strong>{formatWorkReportPoints(managerEditTotalPoints)} نقطة</strong>
+                </div>
+                <div style={{ display: 'grid', gap: 8 }}>
+                  {managerEditAwardees.map((awardee) => (
+                    <div
+                      key={`${selectedReport._id}-${awardee.userId}-manager-edit`}
+                      style={{
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        gap: 12,
+                        flexWrap: 'wrap',
+                        alignItems: 'center',
+                        padding: '10px 12px',
+                        background: 'rgba(255,255,255,0.02)',
+                        border: '1px solid var(--border)',
+                        borderRadius: 8,
+                      }}
+                    >
+                      <div>
+                        <strong>{awardee.fullName || 'مستخدم'}</strong>
+                        <div style={{ fontSize: 12, color: 'var(--text-soft)', marginTop: 2 }}>
+                          {awardee.distributionRole === 'REPORT_OWNER' ? 'صاحب التقرير / قائد الفريق' : 'مشارك'}
+                          {awardee.employeeCode ? ` | ${awardee.employeeCode}` : ''}
+                        </div>
+                      </div>
+                      <input
+                        className="input"
+                        type="number"
+                        min={0}
+                        max={1000}
+                        value={managerEditPointsByUser?.[awardee.userId] ?? ''}
+                        onChange={(e) => updateManagerEditUserPoints(awardee.userId, e.target.value)}
+                        style={{ width: 120 }}
+                      />
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div style={{ display: 'flex', gap: 8, marginTop: 12, flexWrap: 'wrap' }}>
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  disabled={managerEditSaving}
+                  onClick={submitManagerEdit}
+                >
+                  {managerEditSaving ? 'جارٍ حفظ التعديل...' : 'حفظ التعديل'}
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-soft"
+                  disabled={managerEditSaving}
+                  onClick={cancelManagerEdit}
+                >
+                  إلغاء
+                </button>
+              </div>
+            </div>
+          ) : null}
+
           {canModerateSelected ? (
             <div style={{ marginTop: 20, borderTop: '1px solid var(--border)', paddingTop: 16 }}>
               {!inlineAction ? (
@@ -1890,7 +2419,12 @@ export default function WorkReportsPage() {
                   <button
                     type="button"
                     className="btn btn-primary"
-                    onClick={() => setInlineAction('approve')}
+                    onClick={() => {
+                      setApprovalPoints('');
+                      setApprovalPointsByUser(buildWorkReportApprovalPointsMap(selectedReport));
+                      setApprovalComment('');
+                      setInlineAction('approve');
+                    }}
                   >
                     اعتماد ومنح نقاط
                   </button>
@@ -1908,7 +2442,63 @@ export default function WorkReportsPage() {
               {inlineAction === 'approve' ? (
                 <div>
                   <h3 style={{ margin: '0 0 10px' }}>اعتماد التقرير</h3>
-                  <div className="grid-3" style={{ gap: 10 }}>
+                <div
+                  style={{
+                    display: 'grid',
+                    gap: 10,
+                    marginBottom: 12,
+                    padding: 12,
+                    borderRadius: 10,
+                    border: '1px solid var(--border)',
+                    background: '#0e1a34',
+                  }}
+                >
+                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
+                    <div>
+                      <strong>النقاط اليدوية للكادر</strong>
+                      <div style={{ fontSize: 12, color: 'var(--text-soft)', marginTop: 4 }}>
+                        امنح كل مشارك وصاحب التقرير / قائد الفريق نقاطه بشكل مستقل.
+                      </div>
+                    </div>
+                    <strong>{formatWorkReportPoints(approvalTotalPoints)} نقطة</strong>
+                  </div>
+                  <div style={{ display: 'grid', gap: 8 }}>
+                    {approvalAwardees.map((awardee) => (
+                      <div
+                        key={`${selectedReport._id}-${awardee.userId}-approval`}
+                        style={{
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          gap: 12,
+                          flexWrap: 'wrap',
+                          alignItems: 'center',
+                          padding: '10px 12px',
+                          background: 'rgba(255,255,255,0.02)',
+                          border: '1px solid var(--border)',
+                          borderRadius: 8,
+                        }}
+                      >
+                        <div>
+                          <strong>{awardee.fullName || 'مستخدم'}</strong>
+                          <div style={{ fontSize: 12, color: 'var(--text-soft)', marginTop: 2 }}>
+                            {awardee.distributionRole === 'REPORT_OWNER' ? 'صاحب التقرير / قائد الفريق' : 'مشارك'}
+                            {awardee.employeeCode ? ` | ${awardee.employeeCode}` : ''}
+                          </div>
+                        </div>
+                        <input
+                          className="input"
+                          type="number"
+                          min={0}
+                          max={1000}
+                          value={approvalPointsByUser?.[awardee.userId] ?? ''}
+                          onChange={(e) => updateApprovalUserPoints(awardee.userId, e.target.value)}
+                          style={{ width: 120 }}
+                        />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+                <div className="grid-3" style={{ display: 'none', gap: 10 }}>
                     <label>
                       إجمالي نقاط التقرير (اختياري)
                       <input
@@ -1951,7 +2541,7 @@ export default function WorkReportsPage() {
                       type="button"
                       className="btn btn-soft"
                       disabled={approving}
-                      onClick={() => { setInlineAction(null); setApprovalPoints(''); setApprovalComment(''); }}
+                      onClick={() => { setInlineAction(null); setApprovalPoints(''); setApprovalPointsByUser({}); setApprovalComment(''); }}
                     >
                       إلغاء
                     </button>
@@ -2004,6 +2594,7 @@ export default function WorkReportsPage() {
             </div>
           ) : null}
         </section>
+        </div>
       ) : null}
 
       <MaintenancePlanModal

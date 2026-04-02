@@ -78,6 +78,47 @@ const workReportPdfFileSchema = new mongoose.Schema(
   { _id: false },
 );
 
+const workReportPointAwardSchema = new mongoose.Schema(
+  {
+    user: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+      required: true,
+    },
+    fullName: {
+      type: String,
+      default: '',
+      trim: true,
+    },
+    employeeCode: {
+      type: String,
+      default: '',
+      trim: true,
+      uppercase: true,
+    },
+    distributionRole: {
+      type: String,
+      enum: ['REPORT_OWNER', 'PARTICIPANT'],
+      default: 'PARTICIPANT',
+    },
+    pointsAwarded: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    awardedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+      default: null,
+    },
+    awardedAt: {
+      type: Date,
+      default: null,
+    },
+  },
+  { _id: false },
+);
+
 const workReportSchema = new mongoose.Schema(
   {
     user: {
@@ -165,6 +206,10 @@ const workReportSchema = new mongoose.Schema(
     },
     participants: {
       type: [workReportParticipantSchema],
+      default: [],
+    },
+    pointAwards: {
+      type: [workReportPointAwardSchema],
       default: [],
     },
     pdfFile: {

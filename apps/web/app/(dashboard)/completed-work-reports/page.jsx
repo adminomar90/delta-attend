@@ -6,7 +6,7 @@ import { authStorage } from '../../../lib/auth';
 import { Permission, hasPermission } from '../../../lib/permissions';
 import MaintenancePlanModal from '../../../components/maintenance/MaintenancePlanModal';
 import { buildPlanDefaultsFromReport } from '../../../lib/maintenancePlans';
-import { calculateWorkReportDistribution } from '../../../lib/workReportPoints';
+import { summarizeWorkReportPointAwards } from '../../../lib/workReportPoints';
 
 const statusLabelMap = {
   APPROVED: 'معتمد',
@@ -75,6 +75,13 @@ export default function CompletedWorkReportsPage() {
   const selectedReport = useMemo(() => {
     return reports.find((report) => report._id === selectedReportId) || reports[0] || null;
   }, [reports, selectedReportId]);
+
+  const selectedAwardsSummary = useMemo(() => {
+    if (!selectedReport) {
+      return null;
+    }
+    return summarizeWorkReportPointAwards(selectedReport);
+  }, [selectedReport]);
 
   const load = async () => {
     if (!canAccess) {
@@ -434,13 +441,41 @@ export default function CompletedWorkReportsPage() {
               </label>
               <label>
                 نقاط كاتب التقرير
-                <input className="input" value={formatPoints(selectedReport.reporterPointsAwarded)} disabled />
+                <input className="input" value={formatPoints(selectedAwardsSummary?.ownerPoints || 0)} disabled />
               </label>
               <label>
                 نقاط كل مشارك
-                <input className="input" value={formatPoints(selectedReport.participantPointsAwarded)} disabled />
+                <input className="input" value={formatPoints(selectedAwardsSummary?.participantsTotalPoints || 0)} disabled />
               </label>
             </div>
+            {selectedAwardsSummary?.pointAwards?.length ? (
+              <div style={{ display: 'grid', gap: 8, marginTop: 12 }}>
+                {selectedAwardsSummary.pointAwards.map((award) => (
+                  <div
+                    key={`${selectedReport._id}-${award.userId}`}
+                    style={{
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      gap: 12,
+                      padding: '10px 12px',
+                      borderRadius: 8,
+                      background: 'var(--card)',
+                      border: '1px solid var(--border)',
+                      flexWrap: 'wrap',
+                    }}
+                  >
+                    <div>
+                      <strong>{award.fullName || 'مستخدم'}</strong>
+                      <div style={{ fontSize: 12, color: 'var(--text-soft)', marginTop: 2 }}>
+                        {award.distributionRole === 'REPORT_OWNER' ? 'صاحب التقرير / قائد الفريق' : 'مشارك'}
+                        {award.employeeCode ? ` | ${award.employeeCode}` : ''}
+                      </div>
+                    </div>
+                    <strong>{formatPoints(award.pointsAwarded)} نقطة</strong>
+                  </div>
+                ))}
+              </div>
+            ) : null}
           </div>
 
           {/* Participants Section */}
@@ -460,9 +495,14 @@ export default function CompletedWorkReportsPage() {
                 ))}
               </div>
               {selectedReport.pointsAwarded > 0 ? (
+                <>
                 <p style={{ color: 'var(--text-soft)', fontSize: 13, marginTop: 8 }}>
+                  مجموع نقاط الكادر المشارك: {formatPoints(selectedAwardsSummary?.participantsTotalPoints || 0)} من أصل {formatPoints(selectedAwardsSummary?.totalPoints || 0)} نقطة.
+                </p>
+                <p style={{ display: 'none', color: 'var(--text-soft)', fontSize: 13, marginTop: 8 }}>
                   توزيع النقاط: {formatPoints(selectedReport.reporterPointsAwarded)} للكاتب + {formatPoints(selectedReport.participantPointsAwarded)} لكل مشارك × {selectedReport.participants.length} = {formatPoints(selectedReport.participantsTotalAwarded || 0)} للمشاركين
                 </p>
+                </>
               ) : null}
             </div>
           ) : (

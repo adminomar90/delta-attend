@@ -113,6 +113,32 @@ const parseIdArray = (value) => {
   return [];
 };
 
+const parsePointsByUserInput = (value) => {
+  if (value === undefined || value === null || value === '') {
+    return {};
+  }
+
+  if (typeof value === 'object' && !Array.isArray(value)) {
+    return value;
+  }
+
+  const raw = toCleanString(value);
+  if (!raw) {
+    return {};
+  }
+
+  try {
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      return parsed;
+    }
+  } catch {
+    throw new AppError('صيغة نقاط توزيع تقرير العمل غير صالحة', 400);
+  }
+
+  throw new AppError('صيغة نقاط توزيع تقرير العمل غير صالحة', 400);
+};
+
 const buildUploadedImages = (files = [], comments = []) => {
   if (files.length) {
     console.log(`[WorkReport] Processing ${files.length} uploaded image(s):`);
@@ -299,7 +325,7 @@ const grantPointsToWorkReportUser = async ({
     user: targetUser._id,
     points: safePoints,
     category: 'WORK_REPORT_APPROVAL',
-    reason: distributionRole === 'REPORT_AUTHOR'
+    reason: ['REPORT_AUTHOR', 'REPORT_OWNER'].includes(distributionRole)
       ? `اعتماد تقرير عمل: ${report.title || report.projectName || 'بدون عنوان'}`
       : `مشاركة في تقرير عمل: ${report.title || report.projectName || 'بدون عنوان'}`,
     approvedBy,
@@ -333,6 +359,114 @@ const grantPointsToWorkReportUser = async ({
   return updatedUser;
 };
 
+const adjustApprovedWorkReportUserPoints = async ({
+  userId,
+  pointsDelta,
+  report,
+  approvedBy,
+  distributionRole,
+}) => {
+  const safeDelta = Number(pointsDelta || 0);
+  if (!Number.isFinite(safeDelta) || safeDelta === 0) {
+    return null;
+  }
+
+  const targetUser = await userRepository.findById(userId);
+  if (!targetUser) {
+    throw new AppError('تعذر العثور على حساب أحد المشاركين أثناء تعديل التقرير المعتمد', 409);
+  }
+
+  await pointsLedgerRepository.create({
+    user: targetUser._id,
+    points: safeDelta,
+    category: 'WORK_REPORT_APPROVAL',
+    reason: `تعديل نقاط تقرير عمل: ${report.title || report.projectName || 'بدون عنوان'}`,
+    approvedBy,
+    sourceAction: 'WORK_REPORT_APPROVAL_EDIT',
+    metadata: {
+      workReportId: String(report._id),
+      distributionRole,
+      adjustmentDelta: safeDelta,
+      totalPoints: Number(report.pointsAwarded || 0),
+      participantCount: Number(report.participantCount || report.participants?.length || 0),
+    },
+  });
+
+  const nextPointsTotal = Math.max(0, Number(targetUser.pointsTotal || 0) + safeDelta);
+  const nextLevel = levelService.resolveLevel(nextPointsTotal);
+  const updatedUser = await userRepository.incrementPointsAndSetLevel(targetUser._id, safeDelta, nextLevel);
+
+  if (safeDelta > 0) {
+    const generatedBadges = badgeService.evaluate(updatedUser, 0);
+    for (const badgeCode of generatedBadges) {
+      if (!updatedUser.badges.includes(badgeCode)) {
+        await userRepository.attachBadge(updatedUser._id, badgeCode);
+      }
+    }
+
+    const goalUpdates = await goalRepository.incrementActiveGoals(updatedUser._id, safeDelta);
+    for (const goal of goalUpdates) {
+      if (goal.achieved) {
+        await notificationService.notifyGoalAchieved(updatedUser._id, goal);
+      }
+    }
+  }
+
+  return updatedUser;
+};
+
+const resolveWorkReportApprovalAwards = ({
+  report,
+  rawPointsByUser,
+  totalPoints,
+  approvalTimestamp,
+  approvedBy,
+}) => {
+  const recipients = workReportPointsService.buildApprovalRecipients(report);
+  const manualPointsSource = parsePointsByUserInput(rawPointsByUser);
+  const hasManualPoints = Object.keys(manualPointsSource).length > 0;
+  const fallbackDistribution = hasManualPoints
+    ? null
+    : workReportPointsService.calculateDistribution(
+        totalPoints,
+        recipients.filter((entry) => entry.distributionRole === 'PARTICIPANT').length,
+      );
+
+  const pointAwards = hasManualPoints
+    ? recipients.map((recipient) => ({
+        user: recipient.userId,
+        fullName: recipient.fullName,
+        employeeCode: recipient.employeeCode,
+        distributionRole: recipient.distributionRole,
+        pointsAwarded: toNumberInRange(manualPointsSource[recipient.userId], {
+          min: 0,
+          max: 1000,
+          fallback: 0,
+          fieldName: `نقاط ${recipient.fullName || recipient.userId || 'المستخدم'}`,
+        }),
+        awardedBy: approvedBy,
+        awardedAt: approvalTimestamp,
+      }))
+    : recipients.map((recipient) => ({
+        user: recipient.userId,
+        fullName: recipient.fullName,
+        employeeCode: recipient.employeeCode,
+        distributionRole: recipient.distributionRole,
+        pointsAwarded:
+          recipient.distributionRole === 'REPORT_OWNER'
+            ? fallbackDistribution.reporterPoints
+            : fallbackDistribution.participantPoints,
+        awardedBy: approvedBy,
+        awardedAt: approvalTimestamp,
+      }));
+
+  return {
+    pointAwards,
+    summary: workReportPointsService.summarizePointAwards(pointAwards),
+    hasManualPoints,
+  };
+};
+
 const assertWorkReportAccess = async (req, report) => {
   if (report?.status === 'APPROVED' && hasWorkReportArchiveAccess(req.user)) {
     return;
@@ -356,6 +490,138 @@ const assertWorkReportAccess = async (req, report) => {
   if (!isUserWithinManagedScope({ managedUserIds, userId: report.user?._id || report.user })) {
     throw new AppError('ليس لديك صلاحية الوصول إلى تقرير العمل هذا', 403);
   }
+};
+
+const resolveWorkReportPayload = async ({
+  body = {},
+  existingReport = null,
+  authorId,
+}) => {
+  const hasProjectId = body.projectId !== undefined || body.project !== undefined;
+  const hasProjectName = Object.prototype.hasOwnProperty.call(body, 'projectName');
+  const projectId = toCleanString(
+    hasProjectId
+      ? (body.projectId || body.project)
+      : (existingReport?.project?._id || existingReport?.project || ''),
+  );
+  const manualProjectName = toCleanString(
+    hasProjectName
+      ? body.projectName
+      : (existingReport?.projectName || existingReport?.project?.name || ''),
+  );
+  const details = toCleanString(
+    Object.prototype.hasOwnProperty.call(body, 'details')
+      ? body.details
+      : existingReport?.details,
+  );
+
+  if (!projectId && !manualProjectName) {
+    throw new AppError('اسم المشروع مطلوب', 400);
+  }
+  if (!details) {
+    throw new AppError('تفاصيل التقرير مطلوبة', 400);
+  }
+
+  const project = projectId ? await projectRepository.findById(projectId) : null;
+  if (projectId && !project) {
+    throw new AppError('المشروع غير موجود', 404);
+  }
+
+  const nextProjectId = project
+    ? project._id
+    : (existingReport && !hasProjectId && !hasProjectName
+      ? (existingReport.project?._id || existingReport.project || null)
+      : null);
+  const resolvedProjectName = project?.name || manualProjectName;
+
+  const progressPercent = toNumberInRange(
+    Object.prototype.hasOwnProperty.call(body, 'progressPercent')
+      ? body.progressPercent
+      : existingReport?.progressPercent,
+    {
+      min: 0,
+      max: 100,
+      fallback: 0,
+      fieldName: 'progressPercent',
+    },
+  );
+  const hoursSpent = toNumberInRange(
+    Object.prototype.hasOwnProperty.call(body, 'hoursSpent')
+      ? body.hoursSpent
+      : existingReport?.hoursSpent,
+    {
+      min: 0,
+      max: 24,
+      fallback: 0,
+      fieldName: 'hoursSpent',
+    },
+  );
+
+  const participantIds = Object.prototype.hasOwnProperty.call(body, 'participantIds')
+    ? parseIdArray(body.participantIds)
+    : (existingReport?.participants || []).map((item) => String(item.user?._id || item.user || '')).filter(Boolean);
+  const participantCount = toNumberInRange(
+    Object.prototype.hasOwnProperty.call(body, 'participantCount')
+      ? body.participantCount
+      : (existingReport?.participantCount ?? participantIds.length),
+    {
+      min: 0,
+      max: 100,
+      fallback: participantIds.length,
+      fieldName: 'participantCount',
+    },
+  );
+  const participants = await resolveWorkReportParticipants({
+    participantIds,
+    participantCount,
+    authorId,
+  });
+
+  return {
+    project,
+    payload: {
+      project: nextProjectId,
+      projectName: resolvedProjectName,
+      activityType: toCleanString(
+        Object.prototype.hasOwnProperty.call(body, 'activityType')
+          ? body.activityType
+          : existingReport?.activityType,
+      ),
+      title: toCleanString(
+        Object.prototype.hasOwnProperty.call(body, 'title')
+          ? body.title
+          : existingReport?.title,
+      ),
+      details,
+      accomplishments: toCleanString(
+        Object.prototype.hasOwnProperty.call(body, 'accomplishments')
+          ? body.accomplishments
+          : existingReport?.accomplishments,
+      ),
+      challenges: toCleanString(
+        Object.prototype.hasOwnProperty.call(body, 'challenges')
+          ? body.challenges
+          : existingReport?.challenges,
+      ),
+      nextSteps: toCleanString(
+        Object.prototype.hasOwnProperty.call(body, 'nextSteps')
+          ? body.nextSteps
+          : existingReport?.nextSteps,
+      ),
+      progressPercent,
+      hoursSpent,
+      workDate:
+        toOptionalDate(
+          Object.prototype.hasOwnProperty.call(body, 'workDate')
+            ? body.workDate
+            : existingReport?.workDate,
+        )
+        || existingReport?.workDate
+        || new Date(),
+      participantCount,
+      participants,
+    },
+  };
 };
 
 const createStoredWorkReportPdf = async ({ report, req }) => {
@@ -453,53 +719,13 @@ export const listWorkReportEmployees = asyncHandler(async (_req, res) => {
 });
 
 export const createWorkReport = asyncHandler(async (req, res) => {
-  const projectId = toCleanString(req.body.projectId || req.body.project);
-  const manualProjectName = toCleanString(req.body.projectName);
-  const details = toCleanString(req.body.details);
-
-  if (!projectId && !manualProjectName) {
-    throw new AppError('اسم المشروع مطلوب', 400);
-  }
-  if (!details) {
-    throw new AppError('تفاصيل التقرير مطلوبة', 400);
-  }
-
-  const [user, project] = await Promise.all([
-    userRepository.findById(req.user.id),
-    projectId ? projectRepository.findById(projectId) : Promise.resolve(null),
-  ]);
+  const user = await userRepository.findById(req.user.id);
 
   if (!user || !user.active) {
     throw new AppError('المستخدم غير موجود أو غير نشط', 404);
   }
-  if (projectId && !project) {
-    throw new AppError('المشروع غير موجود', 404);
-  }
-
-  const resolvedProjectName = project?.name || manualProjectName;
-
-  const progressPercent = toNumberInRange(req.body.progressPercent, {
-    min: 0,
-    max: 100,
-    fallback: 0,
-    fieldName: 'progressPercent',
-  });
-  const hoursSpent = toNumberInRange(req.body.hoursSpent, {
-    min: 0,
-    max: 24,
-    fallback: 0,
-    fieldName: 'hoursSpent',
-  });
-  const participantIds = parseIdArray(req.body.participantIds);
-  const participantCount = toNumberInRange(req.body.participantCount, {
-    min: 0,
-    max: 100,
-    fallback: participantIds.length,
-    fieldName: 'participantCount',
-  });
-  const participants = await resolveWorkReportParticipants({
-    participantIds,
-    participantCount,
+  const { project, payload } = await resolveWorkReportPayload({
+    body: req.body,
     authorId: req.user.id,
   });
   const files = Array.isArray(req.files) ? req.files : [];
@@ -510,20 +736,8 @@ export const createWorkReport = asyncHandler(async (req, res) => {
     user: req.user.id,
     employeeName: user.fullName,
     employeeCode: user.employeeCode || '',
-    project: project?._id || null,
-    projectName: resolvedProjectName,
-    activityType: toCleanString(req.body.activityType),
-    title: toCleanString(req.body.title),
-    details,
-    accomplishments: toCleanString(req.body.accomplishments),
-    challenges: toCleanString(req.body.challenges),
-    nextSteps: toCleanString(req.body.nextSteps),
-    progressPercent,
-    hoursSpent,
-    workDate: toOptionalDate(req.body.workDate) || new Date(),
+    ...payload,
     images,
-    participantCount,
-    participants,
     status: 'SUBMITTED',
     pointsAwarded: 0,
     reporterPointsAwarded: 0,
@@ -552,12 +766,12 @@ export const createWorkReport = asyncHandler(async (req, res) => {
     entityId: created._id,
     after: {
       projectId: project ? String(project._id) : '',
-      projectName: resolvedProjectName,
-      progressPercent,
-      hoursSpent,
+      projectName: payload.projectName,
+      progressPercent: payload.progressPercent,
+      hoursSpent: payload.hoursSpent,
       imagesCount: images.length,
-      participantCount,
-      participantIds: participants.map((item) => String(item.user)),
+      participantCount: payload.participantCount,
+      participantIds: payload.participants.map((item) => String(item.user)),
       pdfUrl: report.pdfFile?.publicUrl || '',
       status: 'SUBMITTED',
     },
@@ -572,7 +786,7 @@ export const createWorkReport = asyncHandler(async (req, res) => {
   await notificationService.notifyWorkReportCreated(workReportRecipients, {
     employeeName: user.fullName,
     reportTitle: report.title || report.activityType || 'بدون عنوان',
-    projectName: resolvedProjectName || report.projectName || '-',
+    projectName: payload.projectName || report.projectName || '-',
     occurredAt: report.createdAt || new Date(),
     metadata: {
       workReportId: String(report._id),
@@ -589,7 +803,7 @@ export const createWorkReport = asyncHandler(async (req, res) => {
     titleAr: 'إنشاء تقرير عمل',
     actorName: user.fullName,
     actionLabel: 'إنشاء تقرير عمل',
-    entityLabel: report.title || resolvedProjectName || 'تقرير عمل',
+    entityLabel: report.title || payload.projectName || 'تقرير عمل',
     occurredAt: report.createdAt || new Date(),
     metadata: {
       entityType: 'WORK_REPORT',
@@ -793,7 +1007,7 @@ export const approveWorkReport = asyncHandler(async (req, res) => {
   }
 
   const rawPoints = toCleanString(req.body.points);
-  const points = rawPoints
+  const legacyTotalPoints = rawPoints
     ? toNumberInRange(rawPoints, {
         min: 1,
         max: 1000,
@@ -802,11 +1016,18 @@ export const approveWorkReport = asyncHandler(async (req, res) => {
       })
     : DEFAULT_WORK_REPORT_APPROVAL_POINTS;
   const managerComment = toCleanString(req.body.managerComment);
-  const distribution = workReportPointsService.calculateDistribution(
-    points,
-    report.participants?.length || 0,
+  const approvalTimestamp = new Date();
+  const { pointAwards, summary } = resolveWorkReportApprovalAwards({
+    report,
+    rawPointsByUser: req.body.pointsByUser || req.body.pointsByAwardee || req.body.pointsByParticipant,
+    totalPoints: legacyTotalPoints,
+    approvalTimestamp,
+    approvedBy: req.user.id,
+  });
+  const pointAwardsByUserId = new Map(
+    pointAwards.map((entry) => [String(entry.user), entry]),
   );
-  const authorId = report.user?._id || report.user;
+  const authorId = String(report.user?._id || report.user || '');
   const participants = Array.isArray(report.participants) ? report.participants : [];
   const reportLabel = report.title || report.projectName || 'بدون عنوان';
 
@@ -820,28 +1041,30 @@ export const approveWorkReport = asyncHandler(async (req, res) => {
 
   const updated = await workReportRepository.updateById(report._id, {
     status: 'APPROVED',
-    pointsAwarded: distribution.totalPoints,
-    reporterPointsAwarded: distribution.reporterPoints,
-    participantPointsAwarded: distribution.participantPoints,
-    participantsTotalAwarded: distribution.participantsTotalPoints,
+    pointAwards,
+    pointsAwarded: summary.totalPoints,
+    reporterPointsAwarded: summary.reporterPoints,
+    participantPointsAwarded: summary.participantPoints,
+    participantsTotalAwarded: summary.participantsTotalPoints,
     approvedBy: req.user.id,
-    approvedAt: new Date(),
+    approvedAt: approvalTimestamp,
     managerComment,
     rejectionReason: '',
   });
 
   await grantPointsToWorkReportUser({
     userId: authorId,
-    points: distribution.reporterPoints,
+    points: pointAwardsByUserId.get(authorId)?.pointsAwarded || 0,
     report: updated,
     approvedBy: req.user.id,
-    distributionRole: 'REPORT_AUTHOR',
+    distributionRole: 'REPORT_OWNER',
   });
 
   for (const participant of participants) {
+    const participantId = String(participant.user?._id || participant.user || '');
     await grantPointsToWorkReportUser({
-      userId: participant.user?._id || participant.user,
-      points: distribution.participantPoints,
+      userId: participantId,
+      points: pointAwardsByUserId.get(participantId)?.pointsAwarded || 0,
       report: updated,
       approvedBy: req.user.id,
       distributionRole: 'PARTICIPANT',
@@ -852,32 +1075,36 @@ export const approveWorkReport = asyncHandler(async (req, res) => {
     authorId,
     'تم اعتماد تقرير العمل',
     participants.length
-      ? `تم اعتماد تقريرك "${reportLabel}" بنجاح. تم منحك ${formatPoints(distribution.reporterPoints)} نقطة ككاتب للتقرير، وإجمالي نقاط التقرير ${formatPoints(distribution.totalPoints)} نقطة موزعة على ${distribution.participantCount} مشارك.`
-      : `تم اعتماد تقريرك "${reportLabel}" بنجاح. تم منحك ${formatPoints(distribution.reporterPoints)} نقطة.`,
+      ? `تم اعتماد تقريرك "${reportLabel}" بنجاح. تم منحك ${formatPoints(summary.reporterPoints)} نقطة، وإجمالي النقاط الممنوحة للتقرير ${formatPoints(summary.totalPoints)} نقطة.`
+      : `تم اعتماد تقريرك "${reportLabel}" بنجاح. تم منحك ${formatPoints(summary.reporterPoints)} نقطة.`,
     {
       workReportId: String(report._id),
-      totalPoints: distribution.totalPoints,
-      reporterPoints: distribution.reporterPoints,
-      participantPoints: distribution.participantPoints,
-      participantCount: distribution.participantCount,
+      totalPoints: summary.totalPoints,
+      reporterPoints: summary.reporterPoints,
+      participantPoints: summary.participantPoints,
+      participantCount: summary.participantCount,
+      pointAwards,
       status: 'APPROVED',
-      approvedAt: updated.approvedAt || new Date(),
+      approvedAt: updated.approvedAt || approvalTimestamp,
     },
   );
 
   for (const participant of participants) {
+    const participantId = String(participant.user?._id || participant.user || '');
+    const participantAward = pointAwardsByUserId.get(participantId)?.pointsAwarded || 0;
     await notificationService.notifySystem(
-      participant.user?._id || participant.user,
+      participantId,
       'تم اعتماد التقرير ومكافأة المشاركة',
-      `تم اعتماد تقرير العمل "${reportLabel}"، وتم منحك ${formatPoints(distribution.participantPoints)} نقطة كمشارك في التنفيذ.`,
+      `تم اعتماد تقرير العمل "${reportLabel}"، وتم منحك ${formatPoints(participantAward)} نقطة كمشارك في التنفيذ.`,
       {
         workReportId: String(report._id),
-        totalPoints: distribution.totalPoints,
-        reporterPoints: distribution.reporterPoints,
-        participantPoints: distribution.participantPoints,
-        participantCount: distribution.participantCount,
+        totalPoints: summary.totalPoints,
+        reporterPoints: summary.reporterPoints,
+        participantPoints: summary.participantPoints,
+        participantCount: summary.participantCount,
+        pointAwards,
         status: 'APPROVED',
-        approvedAt: updated.approvedAt || new Date(),
+        approvedAt: updated.approvedAt || approvalTimestamp,
       },
     );
   }
@@ -890,11 +1117,17 @@ export const approveWorkReport = asyncHandler(async (req, res) => {
     before,
     after: {
       status: 'APPROVED',
-      pointsAwarded: distribution.totalPoints,
-      reporterPointsAwarded: distribution.reporterPoints,
-      participantPointsAwarded: distribution.participantPoints,
-      participantsTotalAwarded: distribution.participantsTotalPoints,
-      participantCount: distribution.participantCount,
+      pointsAwarded: summary.totalPoints,
+      reporterPointsAwarded: summary.reporterPoints,
+      participantPointsAwarded: summary.participantPoints,
+      participantsTotalAwarded: summary.participantsTotalPoints,
+      participantCount: summary.participantCount,
+      pointAwards: pointAwards.map((entry) => ({
+        userId: String(entry.user),
+        fullName: entry.fullName,
+        distributionRole: entry.distributionRole,
+        pointsAwarded: entry.pointsAwarded,
+      })),
     },
     req,
   });
@@ -915,15 +1148,218 @@ export const approveWorkReport = asyncHandler(async (req, res) => {
       entityType: 'WORK_REPORT',
       entityId: String(report._id),
       action: 'WORK_REPORT_APPROVED',
-      totalPoints: distribution.totalPoints,
-      participantCount: distribution.participantCount,
+      totalPoints: summary.totalPoints,
+      participantCount: summary.participantCount,
+      pointAwards: pointAwards.map((entry) => ({
+        userId: String(entry.user),
+        distributionRole: entry.distributionRole,
+        pointsAwarded: entry.pointsAwarded,
+      })),
     },
   });
 
   res.json({
     report: updated,
-    grantedPoints: distribution.totalPoints,
-    distribution,
+    grantedPoints: summary.totalPoints,
+    distribution: {
+      ...summary,
+      pointAwards,
+    },
+  });
+});
+
+export const managerEditApprovedWorkReport = asyncHandler(async (req, res) => {
+  const report = await workReportRepository.findById(req.params.id);
+  if (!report) {
+    throw new AppError('تقرير العمل غير موجود', 404);
+  }
+
+  if (report.status !== 'APPROVED') {
+    throw new AppError('يمكن تعديل التقرير فقط بعد اعتماده', 400);
+  }
+
+  if (String(report.user?._id || report.user) === req.user.id) {
+    throw new AppError('لا يمكنك تعديل تقريرك الشخصي بعد الاعتماد', 403);
+  }
+
+  const canManage = await canApproveOrRejectWorkReport({
+    actor: req.user,
+    report,
+  });
+  if (!canManage) {
+    throw new AppError('التعديل بعد الاعتماد متاح فقط للمدير المباشر أو المدير العام', 403);
+  }
+
+  const ownerId = String(report.user?._id || report.user || '');
+  const { project, payload } = await resolveWorkReportPayload({
+    body: req.body,
+    existingReport: report,
+    authorId: ownerId,
+  });
+
+  const rawPoints = toCleanString(req.body.points);
+  const awardTimestamp = new Date();
+  const { pointAwards, summary } = resolveWorkReportApprovalAwards({
+    report: {
+      user: report.user,
+      employeeName: report.employeeName,
+      employeeCode: report.employeeCode,
+      participants: payload.participants,
+      participantCount: payload.participantCount,
+    },
+    rawPointsByUser: req.body.pointsByUser || req.body.pointsByAwardee || req.body.pointsByParticipant,
+    totalPoints: rawPoints
+      ? toNumberInRange(rawPoints, {
+          min: 1,
+          max: 1000,
+          fallback: NaN,
+          fieldName: 'points',
+        })
+      : Number(report.pointsAwarded || DEFAULT_WORK_REPORT_APPROVAL_POINTS),
+    approvalTimestamp: awardTimestamp,
+    approvedBy: req.user.id,
+  });
+
+  const previousSummary = workReportPointsService.resolveStoredPointAwards(report);
+  const previousByUserId = new Map(
+    previousSummary.pointAwards.map((entry) => [String(entry.userId), entry]),
+  );
+  const nextByUserId = new Map(
+    pointAwards.map((entry) => [String(entry.user), entry]),
+  );
+
+  const before = {
+    projectId: String(report.project?._id || report.project || ''),
+    projectName: report.project?.name || report.projectName || '',
+    activityType: report.activityType || '',
+    title: report.title || '',
+    details: report.details || '',
+    accomplishments: report.accomplishments || '',
+    challenges: report.challenges || '',
+    nextSteps: report.nextSteps || '',
+    progressPercent: Number(report.progressPercent || 0),
+    hoursSpent: Number(report.hoursSpent || 0),
+    workDate: report.workDate || null,
+    participantCount: Number(report.participantCount || report.participants?.length || 0),
+    participantIds: (report.participants || []).map((item) => String(item.user?._id || item.user || '')),
+    managerComment: report.managerComment || '',
+    pointsAwarded: Number(report.pointsAwarded || 0),
+    pointAwards: previousSummary.pointAwards,
+  };
+
+  if (report.pdfFile?.publicUrl) {
+    const oldPdfPath = resolveStoredWorkReportPdfAbsolutePath(report.pdfFile.publicUrl);
+    if (oldPdfPath) {
+      try { fs.unlinkSync(oldPdfPath); } catch { /* ignore missing */ }
+    }
+  }
+
+  const updated = await workReportRepository.updateById(report._id, {
+    ...payload,
+    pointAwards,
+    pointsAwarded: summary.totalPoints,
+    reporterPointsAwarded: summary.reporterPoints,
+    participantPointsAwarded: summary.participantPoints,
+    participantsTotalAwarded: summary.participantsTotalPoints,
+    managerComment: toCleanString(
+      Object.prototype.hasOwnProperty.call(req.body, 'managerComment')
+        ? req.body.managerComment
+        : report.managerComment,
+    ),
+    rejectionReason: '',
+    $unset: { pdfFile: 1 },
+  });
+
+  const affectedUserIds = new Set([
+    ...previousByUserId.keys(),
+    ...nextByUserId.keys(),
+  ]);
+  const pointChanges = [];
+
+  for (const userId of affectedUserIds) {
+    const previousPoints = Number(previousByUserId.get(userId)?.pointsAwarded || 0);
+    const nextPoints = Number(nextByUserId.get(userId)?.pointsAwarded || 0);
+    const delta = nextPoints - previousPoints;
+    if (!delta) {
+      continue;
+    }
+
+    const distributionRole =
+      nextByUserId.get(userId)?.distributionRole
+      || previousByUserId.get(userId)?.distributionRole
+      || 'PARTICIPANT';
+
+    await adjustApprovedWorkReportUserPoints({
+      userId,
+      pointsDelta: delta,
+      report: updated,
+      approvedBy: req.user.id,
+      distributionRole,
+    });
+
+    pointChanges.push({
+      userId,
+      previousPoints,
+      nextPoints,
+      delta,
+      distributionRole,
+    });
+
+    await notificationService.notifySystem(
+      userId,
+      'تحديث تقرير العمل المعتمد',
+      `تم تحديث تقرير العمل "${updated.title || updated.projectName || 'بدون عنوان'}" من قبل المدير، وأصبحت حصتك ${formatPoints(nextPoints)} نقطة.`,
+      {
+        workReportId: String(updated._id),
+        status: updated.status,
+        totalPoints: summary.totalPoints,
+        pointsDelta: delta,
+        pointsAwarded: nextPoints,
+        distributionRole,
+      },
+    );
+  }
+
+  await auditService.log({
+    actorId: req.user.id,
+    action: 'WORK_REPORT_MANAGER_EDITED',
+    entityType: 'WORK_REPORT',
+    entityId: report._id,
+    before,
+    after: {
+      projectId: project ? String(project._id) : '',
+      projectName: updated.project?.name || updated.projectName || '',
+      activityType: updated.activityType || '',
+      title: updated.title || '',
+      details: updated.details || '',
+      accomplishments: updated.accomplishments || '',
+      challenges: updated.challenges || '',
+      nextSteps: updated.nextSteps || '',
+      progressPercent: Number(updated.progressPercent || 0),
+      hoursSpent: Number(updated.hoursSpent || 0),
+      workDate: updated.workDate || null,
+      participantCount: Number(updated.participantCount || updated.participants?.length || 0),
+      participantIds: (updated.participants || []).map((item) => String(item.user?._id || item.user || '')),
+      managerComment: updated.managerComment || '',
+      pointsAwarded: Number(updated.pointsAwarded || 0),
+      pointAwards: pointAwards.map((entry) => ({
+        userId: String(entry.user),
+        fullName: entry.fullName,
+        distributionRole: entry.distributionRole,
+        pointsAwarded: entry.pointsAwarded,
+      })),
+      pointChanges,
+    },
+    req,
+  });
+
+  res.json({
+    report: updated,
+    distribution: {
+      ...summary,
+      pointAwards,
+    },
+    pointChanges,
   });
 });
 

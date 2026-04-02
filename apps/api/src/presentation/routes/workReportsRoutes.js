@@ -9,6 +9,7 @@ import {
   saveWorkReportPdf,
   workReportWhatsappLink,
   approveWorkReport,
+  managerEditApprovedWorkReport,
   rejectWorkReport,
   deleteWorkReport,
   addWorkReportImages,
@@ -56,6 +57,7 @@ workReportsRoutes.post(
   createWorkReport,
 );
 workReportsRoutes.patch('/:id/approve', approveWorkReport);
+workReportsRoutes.patch('/:id/manager-edit', managerEditApprovedWorkReport);
 workReportsRoutes.patch('/:id/reject', rejectWorkReport);
 workReportsRoutes.patch(
   '/:id/images',
