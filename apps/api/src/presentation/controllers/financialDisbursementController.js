@@ -208,6 +208,19 @@ const canEditRequest = (req, request) =>
   && !request.financiallyApprovedAt
   && !request.generalManagerApprovedAt;
 
+const buildReturnedForReviewPayload = () => ({
+  status: FinancialDisbursementStatus.RETURNED_FOR_REVIEW,
+  currentReviewerRole: 'EMPLOYEE',
+  projectManagerApprovedAt: null,
+  financiallyApprovedAt: null,
+  generalManagerApprovedAt: null,
+  approvedAmount: null,
+  approvedAmountSetBy: null,
+  approvedAmountSetAt: null,
+  requiresGeneralManagerApproval: false,
+  generalManagerRequestReason: '',
+});
+
 const serializeRequest = (request, currentUser = null) => {
   const currentUserId = String(currentUser?.id || currentUser?._id || '');
   const status = request.status || '';
@@ -940,15 +953,11 @@ export const reviewFinancialDisbursementAsProjectManager = asyncHandler(async (r
   const nextStatus =
     action === FinancialWorkflowAction.APPROVE
       ? FinancialDisbursementStatus.PENDING_FINANCIAL_MANAGER_APPROVAL
-      : action === FinancialWorkflowAction.REJECT
-        ? FinancialDisbursementStatus.REJECTED_BY_PROJECT_MANAGER
-        : FinancialDisbursementStatus.RETURNED_FOR_REVIEW;
+      : FinancialDisbursementStatus.RETURNED_FOR_REVIEW;
   const currentReviewerRole =
     action === FinancialWorkflowAction.APPROVE
       ? Roles.FINANCIAL_MANAGER
-      : action === FinancialWorkflowAction.RETURN_FOR_REVIEW
-        ? 'EMPLOYEE'
-        : null;
+      : 'EMPLOYEE';
 
   const amountNotes = approvedAmount != null && approvedAmount !== request.amount
     ? `تم تعديل المبلغ من ${request.amount} إلى ${approvedAmount}`
@@ -956,9 +965,13 @@ export const reviewFinancialDisbursementAsProjectManager = asyncHandler(async (r
   const combinedNotes = [notes, amountNotes].filter(Boolean).join(' | ');
 
   const updatedRequest = await financialDisbursementRepository.updateById(request._id, {
-    status: nextStatus,
-    currentReviewerRole,
-    projectManagerApprovedAt: action === FinancialWorkflowAction.APPROVE ? new Date() : request.projectManagerApprovedAt,
+    ...(action === FinancialWorkflowAction.APPROVE
+      ? {
+          status: nextStatus,
+          currentReviewerRole,
+          projectManagerApprovedAt: new Date(),
+        }
+      : buildReturnedForReviewPayload()),
     ...(approvedAmount != null ? {
       approvedAmount,
       approvedAmountSetBy: req.user.id,
@@ -994,10 +1007,10 @@ export const reviewFinancialDisbursementAsProjectManager = asyncHandler(async (r
       previousStatus,
       action,
       recipients,
-      titleAr: action === FinancialWorkflowAction.REJECT ? 'رفض طلب صرف مالي' : 'إعادة طلب صرف للمراجعة',
+      titleAr: action === FinancialWorkflowAction.REJECT ? 'رفض طلب صرف وإعادته للموظف' : 'إعادة طلب صرف للمراجعة',
       messageAr:
         action === FinancialWorkflowAction.REJECT
-          ? `تم رفض طلب الصرف ${updatedRequest.requestNo} من مدير المشاريع.`
+          ? `تم رفض طلب الصرف ${updatedRequest.requestNo} من مدير المشاريع وإعادته إلى الموظف للتعديل وإعادة الإرسال.`
           : `تمت إعادة طلب الصرف ${updatedRequest.requestNo} للمراجعة.`,
     });
   }
@@ -1073,17 +1086,13 @@ export const reviewFinancialDisbursementAsFinancialManager = asyncHandler(async 
       ? FinancialDisbursementStatus.READY_FOR_DISBURSEMENT
       : action === FinancialWorkflowAction.REQUEST_GENERAL_MANAGER_APPROVAL
         ? FinancialDisbursementStatus.PENDING_GENERAL_MANAGER_APPROVAL
-        : action === FinancialWorkflowAction.REJECT
-          ? FinancialDisbursementStatus.REJECTED_BY_FINANCIAL_MANAGER
-          : FinancialDisbursementStatus.RETURNED_FOR_REVIEW;
+        : FinancialDisbursementStatus.RETURNED_FOR_REVIEW;
   const currentReviewerRole =
     action === FinancialWorkflowAction.APPROVE
       ? Roles.FINANCIAL_MANAGER
       : action === FinancialWorkflowAction.REQUEST_GENERAL_MANAGER_APPROVAL
         ? Roles.GENERAL_MANAGER
-        : action === FinancialWorkflowAction.RETURN_FOR_REVIEW
-          ? 'EMPLOYEE'
-          : null;
+        : 'EMPLOYEE';
 
   if (action === FinancialWorkflowAction.REQUEST_GENERAL_MANAGER_APPROVAL && !request.generalManagerReviewer) {
     throw new AppError('No general manager available for escalation', 409);
@@ -1095,13 +1104,14 @@ export const reviewFinancialDisbursementAsFinancialManager = asyncHandler(async 
   const fmCombinedNotes = [notes, fmAmountNotes].filter(Boolean).join(' | ');
 
   let updatedRequest = await financialDisbursementRepository.updateById(request._id, {
-    status: nextStatus,
-    currentReviewerRole,
-    financiallyApprovedAt:
-      action === FinancialWorkflowAction.APPROVE
+    ...(action === FinancialWorkflowAction.APPROVE
       || action === FinancialWorkflowAction.REQUEST_GENERAL_MANAGER_APPROVAL
-        ? new Date()
-        : request.financiallyApprovedAt,
+      ? {
+          status: nextStatus,
+          currentReviewerRole,
+          financiallyApprovedAt: new Date(),
+        }
+      : buildReturnedForReviewPayload()),
     ...(approvedAmount != null ? {
       approvedAmount,
       approvedAmountSetBy: req.user.id,
@@ -1165,10 +1175,10 @@ export const reviewFinancialDisbursementAsFinancialManager = asyncHandler(async 
       previousStatus,
       action,
       recipients,
-      titleAr: action === FinancialWorkflowAction.REJECT ? 'رفض طلب صرف مالي' : 'إعادة طلب صرف للمراجعة',
+      titleAr: action === FinancialWorkflowAction.REJECT ? 'رفض طلب صرف وإعادته للموظف' : 'إعادة طلب صرف للمراجعة',
       messageAr:
         action === FinancialWorkflowAction.REJECT
-          ? `تم رفض طلب الصرف ${updatedRequest.requestNo} من المدير المالي.`
+          ? `تم رفض طلب الصرف ${updatedRequest.requestNo} من المدير المالي وإعادته إلى الموظف للتعديل وإعادة الإرسال.`
           : `تمت إعادة طلب الصرف ${updatedRequest.requestNo} إلى الموظف للمراجعة.`,
     });
   }
@@ -1229,15 +1239,11 @@ export const reviewFinancialDisbursementAsGeneralManager = asyncHandler(async (r
       ? (request.employeeRole === Roles.FINANCIAL_MANAGER
         ? FinancialDisbursementStatus.READY_FOR_DISBURSEMENT
         : FinancialDisbursementStatus.PENDING_FINANCIAL_MANAGER_APPROVAL)
-      : action === FinancialWorkflowAction.REJECT
-        ? FinancialDisbursementStatus.REJECTED_BY_GENERAL_MANAGER
-        : FinancialDisbursementStatus.RETURNED_FOR_REVIEW;
+      : FinancialDisbursementStatus.RETURNED_FOR_REVIEW;
   const currentReviewerRole =
     action === FinancialWorkflowAction.APPROVE
       ? Roles.FINANCIAL_MANAGER
-      : action === FinancialWorkflowAction.RETURN_FOR_REVIEW
-        ? 'EMPLOYEE'
-        : null;
+      : 'EMPLOYEE';
 
   const gmAmountNotes = approvedAmount != null && approvedAmount !== request.amount
     ? `تم تعديل المبلغ من ${request.amount} إلى ${approvedAmount}`
@@ -1245,12 +1251,13 @@ export const reviewFinancialDisbursementAsGeneralManager = asyncHandler(async (r
   const gmCombinedNotes = [notes, gmAmountNotes].filter(Boolean).join(' | ');
 
   let updatedRequest = await financialDisbursementRepository.updateById(request._id, {
-    status: nextStatus,
-    currentReviewerRole,
-    generalManagerApprovedAt:
-      action === FinancialWorkflowAction.APPROVE
-        ? new Date()
-        : request.generalManagerApprovedAt,
+    ...(action === FinancialWorkflowAction.APPROVE
+      ? {
+          status: nextStatus,
+          currentReviewerRole,
+          generalManagerApprovedAt: new Date(),
+        }
+      : buildReturnedForReviewPayload()),
     ...(approvedAmount != null ? {
       approvedAmount,
       approvedAmountSetBy: req.user.id,
@@ -1289,7 +1296,7 @@ export const reviewFinancialDisbursementAsGeneralManager = asyncHandler(async (r
       action === FinancialWorkflowAction.APPROVE
         ? 'اعتماد المدير العام لطلب الصرف'
         : action === FinancialWorkflowAction.REJECT
-          ? 'رفض المدير العام لطلب الصرف'
+          ? 'رفض المدير العام وإعادة الطلب للموظف'
           : 'إعادة طلب الصرف للمراجعة',
     messageAr:
       action === FinancialWorkflowAction.APPROVE
@@ -1297,7 +1304,7 @@ export const reviewFinancialDisbursementAsGeneralManager = asyncHandler(async (r
           ? `تم اعتماد طلب الصرف ${updatedRequest.requestNo} من المدير العام وهو الآن جاهز للتسليم من المدير المالي.`
           : `تم اعتماد طلب الصرف ${updatedRequest.requestNo} من المدير العام وتحويله إلى المدير المالي لاستكمال الاعتماد ثم التسليم.`)
         : action === FinancialWorkflowAction.REJECT
-          ? `تم رفض طلب الصرف ${updatedRequest.requestNo} من المدير العام.`
+          ? `تم رفض طلب الصرف ${updatedRequest.requestNo} من المدير العام وإعادته إلى الموظف للتعديل وإعادة الإرسال.`
           : `تمت إعادة طلب الصرف ${updatedRequest.requestNo} للمراجعة من المدير العام.`,
   });
 
