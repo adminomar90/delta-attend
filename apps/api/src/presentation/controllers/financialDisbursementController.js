@@ -1,6 +1,8 @@
+import path from 'path';
 import { sequenceService } from '../../application/services/sequenceService.js';
 import { auditService } from '../../application/services/auditService.js';
 import { notificationService } from '../../application/services/notificationService.js';
+import { env } from '../../config/env.js';
 import {
   buildApprovalPointEvents,
   buildClosurePointEvents,
@@ -26,6 +28,8 @@ import { sendWhatsappOps, resolveRecipientPhone, appDetailsUrl } from './materia
 
 const financialDisbursementRepository = new FinancialDisbursementRepository();
 const userRepository = new UserRepository();
+const uploadRootDir = path.resolve(process.cwd(), env.uploadsDir);
+const resolvePublicBaseUrl = (req) => `${req.protocol}://${req.get('host')}`;
 
 const canCreateFinancialRequest = (user = {}) =>
   hasPermission(user, Permission.CREATE_FINANCIAL_DISBURSEMENTS);
@@ -211,6 +215,8 @@ const serializeRequest = (request, currentUser = null) => {
   const projectManagerId = String(request.projectManagerReviewer?._id || request.projectManagerReviewer || '');
   const financialManagerId = String(request.financialManagerReviewer?._id || request.financialManagerReviewer || '');
   const generalManagerId = String(request.generalManagerReviewer?._id || request.generalManagerReviewer || '');
+  const canArchiveStatus = [FinancialDisbursementStatus.CLOSED, FinancialDisbursementStatus.RECEIVED].includes(status)
+    || status.startsWith('REJECTED');
 
   return {
     id: String(request._id || request.id || ''),
@@ -244,6 +250,14 @@ const serializeRequest = (request, currentUser = null) => {
     disbursedAt: request.disbursedAt || null,
     receivedAt: request.receivedAt || null,
     closedAt: request.closedAt || null,
+    archived: !!request.archived,
+    archivedAt: request.archivedAt || null,
+    archivedBy: request.archivedBy ? {
+      id: String(request.archivedBy._id || request.archivedBy),
+      fullName: request.archivedBy.fullName || '',
+      role: request.archivedBy.role || '',
+      employeeCode: request.archivedBy.employeeCode || '',
+    } : null,
     createdAt: request.createdAt || null,
     updatedAt: request.updatedAt || null,
     employee: request.employee ? {
@@ -347,6 +361,8 @@ const serializeRequest = (request, currentUser = null) => {
       && !request.projectManagerApprovedAt
       && !request.financiallyApprovedAt
       && !request.generalManagerApprovedAt,
+    canArchive: canArchiveStatus && !request.archived,
+    canUnarchive: !!request.archived,
   };
 };
 
@@ -527,7 +543,10 @@ export const listFinancialDisbursements = asyncHandler(async (req, res) => {
 });
 
 export const financialDisbursementSummary = asyncHandler(async (req, res) => {
-  const requests = await financialDisbursementRepository.list(buildAccessibleFilter(req));
+  const requests = await financialDisbursementRepository.list({
+    ...buildAccessibleFilter(req),
+    archived: { $ne: true },
+  });
   const serialized = requests.map((request) => serializeRequest(request, req.user));
 
   res.json({
@@ -1506,13 +1525,32 @@ export const exportFinancialDisbursementPdf = asyncHandler(async (req, res) => {
 
   ensureReadableRequest(req, request);
 
-  const serialized = serializeRequest(request, req.user);
+  const transactionRequestsDocs = request.transactionNo
+    ? await financialDisbursementRepository.list({ transactionNo: request.transactionNo }, { limit: 100 })
+    : [request];
+
+  const serializedTransactionRequests = transactionRequestsDocs
+    .filter((item) => canReadRequest(req, item))
+    .sort((a, b) => {
+      const dateDiff = new Date(a.createdAt || 0).getTime() - new Date(b.createdAt || 0).getTime();
+      if (dateDiff !== 0) {
+        return dateDiff;
+      }
+      return String(a.requestNo || '').localeCompare(String(b.requestNo || ''), 'en');
+    })
+    .map((item) => serializeRequest(item, req.user));
+
+  const serialized = serializedTransactionRequests.find((item) => item.id === String(request._id || req.params.id))
+    || serializeRequest(request, req.user);
   const buffer = await buildFinancialDisbursementPdfBuffer({
     request: serialized,
+    transactionRequests: serializedTransactionRequests,
     generatedAt: new Date(),
+    publicBaseUrl: resolvePublicBaseUrl(req),
+    uploadRootDir,
   });
 
-  const filename = `financial-disbursement-${serialized.requestNo || req.params.id}.pdf`;
+  const filename = `financial-disbursement-${serialized.transactionNo || serialized.requestNo || req.params.id}.pdf`;
   const disposition = req.query.download === '1' ? 'attachment' : 'inline';
 
   res.setHeader('Content-Type', 'application/pdf');

@@ -7,7 +7,6 @@ import { Permission, hasPermission } from '../../../lib/permissions';
 
 export default function LeaderboardPage() {
   const currentUser = authStorage.getUser();
-  const [period, setPeriod] = useState('monthly');
   const [data, setData] = useState([]);
   const [error, setError] = useState('');
   const canViewLeaderboard = hasPermission(currentUser, Permission.VIEW_LEADERBOARD);
@@ -17,7 +16,7 @@ export default function LeaderboardPage() {
       ? 'مستوى الفريق/الإدارة'
       : 'مستواك الشخصي';
 
-  const load = async (p) => {
+  const load = async () => {
     if (!canViewLeaderboard) {
       setData([]);
       return;
@@ -25,7 +24,7 @@ export default function LeaderboardPage() {
 
     try {
       setError('');
-      const response = await api.get(`/gamification/leaderboard?period=${p}&limit=20`);
+      const response = await api.get('/gamification/leaderboard?period=monthly');
       setData(response.leaderboard || []);
     } catch (err) {
       setError(err.message || 'تعذر تحميل لوحة الصدارة');
@@ -33,8 +32,8 @@ export default function LeaderboardPage() {
   };
 
   useEffect(() => {
-    load(period);
-  }, [period, canViewLeaderboard]);
+    load();
+  }, [canViewLeaderboard]);
 
   if (!canViewLeaderboard) {
     return (
@@ -48,14 +47,9 @@ export default function LeaderboardPage() {
     <section className="card section">
       <div className="section-header">
         <div>
-          <h2 style={{ marginBottom: 6 }}>لوحة الصدارة</h2>
+          <h2 style={{ marginBottom: 6 }}>لوحة الصدارة الشهرية</h2>
           <p style={{ margin: 0, color: 'var(--text-soft)' }}>النطاق الحالي: {scopeLabel}</p>
         </div>
-        <select className="select select-compact" value={period} onChange={(e) => setPeriod(e.target.value)}>
-          <option value="daily">يومي</option>
-          <option value="weekly">أسبوعي</option>
-          <option value="monthly">شهري</option>
-        </select>
       </div>
 
       {error ? <p style={{ color: 'var(--danger)' }}>{error}</p> : null}
@@ -68,6 +62,8 @@ export default function LeaderboardPage() {
             <th>الدور</th>
             <th>المستوى</th>
             <th>النقاط</th>
+            <th>نقاط السنة</th>
+            <th>النقاط الكلية</th>
             <th>الشارات</th>
           </tr>
         </thead>
@@ -81,6 +77,8 @@ export default function LeaderboardPage() {
               <td>{entry.role}</td>
               <td>{entry.level}</td>
               <td>{entry.points}</td>
+              <td>{entry.yearlyPoints ?? 0}</td>
+              <td>{entry.pointsTotal ?? 0}</td>
               <td>
                 <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
                   {(entry.badges || []).length ? entry.badges.map((badge) => <span key={badge} className="badge">{badge}</span>) : '-'}

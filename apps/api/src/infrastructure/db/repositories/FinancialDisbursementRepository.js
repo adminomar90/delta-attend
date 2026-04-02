@@ -10,6 +10,7 @@ const populatePipeline = [
   { path: 'pointsEvents.ledger', select: 'points category reason sourceAction createdAt' },
   { path: 'pointsEvents.appliedBy', select: 'fullName role employeeCode' },
   { path: 'attachments.uploadedBy', select: 'fullName role employeeCode' },
+  { path: 'archivedBy', select: 'fullName role employeeCode' },
 ];
 
 export class FinancialDisbursementRepository {

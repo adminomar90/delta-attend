@@ -74,12 +74,12 @@ export const api = {
    * @param {{ onProgress?: (e: {loaded:number, total:number, percent:number}) => void }} options
    * @returns {Promise<any>}
    */
-  postWithProgress(path, formData, { onProgress } = {}) {
+  postWithProgress(path, formData, { onProgress, timeoutMs = 180000 } = {}) {
     return new Promise((resolve, reject) => {
       const xhr = new XMLHttpRequest();
       xhr.open('POST', `${API_URL}${path}`);
       xhr.withCredentials = true;
-      xhr.timeout = 180000; // 3 minutes
+      xhr.timeout = timeoutMs;
 
       if (onProgress) {
         xhr.upload.addEventListener('progress', (e) => {
@@ -122,12 +122,12 @@ export const api = {
   /**
    * PATCH with upload progress (for adding images in batches).
    */
-  patchWithProgress(path, formData, { onProgress } = {}) {
+  patchWithProgress(path, formData, { onProgress, timeoutMs = 300000 } = {}) {
     return new Promise((resolve, reject) => {
       const xhr = new XMLHttpRequest();
       xhr.open('PATCH', `${API_URL}${path}`);
       xhr.withCredentials = true;
-      xhr.timeout = 300000; // 5 minutes per batch
+      xhr.timeout = timeoutMs;
 
       if (onProgress) {
         xhr.upload.addEventListener('progress', (e) => {
@@ -202,5 +202,4 @@ export const api = {
     return response.blob();
   },
 };
-
 

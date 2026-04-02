@@ -43,6 +43,14 @@ export const uploadDocumentMiddleware = multer({
   },
 });
 
+export const uploadFinancialDisbursementAttachmentsMiddleware = multer({
+  storage: diskStorage,
+  limits: {
+    fileSize: 50 * 1024 * 1024,
+    files: 20,
+  },
+});
+
 const workReportImageFilter = (_req, file, cb) => {
   const allowed = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'image/bmp', 'image/heic', 'image/heif']);
   if (!file.mimetype.startsWith('image/') && !allowed.has(String(file.mimetype || '').toLowerCase())) {

@@ -498,7 +498,7 @@ export default function DashboardPage() {
           <div className="progress" style={{ marginBottom: 8 }}>
             <span style={{ width: `${Math.min(100, (me.user.pointsTotal / ((me.nextLevel?.remainingPoints || me.user.pointsTotal) + me.user.pointsTotal)) * 100)}%` }} />
           </div>
-          <p style={{ margin: 0 }}>النقاط الحالية: <strong>{me.user.pointsTotal}</strong></p>
+          <p style={{ margin: 0 }}>نقاط الشهر: <strong>{me.user.monthlyPoints ?? 0}</strong> | النقاط الكلية: <strong>{me.user.pointsTotal}</strong></p>
           <p style={{ margin: '8px 0 0' }}>
             الرتبة الشهرية: <strong>{me.rank || '-'}</strong>
           </p>

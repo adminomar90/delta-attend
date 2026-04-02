@@ -51,7 +51,6 @@ const assertGamificationAdmin = (req) => {
 
 export const leaderboard = asyncHandler(async (req, res) => {
   const period = req.query.period || 'monthly';
-  const limit = Number(req.query.limit || 10);
   const managedUserIds = await resolveManagedUserIds({
     userRepository,
     actorId: req.user.id,
@@ -62,15 +61,45 @@ export const leaderboard = asyncHandler(async (req, res) => {
   const data = await pointsLedgerRepository.leaderboard({
     startDate,
     endDate,
-    limit,
+    limit: 99999,
     userIds: managedUserIds,
   });
+
+  // Build a map of userId -> leaderboard entry for the period
+  const periodMap = new Map(data.map((item) => [String(item.userId), item]));
+
+  // Fetch ALL managed users so employees with 0 points also appear
+  const allUsers = await userRepository.listActive({ userIds: managedUserIds, includeManager: false });
+
+  const allUserIds = allUsers.map((u) => u._id);
+  const currentYear = dayjs().year();
+  const yearlyData = await pointsLedgerRepository.yearlyPointsByUserIds(allUserIds, currentYear);
+  const yearlyMap = new Map(yearlyData.map((y) => [String(y._id), y.yearlyPoints]));
+
+  // Merge: employees with period points + employees with 0 points
+  const merged = allUsers.map((u) => {
+    const uid = String(u._id);
+    const entry = periodMap.get(uid);
+    return {
+      userId: u._id,
+      fullName: u.fullName,
+      role: u.role,
+      level: u.level,
+      badges: u.badges || [],
+      pointsTotal: u.pointsTotal || 0,
+      points: entry ? entry.points : 0,
+      yearlyPoints: yearlyMap.get(uid) || 0,
+    };
+  });
+
+  // Sort by period points descending
+  merged.sort((a, b) => b.points - a.points);
 
   res.json({
     period,
     startDate,
     endDate,
-    leaderboard: data.map((item, index) => ({
+    leaderboard: merged.map((item, index) => ({
       rank: index + 1,
       ...item,
     })),
@@ -90,12 +119,14 @@ export const myGamificationState = asyncHandler(async (req, res) => {
   });
 
   const rank = leaderboardData.findIndex((item) => String(item.userId) === req.user.id);
+  const monthlyPoints = rank >= 0 ? leaderboardData[rank].points : 0;
 
   res.json({
     user: {
       id: String(user._id),
       fullName: user.fullName,
       pointsTotal: user.pointsTotal,
+      monthlyPoints,
       level: user.level,
       badges: user.badges,
     },

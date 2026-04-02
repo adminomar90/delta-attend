@@ -102,7 +102,39 @@ export class PointsLedgerRepository {
           role: '$user.role',
           level: '$user.level',
           badges: '$user.badges',
+          pointsTotal: '$user.pointsTotal',
           points: 1,
+        },
+      },
+    ]);
+  }
+
+  async yearlyPointsByUserIds(userIds, year) {
+    const start = new Date(year, 0, 1);
+    const end = new Date(year + 1, 0, 1);
+
+    const objectIds = userIds
+      .map((id) => {
+        if (!id) return null;
+        if (id instanceof mongoose.Types.ObjectId) return id;
+        return mongoose.Types.ObjectId.isValid(id) ? new mongoose.Types.ObjectId(String(id)) : null;
+      })
+      .filter(Boolean);
+
+    if (!objectIds.length) return [];
+
+    return PointsLedgerModel.aggregate([
+      {
+        $match: {
+          user: { $in: objectIds },
+          createdAt: { $gte: start, $lt: end },
+          points: { $gt: 0 },
+        },
+      },
+      {
+        $group: {
+          _id: '$user',
+          yearlyPoints: { $sum: '$points' },
         },
       },
     ]);

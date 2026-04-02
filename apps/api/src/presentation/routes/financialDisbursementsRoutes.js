@@ -7,7 +7,7 @@ import {
   canDisburseFinancialFunds,
 } from '../middlewares/authorizationMiddleware.js';
 import { Permission } from '../../shared/constants.js';
-import { uploadDocumentMiddleware } from '../middlewares/uploadMiddleware.js';
+import { uploadFinancialDisbursementAttachmentsMiddleware } from '../middlewares/uploadMiddleware.js';
 import {
   archiveFinancialDisbursement,
   confirmFinancialDisbursementReceipt,
@@ -42,12 +42,22 @@ financialDisbursementsRoutes.use(requireAuth, canAccessFinancialDisbursementsMod
 financialDisbursementsRoutes.get('/summary', financialDisbursementSummary);
 financialDisbursementsRoutes.get('/reports', financialDisbursementReports);
 financialDisbursementsRoutes.get('/', listFinancialDisbursements);
-financialDisbursementsRoutes.post('/', canCreateFinancialDisbursements, uploadDocumentMiddleware.array('attachments', 10), createFinancialDisbursement);
+financialDisbursementsRoutes.post(
+  '/',
+  canCreateFinancialDisbursements,
+  uploadFinancialDisbursementAttachmentsMiddleware.array('attachments', 20),
+  createFinancialDisbursement,
+);
 financialDisbursementsRoutes.get('/:id/pdf', exportFinancialDisbursementPdf);
 financialDisbursementsRoutes.post('/:id/whatsapp-link', financialDisbursementWhatsappLink);
 financialDisbursementsRoutes.get('/:id', getFinancialDisbursement);
 financialDisbursementsRoutes.delete('/:id', canCreateFinancialDisbursements, deleteFinancialDisbursement);
-financialDisbursementsRoutes.patch('/:id', canCreateFinancialDisbursements, uploadDocumentMiddleware.array('attachments', 10), updateFinancialDisbursement);
+financialDisbursementsRoutes.patch(
+  '/:id',
+  canCreateFinancialDisbursements,
+  uploadFinancialDisbursementAttachmentsMiddleware.array('attachments', 20),
+  updateFinancialDisbursement,
+);
 financialDisbursementsRoutes.patch('/:id/submit', canCreateFinancialDisbursements, submitFinancialDisbursement);
 financialDisbursementsRoutes.patch('/:id/project-manager-review', canReviewFinancialDisbursements, reviewFinancialDisbursementAsProjectManager);
 financialDisbursementsRoutes.patch('/:id/financial-manager-review', canReviewFinancialDisbursements, reviewFinancialDisbursementAsFinancialManager);
