@@ -1830,8 +1830,7 @@ export default function WorkReportsPage() {
       {selectedReport ? (
         <div className="modal-backdrop" onClick={closeSelectedReport}>
         <section
-          className="card section modal-panel daily-plan-modal-panel"
-          style={{ width: 'min(100%, 1100px)', maxHeight: '90dvh' }}
+          className="card section modal-panel work-report-detail-modal"
           onClick={(event) => event.stopPropagation()}
         >
           {/* Header */}

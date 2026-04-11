@@ -2030,6 +2030,10 @@ textarea:disabled {
   padding: 8px 12px;
 }
 
+.work-report-actions-mobile .btn {
+  font-size: 13px;
+}
+
 .work-report-mobile-card {
   display: flex;
   flex-direction: column;
@@ -2089,7 +2093,7 @@ textarea:disabled {
   align-items: center;
   gap: 10px;
   direction: ltr;
-  min-width: 168px;
+  min-width: min(168px, 100%);
 }
 
 .work-report-progress-main {
@@ -2142,6 +2146,11 @@ textarea:disabled {
   color: var(--text);
   font-weight: 800;
   font-variant-numeric: tabular-nums;
+}
+
+.work-report-detail-modal {
+  width: min(100%, 1100px);
+  max-height: 90dvh;
 }
 
 .work-report-actions,
@@ -2207,9 +2216,9 @@ textarea:disabled {
   }
 
   .work-reports-mobile-list {
-    display: flex;
-    flex-direction: column;
-    gap: 12px;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(min(340px, 100%), 1fr));
+    gap: 14px;
   }
 }
 
@@ -2414,6 +2423,12 @@ textarea:disabled {
     padding: 22px;
   }
 
+  .work-report-detail-modal {
+    width: min(96%, 960px);
+    max-height: min(90dvh, 800px);
+    padding: 20px;
+  }
+
   .maintenance-modal-panel {
     width: min(92%, 860px);
   }
@@ -2423,11 +2438,16 @@ textarea:disabled {
   }
 
   .work-report-mobile-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: repeat(4, minmax(0, 1fr));
   }
 
   .work-report-mobile-card {
     padding: 18px;
+    gap: 14px;
+  }
+
+  .work-report-mobile-head {
+    flex-direction: row;
   }
 
   .work-report-actions-mobile {
@@ -2446,6 +2466,10 @@ textarea:disabled {
 
   .work-report-detail-actions .btn {
     flex: 0 1 auto;
+  }
+
+  .work-report-mobile-subtitle {
+    font-size: 13px;
   }
 
   .maintenance-card-grid {
@@ -2913,17 +2937,42 @@ textarea:disabled {
     display: block;
     overflow-x: auto;
     -webkit-overflow-scrolling: touch;
+    white-space: normal;
   }
 
   .table th,
   .table td {
+    padding: 10px 8px;
+    font-size: 13px;
+  }
+
+  .table th {
     white-space: nowrap;
-    padding: 12px;
+  }
+
+  .work-report-actions {
+    flex-direction: column;
+    gap: 4px;
   }
 
   .work-report-actions .btn {
     font-size: 12px;
-    padding: 8px 10px;
+    padding: 6px 10px;
+    min-height: 36px;
+    width: 100%;
+  }
+
+  .work-report-progress {
+    min-width: 120px;
+  }
+
+  .work-report-progress-gauge {
+    width: 34px;
+    height: 34px;
+  }
+
+  .work-report-progress-gauge span {
+    font-size: 10px;
   }
 }
 
@@ -2945,6 +2994,14 @@ textarea:disabled {
 
   .work-report-mobile-head {
     flex-direction: row;
+  }
+
+  .work-report-mobile-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  .work-report-mobile-subtitle {
+    font-size: 13px;
   }
 
   .work-report-actions-mobile {
