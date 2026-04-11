@@ -150,6 +150,7 @@ textarea:disabled {
 
 .btn-primary:hover {
   transform: translateY(-1px);
+  will-change: transform;
 }
 
 .btn-soft {
@@ -870,18 +871,18 @@ textarea:disabled {
 }
 
 .input-xs {
-  width: 4.5rem;
-  min-width: 4.5rem;
+  width: min(4.5rem, 100%);
+  min-width: 3.5rem;
 }
 
 .input-sm {
-  width: 6rem;
-  min-width: 6rem;
+  width: min(6rem, 100%);
+  min-width: 4.5rem;
 }
 
 .input-md {
-  width: 7rem;
-  min-width: 7rem;
+  width: min(7rem, 100%);
+  min-width: 5rem;
 }
 
 .input-lg {
@@ -917,6 +918,9 @@ textarea:disabled {
   width: 100%;
   border-collapse: collapse;
   font-size: 14px;
+  display: block;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
 }
 
 .verify-table td {
@@ -2021,6 +2025,11 @@ textarea:disabled {
   display: none;
 }
 
+.work-report-actions .btn {
+  font-size: 13px;
+  padding: 8px 12px;
+}
+
 .work-report-mobile-card {
   display: flex;
   flex-direction: column;
@@ -2192,7 +2201,7 @@ textarea:disabled {
   }
 }
 
-@media (max-width: 700px) {
+@media (max-width: 900px) {
   .work-reports-table-shell {
     display: none;
   }
@@ -2202,7 +2211,9 @@ textarea:disabled {
     flex-direction: column;
     gap: 12px;
   }
+}
 
+@media (max-width: 700px) {
   .work-report-mobile-head {
     flex-direction: column;
   }
@@ -2315,7 +2326,7 @@ textarea:disabled {
   }
 }
 
-@media (min-width: 701px) {
+@media (min-width: 901px) {
   .work-reports-mobile-list {
     display: none;
   }
@@ -2372,6 +2383,99 @@ textarea:disabled {
   }
 }
 
+/* ── Tablet portrait (768px–1024px) ── */
+@media (min-width: 768px) and (max-width: 1024px) {
+  .container {
+    padding-left: max(20px, env(safe-area-inset-left));
+    padding-right: max(20px, env(safe-area-inset-right));
+  }
+
+  .section,
+  .kpi {
+    padding: 18px;
+  }
+
+  .header {
+    padding: 16px 20px;
+  }
+
+  .header h1 {
+    font-size: clamp(18px, 3vw, 24px);
+  }
+
+  .sidebar {
+    width: min(70vw, 340px);
+    right: calc(-1 * min(70vw, 340px) - 24px);
+  }
+
+  .modal-panel {
+    width: min(92%, 680px);
+    max-height: min(85dvh, 720px);
+    padding: 22px;
+  }
+
+  .maintenance-modal-panel {
+    width: min(92%, 860px);
+  }
+
+  .daily-plan-modal-panel {
+    width: min(92%, 900px);
+  }
+
+  .work-report-mobile-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .work-report-mobile-card {
+    padding: 18px;
+  }
+
+  .work-report-actions-mobile {
+    flex-direction: row;
+    flex-wrap: wrap;
+  }
+
+  .work-report-actions-mobile .btn {
+    width: auto;
+    flex: 0 1 auto;
+  }
+
+  .work-report-detail-actions {
+    width: auto;
+  }
+
+  .work-report-detail-actions .btn {
+    flex: 0 1 auto;
+  }
+
+  .maintenance-card-grid {
+    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  }
+
+  .daily-plan-card-grid {
+    grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  }
+
+  .daily-plan-filter-grid,
+  .daily-plan-form-grid,
+  .daily-plan-detail-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .daily-plan-calendar-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .daily-plan-calendar-day {
+    min-height: 100px;
+  }
+
+  .auth-layout {
+    grid-template-columns: 1.1fr 1fr;
+    min-height: 60vh;
+  }
+}
+
 @media (min-width: 1040px) {
   .grid-3 {
     grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -2389,6 +2493,19 @@ textarea:disabled {
   .daily-plan-form-grid,
   .daily-plan-detail-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (min-width: 1025px) {
+  .sidebar {
+    width: min(88vw, 320px);
+    right: calc(-1 * min(88vw, 320px) - 24px);
+  }
+
+  .table {
+    display: table;
+    overflow: visible;
+    white-space: normal;
   }
 }
 
@@ -2430,7 +2547,7 @@ textarea:disabled {
   .header {
     align-items: center;
     flex-wrap: nowrap;
-    padding: 16px;
+    padding: 16px 20px;
   }
 
   .header-right {
@@ -2443,12 +2560,6 @@ textarea:disabled {
 
   .split {
     grid-template-columns: 1.4fr 1fr;
-  }
-
-  .table {
-    display: table;
-    overflow: visible;
-    white-space: normal;
   }
 
   .auth-layout {
@@ -2789,5 +2900,146 @@ textarea:disabled {
     width: calc(100vw - 24px);
     top: 10px;
     padding: 10px 14px;
+  }
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   Tablet & Multi-device Enhancements
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/* Ensure all tables scroll gracefully on tablets */
+@media (min-width: 901px) and (max-width: 1100px) {
+  .table {
+    display: block;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .table th,
+  .table td {
+    white-space: nowrap;
+    padding: 12px;
+  }
+
+  .work-report-actions .btn {
+    font-size: 12px;
+    padding: 8px 10px;
+  }
+}
+
+/* Tablet landscape: show table in full mode */
+@media (min-width: 1025px) and (max-width: 1100px) {
+  .table {
+    display: table;
+    overflow: visible;
+    white-space: normal;
+  }
+}
+
+/* Better spacing on medium tablets */
+@media (min-width: 768px) and (max-width: 900px) {
+  .work-report-mobile-card {
+    padding: 18px;
+    gap: 14px;
+  }
+
+  .work-report-mobile-head {
+    flex-direction: row;
+  }
+
+  .work-report-actions-mobile {
+    flex-direction: row;
+    flex-wrap: wrap;
+  }
+
+  .work-report-actions-mobile .btn {
+    width: auto;
+  }
+
+  .maintenance-modal-panel {
+    width: min(92%, 860px);
+    border-radius: 20px;
+  }
+
+  .maintenance-modal-actions {
+    flex-direction: row;
+    flex-wrap: wrap;
+  }
+
+  .maintenance-modal-actions .btn {
+    width: auto;
+  }
+
+  .daily-plan-calendar-day {
+    min-height: 100px;
+  }
+}
+
+/* Landscape phone / small tablet */
+@media (min-width: 568px) and (max-width: 767px) {
+  .work-report-mobile-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .work-report-mobile-head {
+    flex-direction: row;
+  }
+
+  .work-report-actions-mobile {
+    flex-direction: row;
+    flex-wrap: wrap;
+  }
+
+  .work-report-actions-mobile .btn {
+    width: auto;
+  }
+
+  .modal-panel {
+    width: min(96%, 600px);
+  }
+}
+
+/* Hover-only styles for non-touch (prevents sticky hover on mobile/tablet) */
+@media (hover: hover) and (pointer: fine) {
+  .btn-primary:hover {
+    transform: translateY(-1px);
+  }
+
+  .maintenance-plan-card:hover {
+    transform: translateY(-2px);
+  }
+
+  .daily-plan-calendar-day:hover {
+    transform: translateY(-1px);
+  }
+
+  .daily-plan-user-card:hover {
+    transform: translateY(-1px);
+  }
+}
+
+@media (hover: none) {
+  .btn-primary:hover {
+    transform: none;
+  }
+
+  .maintenance-plan-card:hover {
+    transform: none;
+  }
+
+  .daily-plan-calendar-day:hover {
+    transform: none;
+  }
+
+  .daily-plan-user-card:hover {
+    transform: none;
+  }
+
+  .btn-primary:active {
+    opacity: 0.85;
+  }
+
+  .btn-soft:active {
+    opacity: 0.85;
   }
 }

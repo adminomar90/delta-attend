@@ -1424,7 +1424,7 @@ export default function WorkReportsPage() {
 
               {/* ── Image Cards Grid ── */}
               {attachments.length ? (
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 220px))', gap: 14 }}>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(200px, 100%), 1fr))', gap: 14 }}>
                   {attachments.map((item) => {
                     const statusColor =
                       item.status === 'done' ? '#27ae60' :
