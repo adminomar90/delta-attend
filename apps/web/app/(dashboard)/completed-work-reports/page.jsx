@@ -7,6 +7,7 @@ import { Permission, hasPermission } from '../../../lib/permissions';
 import MaintenancePlanModal from '../../../components/maintenance/MaintenancePlanModal';
 import { buildPlanDefaultsFromReport } from '../../../lib/maintenancePlans';
 import { summarizeWorkReportPointAwards } from '../../../lib/workReportPoints';
+import { buildWhatsAppSendUrl } from '../../../lib/whatsapp';
 
 const statusLabelMap = {
   APPROVED: 'معتمد',
@@ -242,6 +243,7 @@ export default function CompletedWorkReportsPage() {
   const createEvaluationLink = async (report, { send = false } = {}) => {
     setError('');
     setInfo('');
+    const whatsappWindow = send && typeof window !== 'undefined' ? window.open('', '_blank', 'noopener,noreferrer') : null;
     try {
       const response = await api.post('/customer-evaluations/links', {
         sourceType: 'WORK_REPORT',
@@ -250,9 +252,12 @@ export default function CompletedWorkReportsPage() {
       setEvaluationLinks((prev) => ({ ...prev, [report._id]: response.url }));
       setInfo('تم إنشاء رابط تقييم الزبون.');
       if (send) {
-        window.open(`https://wa.me/?text=${encodeURIComponent(response.whatsappMessage)}`, '_blank', 'noopener,noreferrer');
+        const waUrl = buildWhatsAppSendUrl({ phone: report.customerPhone || report.phone || '', message: response.whatsappMessage });
+        if (whatsappWindow) whatsappWindow.location.href = waUrl;
+        else window.open(waUrl, '_blank', 'noopener,noreferrer');
       }
     } catch (err) {
+      if (whatsappWindow) whatsappWindow.close();
       setError(err.message || 'تعذر إنشاء رابط التقييم');
     }
   };

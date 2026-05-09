@@ -22,6 +22,7 @@ import {
   buildDailyWorkPlanArchiveWhatsappMessage,
   buildDailyWorkPlanWhatsappMessage,
 } from '../../../lib/dailyWorkPlanWhatsapp';
+import { buildWhatsAppSendUrl } from '../../../lib/whatsapp';
 import DailyWorkPlanCalendar from '../../../components/daily-work-plans/DailyWorkPlanCalendar';
 import DailyWorkPlanModal from '../../../components/daily-work-plans/DailyWorkPlanModal';
 import DailyWorkPlanActionModal from '../../../components/daily-work-plans/DailyWorkPlanActionModal';
@@ -264,6 +265,7 @@ export default function DailyWorkPlansPage() {
   const createEvaluationLink = async (plan, { send = false } = {}) => {
     setError('');
     setInfo('');
+    const whatsappWindow = send && typeof window !== 'undefined' ? window.open('', '_blank', 'noopener,noreferrer') : null;
     try {
       const response = await api.post('/customer-evaluations/links', {
         sourceType: 'DAILY_WORK_PLAN',
@@ -273,13 +275,12 @@ export default function DailyWorkPlansPage() {
       setInfo('تم إنشاء رابط تقييم الزبون.');
       if (send) {
         const phone = plan.customerSnapshot?.whatsapp || plan.customerSnapshot?.phone || plan.customer?.whatsapp || plan.customer?.phone || '';
-        const normalized = String(phone || '').replace(/\D/g, '');
-        const waUrl = normalized
-          ? `https://wa.me/${normalized}?text=${encodeURIComponent(response.whatsappMessage)}`
-          : `https://wa.me/?text=${encodeURIComponent(response.whatsappMessage)}`;
-        window.open(waUrl, '_blank', 'noopener,noreferrer');
+        const waUrl = buildWhatsAppSendUrl({ phone, message: response.whatsappMessage });
+        if (whatsappWindow) whatsappWindow.location.href = waUrl;
+        else window.open(waUrl, '_blank', 'noopener,noreferrer');
       }
     } catch (err) {
+      if (whatsappWindow) whatsappWindow.close();
       setError(err.message || 'تعذر إنشاء رابط التقييم');
     }
   };
