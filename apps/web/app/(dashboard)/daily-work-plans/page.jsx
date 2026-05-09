@@ -22,7 +22,6 @@ import {
   buildDailyWorkPlanArchiveWhatsappMessage,
   buildDailyWorkPlanWhatsappMessage,
 } from '../../../lib/dailyWorkPlanWhatsapp';
-import ContactActionBar from '../../../components/ContactActionBar';
 import DailyWorkPlanCalendar from '../../../components/daily-work-plans/DailyWorkPlanCalendar';
 import DailyWorkPlanModal from '../../../components/daily-work-plans/DailyWorkPlanModal';
 import DailyWorkPlanActionModal from '../../../components/daily-work-plans/DailyWorkPlanActionModal';
@@ -93,6 +92,7 @@ export default function DailyWorkPlansPage() {
   const [actionState, setActionState] = useState({ mode: '', plan: null });
   const [calendarOpen, setCalendarOpen] = useState(false);
   const [calendarPlans, setCalendarPlans] = useState([]);
+  const [evaluationLinks, setEvaluationLinks] = useState({});
   const [calendarLoading, setCalendarLoading] = useState(false);
   const [calendarMonth, setCalendarMonth] = useState(() => createMonthAnchor(new Date()));
   const [calendarSelectedDate, setCalendarSelectedDate] = useState(() => toDateInputValue(new Date()));
@@ -259,6 +259,29 @@ export default function DailyWorkPlansPage() {
     if (typeof window === 'undefined' || !plan) return;
     const message = buildDailyWorkPlanWhatsappMessage(plan);
     window.open(`https://wa.me/?text=${encodeURIComponent(message)}`, '_blank', 'noopener,noreferrer');
+  };
+
+  const createEvaluationLink = async (plan, { send = false } = {}) => {
+    setError('');
+    setInfo('');
+    try {
+      const response = await api.post('/customer-evaluations/links', {
+        sourceType: 'DAILY_WORK_PLAN',
+        sourceId: plan._id || plan.id,
+      });
+      setEvaluationLinks((prev) => ({ ...prev, [plan._id || plan.id]: response.url }));
+      setInfo('تم إنشاء رابط تقييم الزبون.');
+      if (send) {
+        const phone = plan.customerSnapshot?.whatsapp || plan.customerSnapshot?.phone || plan.customer?.whatsapp || plan.customer?.phone || '';
+        const normalized = String(phone || '').replace(/\D/g, '');
+        const waUrl = normalized
+          ? `https://wa.me/${normalized}?text=${encodeURIComponent(response.whatsappMessage)}`
+          : `https://wa.me/?text=${encodeURIComponent(response.whatsappMessage)}`;
+        window.open(waUrl, '_blank', 'noopener,noreferrer');
+      }
+    } catch (err) {
+      setError(err.message || 'تعذر إنشاء رابط التقييم');
+    }
   };
 
   const sendArchiveToWhatsApp = () => {
@@ -468,13 +491,6 @@ export default function DailyWorkPlansPage() {
                   <div className="customer-plan-contact-row">
                     {customerContact.siteName ? <span className="status-pill status-todo">{customerContact.siteName}</span> : null}
                     {customerContact.siteManager ? <span className="daily-plan-card-subtitle">مسؤول الموقع: {customerContact.siteManager}</span> : null}
-                    <ContactActionBar
-                      phone={customerContact.phone}
-                      whatsapp={customerContact.whatsapp || customerContact.phone}
-                      mapUrl={customerContact.mapUrl}
-                      address={plan.customerSnapshot?.address || plan.location}
-                      compact
-                    />
                   </div>
                 ) : null}
                 {plan.isApproved ? <div className="daily-plan-card-subtitle">إجمالي النقاط الممنوحة: {plan.pointsAwardedTotal || 0}</div> : null}
@@ -483,6 +499,8 @@ export default function DailyWorkPlansPage() {
                 <div className="form-actions daily-plan-actions">
                   <button className="btn btn-soft btn-sm" onClick={() => sendPlanToWhatsApp(plan)}>واتساب</button>
                   <button className="btn btn-soft btn-sm" onClick={() => setDetailsPlan(plan)}>التفاصيل</button>
+                  <button className="btn btn-soft btn-sm" onClick={() => createEvaluationLink(plan)}>إنشاء رابط تقييم الزبون</button>
+                  <button className="btn btn-soft btn-sm" onClick={() => createEvaluationLink(plan, { send: true })}>إرسال رابط التقييم عبر WhatsApp</button>
                   {!isArchiveTab ? (
                     <>
                       {canManage ? <button className="btn btn-soft btn-sm" onClick={() => setEditingPlan(plan)}>تعديل</button> : null}
@@ -502,6 +520,7 @@ export default function DailyWorkPlansPage() {
                     </>
                   )}
                 </div>
+                {evaluationLinks[plan._id || plan.id] ? <input className="input" style={{ marginTop: 8 }} value={evaluationLinks[plan._id || plan.id]} readOnly dir="ltr" /> : null}
               </article>
               );
             }) : <p className="maintenance-empty">{isArchiveTab ? 'لا توجد بلانات مؤرشفة مطابقة للفلاتر الحالية.' : 'لا توجد بلانات مطابقة للفلاتر الحالية.'}</p>}
@@ -527,17 +546,6 @@ export default function DailyWorkPlansPage() {
                       <strong>{plan.title}</strong>
                       <div style={{ color: 'var(--text-soft)', fontSize: 12 }}>{plan.customerName || plan.project?.name || '-'} - {plan.location || '-'}</div>
                       {plan.customer ? <div style={{ color: 'var(--text-soft)', fontSize: 12 }}>{plan.customerSnapshot?.siteName ? `فرع: ${plan.customerSnapshot.siteName}` : 'مرتبط بملف زبون'}</div> : null}
-                      {plan.customer ? (
-                        <div style={{ marginTop: 8 }}>
-                          <ContactActionBar
-                            phone={getCustomerContact(plan).phone}
-                            whatsapp={getCustomerContact(plan).whatsapp || getCustomerContact(plan).phone}
-                            mapUrl={getCustomerContact(plan).mapUrl}
-                            address={plan.customerSnapshot?.address || plan.location}
-                            compact
-                          />
-                        </div>
-                      ) : null}
                       {plan.archivedAt ? <div style={{ color: 'var(--text-soft)', fontSize: 12 }}>أرشفة: {formatDateTime(plan.archivedAt)}</div> : null}
                     </td>
                     <td>{formatAssigneesSummary(plan.assignees, { maxVisible: 3 })}</td>
@@ -561,6 +569,8 @@ export default function DailyWorkPlansPage() {
                       <div className="form-actions">
                         <button className="btn btn-soft btn-sm" onClick={() => setDetailsPlan(plan)}>التفاصيل</button>
                         <button className="btn btn-soft btn-sm" onClick={() => sendPlanToWhatsApp(plan)}>واتساب</button>
+                        <button className="btn btn-soft btn-sm" onClick={() => createEvaluationLink(plan)}>إنشاء رابط تقييم الزبون</button>
+                        <button className="btn btn-soft btn-sm" onClick={() => createEvaluationLink(plan, { send: true })}>إرسال رابط التقييم عبر WhatsApp</button>
                         {!isArchiveTab ? (
                           <>
                             {canManage ? <button className="btn btn-soft btn-sm" onClick={() => setEditingPlan(plan)}>تعديل</button> : null}

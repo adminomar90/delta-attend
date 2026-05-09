@@ -16,6 +16,7 @@ export function AuthProvider({ children }) {
   const isPublicPage =
     pathname === '/login'
     || pathname?.startsWith('/customer-form/')
+    || pathname?.startsWith('/customer-evaluation/')
     || pathname?.startsWith('/maintenance-feedback/');
 
   // Keep authStorage in-memory cache in sync with context

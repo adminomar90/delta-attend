@@ -17,6 +17,7 @@ const menuIcons = {
   '/daily-work-plans': '🧭',
   '/customers': '☎️',
   '/customers?tab=forms': '🧾',
+  '/customer-evaluations': '⭐',
   '/approvals': '✅',
   '/work-reports': '📝',
   '/completed-work-reports': '📚',
@@ -108,6 +109,16 @@ const menu = [
       Permission.VIEW_CUSTOMERS,
       Permission.CREATE_CUSTOMERS,
       Permission.MANAGE_CUSTOMERS,
+    ],
+  },
+  {
+    href: '/customer-evaluations',
+    label: 'تقييمات الزبائن',
+    anyPermissions: [
+      Permission.VIEW_CUSTOMER_EVALUATIONS,
+      Permission.MANAGE_CUSTOMER_EVALUATIONS,
+      Permission.VIEW_ANALYTICS,
+      Permission.VIEW_EXECUTIVE_REPORTS,
     ],
   },
   {

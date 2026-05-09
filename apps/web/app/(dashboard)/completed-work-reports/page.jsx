@@ -52,6 +52,7 @@ export default function CompletedWorkReportsPage() {
   const [error, setError] = useState('');
   const [info, setInfo] = useState('');
   const [maintenancePlanInfo, setMaintenancePlanInfo] = useState(null);
+  const [evaluationLinks, setEvaluationLinks] = useState({});
   const [technicians, setTechnicians] = useState([]);
   const [maintenanceModalOpen, setMaintenanceModalOpen] = useState(false);
   const [maintenanceSaving, setMaintenanceSaving] = useState(false);
@@ -238,6 +239,24 @@ export default function CompletedWorkReportsPage() {
     window.open(url, '_blank', 'noopener,noreferrer');
   };
 
+  const createEvaluationLink = async (report, { send = false } = {}) => {
+    setError('');
+    setInfo('');
+    try {
+      const response = await api.post('/customer-evaluations/links', {
+        sourceType: 'WORK_REPORT',
+        sourceId: report._id,
+      });
+      setEvaluationLinks((prev) => ({ ...prev, [report._id]: response.url }));
+      setInfo('تم إنشاء رابط تقييم الزبون.');
+      if (send) {
+        window.open(`https://wa.me/?text=${encodeURIComponent(response.whatsappMessage)}`, '_blank', 'noopener,noreferrer');
+      }
+    } catch (err) {
+      setError(err.message || 'تعذر إنشاء رابط التقييم');
+    }
+  };
+
   if (!canAccess) {
     return (
       <section className="card section" style={{ color: 'var(--text-soft)' }}>
@@ -321,7 +340,14 @@ export default function CompletedWorkReportsPage() {
                             واتساب
                           </button>
                         ) : null}
+                        <button type="button" className="btn btn-soft" onClick={() => createEvaluationLink(report)}>
+                          إنشاء رابط تقييم الزبون
+                        </button>
+                        <button type="button" className="btn btn-soft" onClick={() => createEvaluationLink(report, { send: true })}>
+                          إرسال رابط التقييم عبر WhatsApp
+                        </button>
                       </div>
+                      {evaluationLinks[report._id] ? <input className="input" style={{ marginTop: 6 }} value={evaluationLinks[report._id]} readOnly dir="ltr" /> : null}
                     </td>
                   </tr>
                 );
@@ -363,6 +389,12 @@ export default function CompletedWorkReportsPage() {
                   إرسال عبر واتساب
                 </button>
               ) : null}
+              <button type="button" className="btn btn-soft" onClick={() => createEvaluationLink(selectedReport)}>
+                إنشاء رابط تقييم الزبون
+              </button>
+              <button type="button" className="btn btn-soft" onClick={() => createEvaluationLink(selectedReport, { send: true })}>
+                إرسال رابط التقييم عبر WhatsApp
+              </button>
               {false ? (
                 maintenancePlanInfo ? (
                   <>
