@@ -1,6 +1,7 @@
 ﻿import { DailyWorkPlanRepository } from '../../infrastructure/db/repositories/DailyWorkPlanRepository.js';
 import { UserRepository } from '../../infrastructure/db/repositories/UserRepository.js';
 import { ProjectRepository } from '../../infrastructure/db/repositories/ProjectRepository.js';
+import { CustomerRepository } from '../../infrastructure/db/repositories/CustomerRepository.js';
 import { auditService } from '../../application/services/auditService.js';
 import { notificationService } from '../../application/services/notificationService.js';
 import { performancePointsService } from '../../application/services/performancePointsService.js';
@@ -30,6 +31,7 @@ import {
   syncOverdueDailyWorkPlans,
   toDateOnly,
 } from '../../application/services/dailyWorkPlanService.js';
+import { createCustomerSnapshot } from '../../application/services/customerService.js';
 import { buildDailyWorkPlansExcelBuffer } from '../../infrastructure/reports/dailyWorkPlansExcelBuilder.js';
 import { buildDailyWorkPlansPdfBuffer } from '../../infrastructure/reports/dailyWorkPlansPdfBuilder.js';
 import {
@@ -44,6 +46,7 @@ import { AppError, asyncHandler } from '../../shared/errors.js';
 const dailyWorkPlanRepository = new DailyWorkPlanRepository();
 const userRepository = new UserRepository();
 const projectRepository = new ProjectRepository();
+const customerRepository = new CustomerRepository();
 
 const toId = (value) => String(value?._id || value?.id || value || '').trim();
 
@@ -186,6 +189,8 @@ const snapshotPlan = (plan) => ({
   priority: plan?.priority || '',
   taskType: plan?.taskType || '',
   customerName: plan?.customerName || '',
+  customer: toId(plan?.customer),
+  customerSnapshot: plan?.customerSnapshot || null,
   projectName: plan?.project?.name || plan?.projectNameSnapshot || '',
   assignees: (plan?.assignees || []).map((assignee) => ({
     userId: toId(assignee.user),
@@ -388,6 +393,8 @@ const buildPlanPayload = async ({ req, existingPlan = null } = {}) => {
   const description = toCleanString(req.body.description);
   const customerName = toCleanString(req.body.customerName);
   const location = toCleanString(req.body.location);
+  const customerId = toCleanString(req.body.customer || req.body.customerId || toId(existingPlan?.customer));
+  const selectedSiteId = toCleanString(req.body.customerSiteId || req.body.siteId || existingPlan?.customerSnapshot?.siteId);
   const planDate = toDateOnly(req.body.planDate);
   const startTime = sanitizeTimeValue(req.body.startTime);
   const expectedEndTime = sanitizeTimeValue(req.body.expectedEndTime, '23:59');
@@ -415,6 +422,20 @@ const buildPlanPayload = async ({ req, existingPlan = null } = {}) => {
     projectNameSnapshot = projectDoc?.name || projectNameSnapshot;
   }
 
+  let customer = null;
+  let customerSnapshot = existingPlan?.customerSnapshot || {};
+  let resolvedCustomerName = customerName;
+  let resolvedLocation = location;
+  if (customerId) {
+    const customerDoc = await customerRepository.findById(customerId);
+    if (!customerDoc) throw new AppError('Customer not found', 404);
+    const selectedSite = (customerDoc.sites || []).find((site) => toId(site) === selectedSiteId) || null;
+    customer = customerId;
+    customerSnapshot = createCustomerSnapshot(customerDoc, selectedSite);
+    resolvedCustomerName = customerName || customerSnapshot.customerName;
+    resolvedLocation = location || customerSnapshot.address || customerDoc.address || '';
+  }
+
   const assignees = req.body.assignees !== undefined || req.body.assigneeIds !== undefined || !existingPlan
     ? await resolveAssignees({
         assigneePayload: parseAssigneePayload(req.body),
@@ -439,8 +460,10 @@ const buildPlanPayload = async ({ req, existingPlan = null } = {}) => {
   return {
     title,
     description,
-    customerName,
-    location,
+    customerName: resolvedCustomerName,
+    customer,
+    customerSnapshot,
+    location: resolvedLocation,
     planDate,
     startTime,
     expectedEndTime,
@@ -588,6 +611,13 @@ export const createDailyWorkPlan = asyncHandler(async (req, res) => {
     lastUpdatedAt: new Date(),
   });
 
+  if (payload.customer) {
+    await customerRepository.updateById(payload.customer, {
+      $addToSet: { linkedDailyWorkPlans: toId(plan) },
+      lastModifiedAt: new Date(),
+    });
+  }
+
   await auditService.log({
     actorId: req.user.id,
     action: 'DAILY_WORK_PLAN_CREATED',
@@ -635,6 +665,13 @@ export const updateDailyWorkPlan = asyncHandler(async (req, res) => {
   delete updatePayload.attachments;
 
   const plan = await dailyWorkPlanRepository.updateById(req.params.id, updatePayload);
+
+  if (payload.customer) {
+    await customerRepository.updateById(payload.customer, {
+      $addToSet: { linkedDailyWorkPlans: toId(plan) },
+      lastModifiedAt: new Date(),
+    });
+  }
 
   await auditService.log({
     actorId: req.user.id,

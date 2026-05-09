@@ -1,6 +1,6 @@
 ﻿'use client';
 
-import { usePathname, useRouter } from 'next/navigation';
+import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { authStorage } from '../lib/auth';
 import { api } from '../lib/api';
 import { Permission, hasAnyPermission } from '../lib/permissions';
@@ -15,6 +15,8 @@ const menuIcons = {
   '/maintenance-reports': '🛠️',
   '/maintenance-plans': '🗓️',
   '/daily-work-plans': '🧭',
+  '/customers': '☎️',
+  '/customers?tab=forms': '🧾',
   '/approvals': '✅',
   '/work-reports': '📝',
   '/completed-work-reports': '📚',
@@ -85,6 +87,27 @@ const menu = [
       Permission.MANAGE_DAILY_WORK_PLANS,
       Permission.UPDATE_ASSIGNED_DAILY_WORK_PLANS,
       Permission.APPROVE_DAILY_WORK_PLANS,
+    ],
+  },
+  {
+    href: '/customers',
+    label: 'معلومات الزبائن',
+    anyPermissions: [
+      Permission.VIEW_CUSTOMERS,
+      Permission.CREATE_CUSTOMERS,
+      Permission.MANAGE_CUSTOMERS,
+      Permission.VIEW_CUSTOMER_FINANCIAL_INFO,
+    ],
+  },
+  {
+    href: '/customers?tab=forms',
+    matchPath: '/customers',
+    matchQuery: 'tab=forms',
+    label: 'استمارات الزبائن',
+    anyPermissions: [
+      Permission.VIEW_CUSTOMERS,
+      Permission.CREATE_CUSTOMERS,
+      Permission.MANAGE_CUSTOMERS,
     ],
   },
   {
@@ -160,6 +183,7 @@ const menu = [
 
 export default function Sidebar({ mobileOpen, onClose }) {
   const pathname = usePathname();
+  const searchParams = useSearchParams();
   const router = useRouter();
   const currentUser = authStorage.getUser();
   const { unreadCount } = useNotifications();
@@ -206,14 +230,17 @@ export default function Sidebar({ mobileOpen, onClose }) {
 
         <nav>
           {visibleMenu.map((item) => {
-            const active = pathname === item.href || pathname.startsWith(`${item.href}/`);
+            const itemPath = item.matchPath || item.href.split('?')[0];
+            const active = item.matchQuery
+              ? pathname === itemPath && searchParams.toString() === item.matchQuery
+              : pathname === itemPath || pathname.startsWith(`${itemPath}/`);
             return (
               <button
                 key={item.href}
                 className={`menu-item ${active ? 'active' : ''}`}
                 onClick={() => navigate(item.href)}
               >
-                <span className="menu-item-icon">{menuIcons[item.href] || '📄'}</span>
+                <span className="menu-item-icon">{menuIcons[item.href] || menuIcons[itemPath] || '📄'}</span>
                 <span className="menu-item-label">{item.label}</span>
                 {item.href === '/notifications' && unreadCount > 0 ? (
                   <span className="sidebar-notif-badge">{unreadCount > 99 ? '99+' : unreadCount}</span>

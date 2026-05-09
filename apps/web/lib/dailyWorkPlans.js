@@ -139,6 +139,14 @@ export const createPlanFormDefaults = (plan = null) => ({
   title: plan?.title || '',
   description: plan?.description || '',
   customerName: plan?.customerName || '',
+  customer: plan?.customer?._id || plan?.customer?.id || plan?.customer || '',
+  customerSiteId: plan?.customerSnapshot?.siteId || '',
+  customerPhone: plan?.customerSnapshot?.phone || '',
+  customerWhatsapp: plan?.customerSnapshot?.whatsapp || '',
+  customerMapUrl: plan?.customerSnapshot?.mapUrl || '',
+  customerSiteName: plan?.customerSnapshot?.siteName || '',
+  siteManagerName: plan?.customerSnapshot?.siteManagerName || '',
+  siteManagerPhone: plan?.customerSnapshot?.siteManagerPhone || '',
   location: plan?.location || '',
   planDate: toDateInputValue(plan?.planDate || new Date()),
   startTime: plan?.startTime || '',
@@ -205,6 +213,8 @@ export const buildDailyWorkPlanFormData = (form) => {
   formData.append('title', form.title || '');
   formData.append('description', form.description || '');
   formData.append('customerName', form.customerName || '');
+  formData.append('customer', form.customer || '');
+  formData.append('customerSiteId', form.customerSiteId || '');
   formData.append('location', form.location || '');
   formData.append('planDate', form.planDate || '');
   formData.append('startTime', form.startTime || '');

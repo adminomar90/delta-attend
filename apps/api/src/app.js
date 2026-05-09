@@ -13,9 +13,27 @@ export const app = express();
 
 app.set('trust proxy', 1);
 
+const isAllowedCorsOrigin = (origin) => {
+  if (!origin) return true;
+  if (origin === env.frontendOrigin) return true;
+  try {
+    const url = new URL(origin);
+    return (
+      ['localhost', '127.0.0.1'].includes(url.hostname)
+      || /^10\./.test(url.hostname)
+      || /^192\.168\./.test(url.hostname)
+      || /^172\.(1[6-9]|2\d|3[0-1])\./.test(url.hostname)
+    );
+  } catch {
+    return false;
+  }
+};
+
 app.use(
   cors({
-    origin: env.frontendOrigin,
+    origin(origin, callback) {
+      callback(null, isAllowedCorsOrigin(origin));
+    },
     credentials: true,
   }),
 );

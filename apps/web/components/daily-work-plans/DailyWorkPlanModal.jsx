@@ -6,6 +6,8 @@ import {
   dailyWorkPlanPriorityOptions,
   dailyWorkPlanTaskTypeOptions,
 } from '../../lib/dailyWorkPlans';
+import ContactActionBar from '../ContactActionBar';
+import CustomerSearchModal from '../customers/CustomerSearchModal';
 import DailyWorkPlanAssigneePicker from './DailyWorkPlanAssigneePicker';
 
 export default function DailyWorkPlanModal({
@@ -20,18 +22,24 @@ export default function DailyWorkPlanModal({
   onSubmit,
 }) {
   const [form, setForm] = useState(createPlanFormDefaults());
+  const [customerSearchOpen, setCustomerSearchOpen] = useState(false);
+  const [linkExistingCustomer, setLinkExistingCustomer] = useState(false);
+  const [whatsappMessage, setWhatsappMessage] = useState('السلام عليكم، معكم شركة دلتا بلس بخصوص طلبكم.');
 
   useEffect(() => {
     if (open) {
-      setForm(createPlanFormDefaults(initialForm));
+      const defaults = createPlanFormDefaults(initialForm);
+      setForm(defaults);
+      setLinkExistingCustomer(!!defaults.customer);
     }
   }, [open, initialForm]);
 
   if (!open) return null;
 
   return (
-    <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal-panel daily-plan-modal-panel" onClick={(e) => e.stopPropagation()}>
+    <>
+      <div className="modal-backdrop" onClick={onClose}>
+        <div className="modal-panel daily-plan-modal-panel" onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
           <div>
             <h3>{title || 'بلان العمل اليومي'}</h3>
@@ -67,6 +75,49 @@ export default function DailyWorkPlanModal({
                   onChange={(e) => setForm((prev) => ({ ...prev, customerName: e.target.value }))}
                 />
               </label>
+
+              <div className="grid-span-full customer-link-panel">
+                <label className="customer-check-inline">
+                  <input
+                    type="checkbox"
+                    checked={linkExistingCustomer}
+                    onChange={(e) => {
+                      const checked = e.target.checked;
+                      setLinkExistingCustomer(checked);
+                      if (!checked) {
+                        setForm((prev) => ({
+                          ...prev,
+                          customer: '',
+                          customerSiteId: '',
+                          customerPhone: '',
+                          customerWhatsapp: '',
+                          customerMapUrl: '',
+                          customerSiteName: '',
+                          siteManagerName: '',
+                          siteManagerPhone: '',
+                        }));
+                      }
+                    }}
+                  />
+                  ربط البلان بزبون موجود
+                </label>
+                {linkExistingCustomer ? (
+                  <>
+                    <div className="action-row">
+                      <button type="button" className="btn btn-soft" onClick={() => setCustomerSearchOpen(true)}>بحث في الزبائن</button>
+                      {form.customer ? <span className="status-pill status-approved">مرتبط: {form.customerName || 'زبون محدد'}</span> : null}
+                    </div>
+                    {form.customer ? (
+                      <div className="daily-plan-mini-grid">
+                        <div><span>هاتف الزبون</span><strong>{form.customerPhone || '-'}</strong></div>
+                        <div><span>واتساب</span><strong>{form.customerWhatsapp || '-'}</strong></div>
+                        <div><span>الموقع / الفرع</span><strong>{form.customerSiteName || '-'}</strong></div>
+                        <div><span>مسؤول الموقع</span><strong>{[form.siteManagerName, form.siteManagerPhone].filter(Boolean).join(' - ') || '-'}</strong></div>
+                      </div>
+                    ) : null}
+                  </>
+                ) : null}
+              </div>
 
               <label>
                 المشروع المرتبط
@@ -185,6 +236,19 @@ export default function DailyWorkPlanModal({
                 />
               </label>
 
+              {form.customer ? (
+                <div className="grid-span-full customer-contact-box">
+                  <label>رسالة واتساب للزبون<input className="input" value={whatsappMessage} onChange={(e) => setWhatsappMessage(e.target.value)} /></label>
+                  <ContactActionBar
+                    phone={form.customerPhone}
+                    whatsapp={form.customerWhatsapp || form.customerPhone}
+                    mapUrl={form.customerMapUrl}
+                    address={form.location}
+                    whatsappMessage={whatsappMessage}
+                  />
+                </div>
+              ) : null}
+
               <div className="grid-span-full">
                 <DailyWorkPlanAssigneePicker
                   users={users}
@@ -237,7 +301,21 @@ export default function DailyWorkPlanModal({
             </button>
           </div>
         </form>
+        </div>
       </div>
-    </div>
+      <CustomerSearchModal
+        open={customerSearchOpen}
+        onClose={() => setCustomerSearchOpen(false)}
+        onSelect={(snapshot) => {
+          setForm((prev) => ({
+            ...prev,
+            ...snapshot,
+            customerName: snapshot.customerName || prev.customerName,
+            location: snapshot.location || prev.location,
+          }));
+          setCustomerSearchOpen(false);
+        }}
+      />
+    </>
   );
 }

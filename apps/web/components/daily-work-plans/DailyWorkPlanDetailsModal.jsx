@@ -8,6 +8,7 @@ import {
   formatDate,
   formatDateTime,
 } from '../../lib/dailyWorkPlans';
+import ContactActionBar from '../ContactActionBar';
 
 export default function DailyWorkPlanDetailsModal({
   open,
@@ -16,6 +17,9 @@ export default function DailyWorkPlanDetailsModal({
   onSendWhatsApp,
 }) {
   if (!open || !plan) return null;
+  const customerPhone = plan.customerSnapshot?.phone || plan.customer?.phone || '';
+  const customerWhatsapp = plan.customerSnapshot?.whatsapp || plan.customer?.whatsapp || customerPhone;
+  const customerMapUrl = plan.customerSnapshot?.mapUrl || plan.customer?.mapUrl || '';
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
@@ -86,6 +90,22 @@ export default function DailyWorkPlanDetailsModal({
           <strong>قائد الفريق</strong>
           <p>{plan.teamLeader?.fullName || 'غير محدد'}</p>
         </div>
+
+        {plan.customer ? (
+          <div className="daily-plan-note-block">
+            <strong>بيانات الزبون المرتبط</strong>
+            <p>
+              {[plan.customerSnapshot?.customerName || plan.customerName, plan.customerSnapshot?.siteName, plan.customerSnapshot?.address || plan.location].filter(Boolean).join(' - ') || 'زبون مرتبط'}
+            </p>
+            <ContactActionBar
+              phone={customerPhone}
+              whatsapp={customerWhatsapp}
+              mapUrl={customerMapUrl}
+              address={plan.customerSnapshot?.address || plan.location}
+              compact
+            />
+          </div>
+        ) : null}
 
         <div className="daily-plan-note-block">
           <strong>ملاحظات الإدارة</strong>

@@ -22,6 +22,7 @@ import {
   buildDailyWorkPlanArchiveWhatsappMessage,
   buildDailyWorkPlanWhatsappMessage,
 } from '../../../lib/dailyWorkPlanWhatsapp';
+import ContactActionBar from '../../../components/ContactActionBar';
 import DailyWorkPlanCalendar from '../../../components/daily-work-plans/DailyWorkPlanCalendar';
 import DailyWorkPlanModal from '../../../components/daily-work-plans/DailyWorkPlanModal';
 import DailyWorkPlanActionModal from '../../../components/daily-work-plans/DailyWorkPlanActionModal';
@@ -266,6 +267,14 @@ export default function DailyWorkPlansPage() {
     window.open(`https://wa.me/?text=${encodeURIComponent(message)}`, '_blank', 'noopener,noreferrer');
   };
 
+  const getCustomerContact = (plan) => ({
+    phone: plan?.customerSnapshot?.phone || plan?.customer?.phone || '',
+    whatsapp: plan?.customerSnapshot?.whatsapp || plan?.customer?.whatsapp || plan?.customer?.phone || '',
+    mapUrl: plan?.customerSnapshot?.mapUrl || plan?.customer?.mapUrl || '',
+    siteName: plan?.customerSnapshot?.siteName || '',
+    siteManager: [plan?.customerSnapshot?.siteManagerName, plan?.customerSnapshot?.siteManagerPhone].filter(Boolean).join(' - '),
+  });
+
   const isTeamLeaderOfPlan = (plan) => String(plan.teamLeader?._id || plan.teamLeader?.id || plan.teamLeader || '') === String(currentUser?.id || '');
   const isPlanOwner = (plan) => {
     const actorId = String(currentUser?.id || '');
@@ -431,7 +440,9 @@ export default function DailyWorkPlansPage() {
       <section className="card section" style={{ marginTop: 16 }}>
         {viewMode === 'cards' ? (
           <div className="daily-plan-card-grid">
-            {plans.length ? plans.map((plan) => (
+            {plans.length ? plans.map((plan) => {
+              const customerContact = getCustomerContact(plan);
+              return (
               <article key={plan._id || plan.id} className={`daily-plan-card ${plan.archived ? 'daily-plan-card-archived' : ''}`}>
                 <div className="maintenance-card-header">
                   <div>
@@ -453,6 +464,19 @@ export default function DailyWorkPlansPage() {
                 <div className="daily-plan-progress-row"><span>{plan.displayProgressLabel || 'التقدم'}</span><ProgressGauge value={plan.displayProgressPercent || 0} /></div>
                 <div className="daily-plan-card-subtitle">قائد الفريق: {plan.teamLeader?.fullName || 'غير محدد'}</div>
                 <div className="daily-plan-card-subtitle">المكلفون: {formatAssigneesSummary(plan.assignees, { maxVisible: 2 })}</div>
+                {plan.customer ? (
+                  <div className="customer-plan-contact-row">
+                    {customerContact.siteName ? <span className="status-pill status-todo">{customerContact.siteName}</span> : null}
+                    {customerContact.siteManager ? <span className="daily-plan-card-subtitle">مسؤول الموقع: {customerContact.siteManager}</span> : null}
+                    <ContactActionBar
+                      phone={customerContact.phone}
+                      whatsapp={customerContact.whatsapp || customerContact.phone}
+                      mapUrl={customerContact.mapUrl}
+                      address={plan.customerSnapshot?.address || plan.location}
+                      compact
+                    />
+                  </div>
+                ) : null}
                 {plan.isApproved ? <div className="daily-plan-card-subtitle">إجمالي النقاط الممنوحة: {plan.pointsAwardedTotal || 0}</div> : null}
                 {plan.postponedTo ? <div className="daily-plan-card-subtitle">مؤجلة إلى: {formatDateTime(plan.postponedTo)}</div> : null}
                 {plan.archivedAt ? <div className="daily-plan-archive-meta"><span>تاريخ الأرشفة: {formatDateTime(plan.archivedAt)}</span><span>بواسطة: {plan.archivedBy?.fullName || '-'}</span></div> : null}
@@ -479,7 +503,8 @@ export default function DailyWorkPlansPage() {
                   )}
                 </div>
               </article>
-            )) : <p className="maintenance-empty">{isArchiveTab ? 'لا توجد بلانات مؤرشفة مطابقة للفلاتر الحالية.' : 'لا توجد بلانات مطابقة للفلاتر الحالية.'}</p>}
+              );
+            }) : <p className="maintenance-empty">{isArchiveTab ? 'لا توجد بلانات مؤرشفة مطابقة للفلاتر الحالية.' : 'لا توجد بلانات مطابقة للفلاتر الحالية.'}</p>}
           </div>
         ) : (
           <div className="work-reports-table-shell">
@@ -501,6 +526,18 @@ export default function DailyWorkPlansPage() {
                     <td>
                       <strong>{plan.title}</strong>
                       <div style={{ color: 'var(--text-soft)', fontSize: 12 }}>{plan.customerName || plan.project?.name || '-'} - {plan.location || '-'}</div>
+                      {plan.customer ? <div style={{ color: 'var(--text-soft)', fontSize: 12 }}>{plan.customerSnapshot?.siteName ? `فرع: ${plan.customerSnapshot.siteName}` : 'مرتبط بملف زبون'}</div> : null}
+                      {plan.customer ? (
+                        <div style={{ marginTop: 8 }}>
+                          <ContactActionBar
+                            phone={getCustomerContact(plan).phone}
+                            whatsapp={getCustomerContact(plan).whatsapp || getCustomerContact(plan).phone}
+                            mapUrl={getCustomerContact(plan).mapUrl}
+                            address={plan.customerSnapshot?.address || plan.location}
+                            compact
+                          />
+                        </div>
+                      ) : null}
                       {plan.archivedAt ? <div style={{ color: 'var(--text-soft)', fontSize: 12 }}>أرشفة: {formatDateTime(plan.archivedAt)}</div> : null}
                     </td>
                     <td>{formatAssigneesSummary(plan.assignees, { maxVisible: 3 })}</td>

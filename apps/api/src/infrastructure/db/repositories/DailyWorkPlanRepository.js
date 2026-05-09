@@ -3,6 +3,7 @@ import { DailyWorkPlanStatus } from '../../../application/services/dailyWorkPlan
 
 const applyPopulate = (query) =>
   query
+    .populate('customer', 'name customerType phone whatsapp email province address mapUrl status sites')
     .populate('project', 'name code status')
     .populate('createdBy', 'fullName role jobTitle')
     .populate('supervisor', 'fullName role jobTitle')
