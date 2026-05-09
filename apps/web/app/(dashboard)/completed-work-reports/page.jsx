@@ -243,7 +243,10 @@ export default function CompletedWorkReportsPage() {
   const createEvaluationLink = async (report, { send = false } = {}) => {
     setError('');
     setInfo('');
-    const whatsappWindow = send && typeof window !== 'undefined' ? window.open('', '_blank', 'noopener,noreferrer') : null;
+    const whatsappWindow = send && typeof window !== 'undefined' ? window.open('about:blank', '_blank') : null;
+    if (whatsappWindow) {
+      whatsappWindow.document.write('<p style="font-family:sans-serif;direction:rtl;text-align:center;margin-top:40px">جاري تجهيز رسالة واتساب...</p>');
+    }
     try {
       const response = await api.post('/customer-evaluations/links', {
         sourceType: 'WORK_REPORT',
@@ -253,7 +256,7 @@ export default function CompletedWorkReportsPage() {
       setInfo('تم إنشاء رابط تقييم الزبون.');
       if (send) {
         const waUrl = buildWhatsAppSendUrl({ phone: report.customerPhone || report.phone || '', message: response.whatsappMessage });
-        if (whatsappWindow) whatsappWindow.location.href = waUrl;
+        if (whatsappWindow) whatsappWindow.location.assign(waUrl);
         else window.open(waUrl, '_blank', 'noopener,noreferrer');
       }
     } catch (err) {

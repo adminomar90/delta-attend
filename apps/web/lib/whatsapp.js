@@ -20,9 +20,11 @@ export const normalizeWhatsappPhone = (value) => {
 export const buildWhatsAppSendUrl = ({ phone, message }) => {
   const normalizedPhone = normalizeWhatsappPhone(phone);
   const text = encodeURIComponent(message || '');
+  const isDesktop = typeof navigator !== 'undefined' && !/Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent || '');
+  const baseUrl = isDesktop ? 'https://web.whatsapp.com/send' : 'https://api.whatsapp.com/send';
   if (!normalizedPhone) {
-    return `https://api.whatsapp.com/send?text=${text}`;
+    return `${baseUrl}?text=${text}`;
   }
 
-  return `https://api.whatsapp.com/send?phone=${normalizedPhone}&text=${text}`;
+  return `${baseUrl}?phone=${normalizedPhone}&text=${text}`;
 };

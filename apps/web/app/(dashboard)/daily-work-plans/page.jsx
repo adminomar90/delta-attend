@@ -265,7 +265,10 @@ export default function DailyWorkPlansPage() {
   const createEvaluationLink = async (plan, { send = false } = {}) => {
     setError('');
     setInfo('');
-    const whatsappWindow = send && typeof window !== 'undefined' ? window.open('', '_blank', 'noopener,noreferrer') : null;
+    const whatsappWindow = send && typeof window !== 'undefined' ? window.open('about:blank', '_blank') : null;
+    if (whatsappWindow) {
+      whatsappWindow.document.write('<p style="font-family:sans-serif;direction:rtl;text-align:center;margin-top:40px">جاري تجهيز رسالة واتساب...</p>');
+    }
     try {
       const response = await api.post('/customer-evaluations/links', {
         sourceType: 'DAILY_WORK_PLAN',
@@ -276,7 +279,7 @@ export default function DailyWorkPlansPage() {
       if (send) {
         const phone = plan.customerSnapshot?.whatsapp || plan.customerSnapshot?.phone || plan.customer?.whatsapp || plan.customer?.phone || '';
         const waUrl = buildWhatsAppSendUrl({ phone, message: response.whatsappMessage });
-        if (whatsappWindow) whatsappWindow.location.href = waUrl;
+        if (whatsappWindow) whatsappWindow.location.assign(waUrl);
         else window.open(waUrl, '_blank', 'noopener,noreferrer');
       }
     } catch (err) {
