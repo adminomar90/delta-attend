@@ -35,7 +35,11 @@ const publicShape = (request) => ({
 });
 
 const buildFormUrl = (req, token) => {
-  const origin = process.env.FRONTEND_ORIGIN || `${req.protocol}://${req.get('host')}`.replace(/\/api$/, '');
+  const configuredOrigin = String(process.env.FRONTEND_ORIGIN || '')
+    .split(',')
+    .map((item) => item.trim())
+    .find((item) => item && !item.includes('localhost'));
+  const origin = configuredOrigin || `${req.protocol}://${req.get('host')}`.replace(/\/api$/, '');
   return `${origin.replace(/\/$/, '')}/customer-form/${token}`;
 };
 

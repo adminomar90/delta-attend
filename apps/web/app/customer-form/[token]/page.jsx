@@ -11,7 +11,12 @@ const resolveApiUrl = () => {
     const url = new URL(configuredApiUrl);
     const openedFromNetwork = !['localhost', '127.0.0.1'].includes(window.location.hostname);
     if (openedFromNetwork && ['localhost', '127.0.0.1'].includes(url.hostname)) {
-      url.hostname = window.location.hostname;
+      if (window.location.port && window.location.port !== '80' && window.location.port !== '443') {
+        url.protocol = window.location.protocol;
+        url.hostname = window.location.hostname;
+      } else {
+        return `${window.location.origin}/api`;
+      }
     }
     return url.toString().replace(/\/$/, '');
   } catch {

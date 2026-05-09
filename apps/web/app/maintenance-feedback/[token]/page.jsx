@@ -2,7 +2,26 @@
 
 import { useEffect, useState } from 'react';
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api';
+const configuredApiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api';
+
+const getApiUrl = () => {
+  if (typeof window === 'undefined') return configuredApiUrl.replace(/\/$/, '');
+  try {
+    const url = new URL(configuredApiUrl);
+    const openedFromNetwork = !['localhost', '127.0.0.1'].includes(window.location.hostname);
+    if (openedFromNetwork && ['localhost', '127.0.0.1'].includes(url.hostname)) {
+      if (window.location.port && window.location.port !== '80' && window.location.port !== '443') {
+        url.protocol = window.location.protocol;
+        url.hostname = window.location.hostname;
+      } else {
+        return `${window.location.origin}/api`;
+      }
+    }
+    return url.toString().replace(/\/$/, '');
+  } catch {
+    return configuredApiUrl.replace(/\/$/, '');
+  }
+};
 
 const projectTypeOptions = [
   ['COMMERCIAL', 'تجاري'],
@@ -57,7 +76,7 @@ export default function MaintenanceFeedbackPage({ params }) {
       setLoading(true);
       setError('');
       try {
-        const response = await fetch(`${API_URL}/maintenance-reports/public/feedback/${token}`, {
+        const response = await fetch(`${getApiUrl()}/maintenance-reports/public/feedback/${token}`, {
           cache: 'no-store',
         });
         const payload = await response.json().catch(() => ({}));
@@ -87,7 +106,7 @@ export default function MaintenanceFeedbackPage({ params }) {
     setError('');
     setSuccess('');
     try {
-      const response = await fetch(`${API_URL}/maintenance-reports/public/feedback/${token}`, {
+      const response = await fetch(`${getApiUrl()}/maintenance-reports/public/feedback/${token}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(form),

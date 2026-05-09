@@ -1,7 +1,31 @@
 'use client';
 
-export const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api';
-const API_BASE = API_URL.replace(/\/api\/?$/, '');
+const CONFIGURED_API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/api';
+
+export function getApiUrl() {
+  if (typeof window === 'undefined') return CONFIGURED_API_URL.replace(/\/$/, '');
+  try {
+    const url = new URL(CONFIGURED_API_URL);
+    const openedFromNetwork = !['localhost', '127.0.0.1'].includes(window.location.hostname);
+    if (openedFromNetwork && ['localhost', '127.0.0.1'].includes(url.hostname)) {
+      if (window.location.port && window.location.port !== '80' && window.location.port !== '443') {
+        url.protocol = window.location.protocol;
+        url.hostname = window.location.hostname;
+      } else {
+        return `${window.location.origin}/api`;
+      }
+    }
+    return url.toString().replace(/\/$/, '');
+  } catch {
+    return CONFIGURED_API_URL.replace(/\/$/, '');
+  }
+}
+
+export const API_URL = getApiUrl();
+
+function getApiBase() {
+  return getApiUrl().replace(/\/api\/?$/, '');
+}
 
 // Global auth-expired event — AuthContext listens for this
 export const AUTH_EXPIRED_EVENT = 'auth:expired';
@@ -15,7 +39,7 @@ function emitAuthExpired() {
 export function assetUrl(path) {
   if (!path) return '';
   if (path.startsWith('http://') || path.startsWith('https://')) return path;
-  return `${API_BASE}${path.startsWith('/') ? '' : '/'}${path}`;
+  return `${getApiBase()}${path.startsWith('/') ? '' : '/'}${path}`;
 }
 
 export const api = {
@@ -23,7 +47,7 @@ export const api = {
     const isFormData = options.body instanceof FormData;
 
     try {
-      const response = await fetch(`${API_URL}${path}`, {
+      const response = await fetch(`${getApiUrl()}${path}`, {
         ...options,
         credentials: 'include',
         headers: {
@@ -77,7 +101,7 @@ export const api = {
   postWithProgress(path, formData, { onProgress, timeoutMs = 180000 } = {}) {
     return new Promise((resolve, reject) => {
       const xhr = new XMLHttpRequest();
-      xhr.open('POST', `${API_URL}${path}`);
+      xhr.open('POST', `${getApiUrl()}${path}`);
       xhr.withCredentials = true;
       xhr.timeout = timeoutMs;
 
@@ -125,7 +149,7 @@ export const api = {
   patchWithProgress(path, formData, { onProgress, timeoutMs = 300000 } = {}) {
     return new Promise((resolve, reject) => {
       const xhr = new XMLHttpRequest();
-      xhr.open('PATCH', `${API_URL}${path}`);
+      xhr.open('PATCH', `${getApiUrl()}${path}`);
       xhr.withCredentials = true;
       xhr.timeout = timeoutMs;
 
@@ -189,7 +213,7 @@ export const api = {
   },
 
   async downloadBlob(path) {
-    const response = await fetch(`${API_URL}${path}`, {
+    const response = await fetch(`${getApiUrl()}${path}`, {
       credentials: 'include',
     });
     if (response.status === 401) {
@@ -202,4 +226,3 @@ export const api = {
     return response.blob();
   },
 };
-

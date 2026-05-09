@@ -15,7 +15,8 @@ app.set('trust proxy', 1);
 
 const isAllowedCorsOrigin = (origin) => {
   if (!origin) return true;
-  if (origin === env.frontendOrigin) return true;
+  const allowedOrigins = Array.isArray(env.frontendOrigin) ? env.frontendOrigin : [env.frontendOrigin].filter(Boolean);
+  if (allowedOrigins.includes(origin)) return true;
   try {
     const url = new URL(origin);
     return (
