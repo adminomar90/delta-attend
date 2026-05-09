@@ -1,7 +1,7 @@
 'use client';
 
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import { api, AUTH_EXPIRED_EVENT } from './api';
 import { authStorage } from './auth';
 
@@ -9,9 +9,14 @@ const AuthContext = createContext(null);
 
 export function AuthProvider({ children }) {
   const router = useRouter();
+  const pathname = usePathname();
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
   const didCheck = useRef(false);
+  const isPublicPage =
+    pathname === '/login'
+    || pathname?.startsWith('/customer-form/')
+    || pathname?.startsWith('/maintenance-feedback/');
 
   // Keep authStorage in-memory cache in sync with context
   const syncStorage = useCallback((userData, token) => {
@@ -71,21 +76,26 @@ export function AuthProvider({ children }) {
 
   // Check session once on mount
   useEffect(() => {
+    if (isPublicPage) {
+      setLoading(false);
+      return;
+    }
     if (didCheck.current) return;
     didCheck.current = true;
     checkSession();
-  }, [checkSession]);
+  }, [checkSession, isPublicPage]);
 
   // Listen for auth:expired events from api.js (401 on any request)
   useEffect(() => {
     const handleExpired = () => {
+      if (isPublicPage) return;
       setUser(null);
       syncStorage(null);
       router.push('/login');
     };
     window.addEventListener(AUTH_EXPIRED_EVENT, handleExpired);
     return () => window.removeEventListener(AUTH_EXPIRED_EVENT, handleExpired);
-  }, [syncStorage, router]);
+  }, [syncStorage, router, isPublicPage]);
 
   // Listen for user-updated events (backward compat with authStorage.setUser)
   useEffect(() => {
