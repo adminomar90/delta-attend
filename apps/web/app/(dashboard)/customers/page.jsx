@@ -45,6 +45,17 @@ const formatDate = (value) => {
   return new Date(value).toLocaleDateString('ar-IQ');
 };
 
+const buildCustomerFormMessage = (link) => {
+  return [
+    'عزيزي الزبون الكريم،',
+    'حرصًا منا على تنظيم بياناتكم وتقديم خدمة أفضل، يرجى التفضل بملء استمارة معلومات الزبائن من خلال الرابط أدناه:',
+    link,
+    '',
+    'شاكرين تعاونكم،',
+    'شركة دلتا بلس',
+  ].join('\n');
+};
+
 export default function CustomersPage() {
   const searchParams = useSearchParams();
   const currentUser = authStorage.getUser();
@@ -152,8 +163,8 @@ export default function CustomersPage() {
   };
 
   const copyLink = async (link) => {
-    await navigator.clipboard?.writeText(link);
-    setInfo('تم نسخ الرابط.');
+    await navigator.clipboard?.writeText(buildCustomerFormMessage(link));
+    setInfo('تم نسخ رسالة الاستمارة مع الرابط.');
   };
 
   const openRequest = async (request) => {
@@ -316,8 +327,8 @@ export default function CustomersPage() {
                 <strong>الرابط الجديد</strong>
                 <input className="input" value={generatedLink} readOnly dir="ltr" />
                 <div className="action-row" style={{ marginTop: 10 }}>
-                  <button className="btn btn-soft btn-sm" onClick={() => copyLink(generatedLink)}>نسخ الرابط</button>
-                  <a className="btn btn-soft btn-sm" href={`https://wa.me/?text=${encodeURIComponent(generatedLink)}`} target="_blank" rel="noreferrer">إرسال عبر واتساب</a>
+                  <button className="btn btn-soft btn-sm" onClick={() => copyLink(generatedLink)}>نسخ الرسالة</button>
+                  <a className="btn btn-soft btn-sm" href={`https://wa.me/?text=${encodeURIComponent(buildCustomerFormMessage(generatedLink))}`} target="_blank" rel="noreferrer">إرسال عبر واتساب</a>
                 </div>
               </div>
             ) : null}
@@ -344,8 +355,8 @@ export default function CustomersPage() {
                     </div>
                     <div className="form-actions daily-plan-actions">
                       <button className="btn btn-soft btn-sm" onClick={() => openRequest(request)}>عرض الطلب</button>
-                      <button className="btn btn-soft btn-sm" onClick={() => copyLink(link)}>نسخ الرابط</button>
-                      <a className="btn btn-soft btn-sm" href={`https://wa.me/?text=${encodeURIComponent(link)}`} target="_blank" rel="noreferrer">إرسال عبر واتساب</a>
+                      <button className="btn btn-soft btn-sm" onClick={() => copyLink(link)}>نسخ الرسالة</button>
+                      <a className="btn btn-soft btn-sm" href={`https://wa.me/?text=${encodeURIComponent(buildCustomerFormMessage(link))}`} target="_blank" rel="noreferrer">إرسال عبر واتساب</a>
                       {canManage && !['CANCELLED', 'SAVED_TO_CUSTOMERS', 'REJECTED'].includes(request.status) ? <button className="btn btn-soft btn-sm" onClick={() => cancelRequest(request)} disabled={saving}>إلغاء الرابط</button> : null}
                       {request.savedCustomer ? <button className="btn btn-soft btn-sm" onClick={() => setDetailsCustomer(request.savedCustomer)}>فتح ملف الزبون</button> : null}
                     </div>
