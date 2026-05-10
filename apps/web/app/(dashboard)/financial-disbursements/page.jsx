@@ -75,6 +75,14 @@ const formatMoney = (value, currency = 'IQD') => {
   return `${rendered} ${currency || 'IQD'}`;
 };
 
+const normalizeSearchText = (value) => String(value || '').trim().toLowerCase();
+
+const getRequestApprovedAmount = (request) =>
+  Number(request?.approvedAmount != null ? request.approvedAmount : request?.amount || 0);
+
+const getRequestTotalAmount = (request) =>
+  Number(request?.transactionTotalAmount || request?.amount || 0);
+
 const createMonthAnchor = (value = new Date()) => {
   const safeValue = value || new Date();
   if (typeof safeValue === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(safeValue)) {
@@ -837,6 +845,89 @@ export default function FinancialDisbursementsPage() {
 
   const [searchText, setSearchText] = useState('');
   const visibleRequests = activeTab === 'archive' ? archivedRequests : requests;
+  const employeeSearchText = normalizeSearchText(searchText);
+  const employeeOptions = useMemo(() => {
+    const employees = new Map();
+    visibleRequests.forEach((request) => {
+      const employeeName = String(request.employee?.fullName || '').trim();
+      if (employeeName) {
+        employees.set(employeeName, employeeName);
+      }
+    });
+    return Array.from(employees.values()).sort((a, b) => a.localeCompare(b, 'ar'));
+  }, [visibleRequests]);
+  const employeeSummaryRequests = useMemo(() => {
+    if (!employeeSearchText) {
+      return [];
+    }
+
+    return visibleRequests.filter((request) =>
+      normalizeSearchText(request.employee?.fullName).includes(employeeSearchText),
+    );
+  }, [employeeSearchText, visibleRequests]);
+  const employeeFinancialSummary = useMemo(() => {
+    const emptySummary = {
+      hasSearch: Boolean(employeeSearchText),
+      requests: [],
+      currency: 'IQD',
+      cards: [],
+    };
+
+    if (!employeeSearchText) {
+      return emptySummary;
+    }
+
+    const summaryRequests = employeeSummaryRequests;
+    const currency = summaryRequests.find((request) => request.currency)?.currency || 'IQD';
+    const sumByStatuses = (statuses, amountResolver = getRequestTotalAmount) =>
+      summaryRequests
+        .filter((request) => statuses.includes(request.status))
+        .reduce((sum, request) => sum + amountResolver(request), 0);
+
+    return {
+      hasSearch: true,
+      requests: summaryRequests,
+      currency,
+      cards: [
+        {
+          key: 'financial-approved',
+          label: 'المعتمد من المدير المالي',
+          statuses: ['READY_FOR_DISBURSEMENT', 'DISBURSED', 'CLOSED'],
+          amount: sumByStatuses(['READY_FOR_DISBURSEMENT', 'DISBURSED', 'CLOSED'], getRequestApprovedAmount),
+        },
+        {
+          key: 'financial-pending',
+          label: 'بانتظار المدير المالي',
+          statuses: ['PENDING_FINANCIAL_MANAGER_APPROVAL'],
+          amount: sumByStatuses(['PENDING_FINANCIAL_MANAGER_APPROVAL']),
+        },
+        {
+          key: 'project-pending',
+          label: 'متوقف عند مدير المشاريع',
+          statuses: ['PENDING_PROJECT_MANAGER_APPROVAL'],
+          amount: sumByStatuses(['PENDING_PROJECT_MANAGER_APPROVAL']),
+        },
+        {
+          key: 'general-pending',
+          label: 'متوقف عند المدير العام',
+          statuses: ['PENDING_GENERAL_MANAGER_APPROVAL'],
+          amount: sumByStatuses(['PENDING_GENERAL_MANAGER_APPROVAL'], getRequestApprovedAmount),
+        },
+        {
+          key: 'delivered',
+          label: 'المبالغ التي تم تسليمها فعليًا للموظف',
+          statuses: ['DISBURSED', 'CLOSED'],
+          amount: sumByStatuses(['DISBURSED', 'CLOSED'], getRequestApprovedAmount),
+        },
+        {
+          key: 'total',
+          label: 'المجموع الكلي',
+          statuses: null,
+          amount: summaryRequests.reduce((sum, request) => sum + getRequestTotalAmount(request), 0),
+        },
+      ],
+    };
+  }, [employeeSearchText, employeeSummaryRequests]);
   const filteredRequests = useMemo(() => {
     let result = visibleRequests;
     if (statusFilter) {
@@ -1606,11 +1697,17 @@ export default function FinancialDisbursementsPage() {
             <input
               className="input"
               type="text"
+              list="financial-disbursement-employee-options"
               placeholder="بحث برقم الطلب، اسم الموظف، نوع الصرف، أو الوصف..."
               value={searchText}
               onChange={(e) => setSearchText(e.target.value)}
               style={{ maxWidth: 400, flex: '1 1 280px' }}
             />
+            <datalist id="financial-disbursement-employee-options">
+              {employeeOptions.map((employeeName) => (
+                <option key={employeeName} value={employeeName} />
+              ))}
+            </datalist>
             <button className={`btn ${viewMode === 'table' ? 'btn-primary' : 'btn-soft'}`} type="button" onClick={() => setViewMode('table')}>
               عرض جدولي
             </button>
@@ -1633,6 +1730,69 @@ export default function FinancialDisbursementsPage() {
           </div>
         </div>
       </section>
+
+      {employeeFinancialSummary.hasSearch ? (
+        <section className="card section" style={{ marginTop: 16 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, flexWrap: 'wrap', marginBottom: 12 }}>
+            <div>
+              <h2 style={{ margin: '0 0 6px' }}>ملخص مبالغ الموظف</h2>
+              <p style={{ margin: 0, color: 'var(--text-soft)' }}>
+                {employeeFinancialSummary.requests.length
+                  ? `تم احتساب ${employeeFinancialSummary.requests.length} طلب مطابق لاسم الموظف.`
+                  : 'لا توجد طلبات صرف مطابقة لاسم الموظف الحالي.'}
+              </p>
+            </div>
+            {statusFilter ? (
+              <button className="btn btn-soft" type="button" onClick={() => setStatusFilter(null)}>
+                عرض كل حالات الموظف
+              </button>
+            ) : null}
+          </div>
+
+          <div className="grid-4">
+            {employeeFinancialSummary.cards.map((card) => {
+              const isActive = (
+                (!statusFilter && !card.statuses)
+                || (
+                  Array.isArray(statusFilter)
+                  && Array.isArray(card.statuses)
+                  && statusFilter.length === card.statuses.length
+                  && statusFilter.every((status) => card.statuses.includes(status))
+                )
+              );
+
+              return (
+                <article
+                  key={card.key}
+                  className="card section"
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => {
+                    setStatusFilter(isActive ? null : card.statuses);
+                    setTimeout(() => tableRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 0);
+                  }}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter' || event.key === ' ') {
+                      event.preventDefault();
+                      setStatusFilter(isActive ? null : card.statuses);
+                      setTimeout(() => tableRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 0);
+                    }
+                  }}
+                  style={{
+                    cursor: 'pointer',
+                    borderColor: isActive ? 'var(--accent)' : 'var(--border)',
+                    outline: isActive ? '2px solid var(--accent)' : 'none',
+                    transition: 'border-color .15s, outline .15s, transform .15s',
+                  }}
+                >
+                  <p style={{ marginTop: 0, color: 'var(--text-soft)', minHeight: 38 }}>{card.label}</p>
+                  <h2 style={{ marginBottom: 0 }}>{formatMoney(card.amount, employeeFinancialSummary.currency)}</h2>
+                </article>
+              );
+            })}
+          </div>
+        </section>
+      ) : null}
 
       <section ref={tableRef} className="card section" style={{ display: viewMode === 'table' ? 'block' : 'none', marginTop: 16 }}>
         <div style={{ display: 'none' }}>
