@@ -295,6 +295,44 @@ export const notificationService = {
     });
   },
 
+  async notifyCustomerEvaluationSubmitted(userIds, payload = {}) {
+    const recipients = Array.isArray(userIds) ? userIds : [userIds];
+    return createManyAndPush(recipients, {
+      type: 'CUSTOMER_EVALUATION_SUBMITTED',
+      titleAr: payload.titleAr || 'تقييم خدمة جديد من زبون',
+      messageAr: payload.messageAr || `وصل تقييم خدمة جديد من الزبون ${payload.customerName || '-'}.`,
+      metadata: {
+        evaluationId: payload.evaluationId || null,
+        customerName: payload.customerName || '',
+        phone: payload.phone || '',
+        sourceNumber: payload.sourceNumber || '',
+        serviceType: payload.serviceType || '',
+        departmentName: payload.departmentName || '',
+        averageScore: payload.averageScore || 0,
+        overallRating: payload.overallRating || '',
+        submittedAt: payload.submittedAt || null,
+      },
+    });
+  },
+
+  async notifyCustomerFormSubmitted(userIds, payload = {}) {
+    const recipients = Array.isArray(userIds) ? userIds : [userIds];
+    return createManyAndPush(recipients, {
+      type: 'CUSTOMER_FORM_SUBMITTED',
+      titleAr: payload.titleAr || 'استمارة معلومات زبون جديدة',
+      messageAr: payload.messageAr || `قام الزبون ${payload.customerName || '-'} بإرسال استمارة معلومات الزبون.`,
+      metadata: {
+        requestId: payload.requestId || null,
+        customerName: payload.customerName || '',
+        phone: payload.phone || '',
+        whatsapp: payload.whatsapp || '',
+        companyOrSiteName: payload.companyOrSiteName || '',
+        duplicateCount: payload.duplicateCount || 0,
+        submittedAt: payload.submittedAt || null,
+      },
+    });
+  },
+
   async notifyAttendanceActivity(userIds, payload = {}) {
     const occurredAt = payload.occurredAt ? new Date(payload.occurredAt) : new Date();
     const formattedDate = occurredAt.toLocaleDateString('ar-IQ', { timeZone: 'Asia/Baghdad' });

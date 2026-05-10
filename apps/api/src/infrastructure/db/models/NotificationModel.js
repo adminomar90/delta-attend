@@ -29,6 +29,8 @@ const notificationSchema = new mongoose.Schema(
         'MAINTENANCE_REPORT_REQUEST',
         'MAINTENANCE_REPORT_STATUS',
         'MAINTENANCE_REPORT_FEEDBACK',
+        'CUSTOMER_EVALUATION_SUBMITTED',
+        'CUSTOMER_FORM_SUBMITTED',
         'INTERNAL_CIRCULAR',
         'INTERNAL_BULLETIN',
         'INTERNAL_MEETING',

@@ -1,6 +1,8 @@
 import { CustomerRepository } from '../../infrastructure/db/repositories/CustomerRepository.js';
 import { CustomerFormRequestRepository } from '../../infrastructure/db/repositories/CustomerFormRequestRepository.js';
+import { UserRepository } from '../../infrastructure/db/repositories/UserRepository.js';
 import { auditService } from '../../application/services/auditService.js';
+import { notificationService } from '../../application/services/notificationService.js';
 import {
   buildCustomerFormAttachment,
   buildCustomerPayloadFromForm,
@@ -9,11 +11,13 @@ import {
   normalizeCustomerFormPayload,
 } from '../../application/services/customerFormService.js';
 import { normalizePhone, toCleanString } from '../../application/services/customerService.js';
-import { Roles } from '../../shared/constants.js';
+import { Permission, Roles } from '../../shared/constants.js';
 import { AppError, asyncHandler } from '../../shared/errors.js';
+import { hasAnyPermission } from '../../shared/permissions.js';
 
 const customerFormRepository = new CustomerFormRequestRepository();
 const customerRepository = new CustomerRepository();
+const userRepository = new UserRepository();
 
 const toId = (value) => String(value?._id || value?.id || value || '').trim();
 const actorLabel = (req) => req.user?.fullName || req.user?.name || 'مستخدم النظام';
@@ -47,6 +51,17 @@ const findDuplicatesForRequest = async (request, excludeId = '') => customerRepo
   [request.data?.normalizedPhone, request.data?.normalizedWhatsapp],
   excludeId,
 );
+
+const resolveCustomerFormNotificationRecipients = async (request) => {
+  const recipients = new Set([toId(request.sentBy)]);
+  const users = await userRepository.listForManagement({ includeManager: false, includeInactive: false });
+  users.forEach((user) => {
+    if (hasAnyPermission(user, [Permission.VIEW_CUSTOMERS, Permission.CREATE_CUSTOMERS, Permission.MANAGE_CUSTOMERS])) {
+      recipients.add(toId(user));
+    }
+  });
+  return [...recipients].filter(Boolean);
+};
 
 export const createCustomerFormLink = asyncHandler(async (req, res) => {
   const days = Math.max(1, Math.min(60, Number(req.body.expiresInDays || 7)));
@@ -226,6 +241,16 @@ export const submitPublicCustomerForm = asyncHandler(async (req, res) => {
   if (attachments.length) updatePayload.$push = { attachments: { $each: attachments } };
 
   const updated = await customerFormRepository.updateByToken(req.params.token, updatePayload);
+  const recipients = await resolveCustomerFormNotificationRecipients(updated);
+  await notificationService.notifyCustomerFormSubmitted(recipients, {
+    requestId: toId(updated),
+    customerName: updated.data?.customerName || '',
+    phone: updated.data?.phone || '',
+    whatsapp: updated.data?.whatsapp || '',
+    companyOrSiteName: updated.data?.companyOrSiteName || updated.data?.siteName || '',
+    duplicateCount: duplicateCustomers.length,
+    submittedAt: updated.submittedAt || new Date(),
+  });
 
   res.status(201).json({
     message: 'تم إرسال الاستمارة بنجاح',

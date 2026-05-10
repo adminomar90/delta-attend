@@ -3,7 +3,11 @@ import PDFDocument from 'pdfkit';
 import { CustomerEvaluationRepository } from '../../infrastructure/db/repositories/CustomerEvaluationRepository.js';
 import { DailyWorkPlanRepository } from '../../infrastructure/db/repositories/DailyWorkPlanRepository.js';
 import { WorkReportRepository } from '../../infrastructure/db/repositories/WorkReportRepository.js';
+import { UserRepository } from '../../infrastructure/db/repositories/UserRepository.js';
+import { notificationService } from '../../application/services/notificationService.js';
 import { AppError, asyncHandler } from '../../shared/errors.js';
+import { Permission } from '../../shared/constants.js';
+import { hasAnyPermission } from '../../shared/permissions.js';
 import {
   buildWhatsappEvaluationMessage,
   calculateAverageScore,
@@ -21,6 +25,7 @@ import {
 const evaluationRepository = new CustomerEvaluationRepository();
 const dailyWorkPlanRepository = new DailyWorkPlanRepository();
 const workReportRepository = new WorkReportRepository();
+const userRepository = new UserRepository();
 
 const toId = (value) => String(value?._id || value?.id || value || '').trim();
 const actorLabel = (req) => req.user?.fullName || req.user?.name || 'مستخدم النظام';
@@ -43,6 +48,17 @@ const getPublicEvaluation = (evaluation) => ({
   work: evaluation.work,
   source: evaluation.source,
 });
+
+const resolveEvaluationNotificationRecipients = async (evaluation) => {
+  const recipients = new Set([toId(evaluation.sentBy)]);
+  const users = await userRepository.listForManagement({ includeManager: false, includeInactive: false });
+  users.forEach((user) => {
+    if (hasAnyPermission(user, [Permission.VIEW_CUSTOMER_EVALUATIONS, Permission.MANAGE_CUSTOMER_EVALUATIONS])) {
+      recipients.add(toId(user));
+    }
+  });
+  return [...recipients].filter(Boolean);
+};
 
 const buildSnapshotFromDailyPlan = (plan, departmentOverride = '') => {
   const department = Object.values(CustomerEvaluationDepartment).includes(departmentOverride)
@@ -164,6 +180,18 @@ export const submitPublicCustomerEvaluation = asyncHandler(async (req, res) => {
     averageScore: calculateAverageScore(answers),
     status: CustomerEvaluationStatus.SUBMITTED,
     submittedAt: new Date(),
+  });
+  const recipients = await resolveEvaluationNotificationRecipients(updated);
+  await notificationService.notifyCustomerEvaluationSubmitted(recipients, {
+    evaluationId: toId(updated),
+    customerName: updated.customer?.customerName || '',
+    phone: updated.customer?.phone || '',
+    sourceNumber: updated.source?.sourceNumber || '',
+    serviceType: updated.work?.serviceType || '',
+    departmentName: updated.work?.departmentName || '',
+    averageScore: updated.averageScore || 0,
+    overallRating: answers.overallRating || '',
+    submittedAt: updated.submittedAt || new Date(),
   });
   res.status(201).json({
     message: 'شكراً لتقييمك، ملاحظاتك تساعدنا على تطوير جودة خدمات دلتا بلس.',
