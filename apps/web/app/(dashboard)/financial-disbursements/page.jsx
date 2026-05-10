@@ -83,6 +83,42 @@ const getRequestApprovedAmount = (request) =>
 const getRequestTotalAmount = (request) =>
   Number(request?.transactionTotalAmount || request?.amount || 0);
 
+const sumUniqueTransactionTotalsByStatuses = (requests = [], statuses = []) => {
+  const seenTransactions = new Set();
+
+  return requests
+    .filter((request) => statuses.includes(request.status))
+    .reduce((sum, request) => {
+      const transactionKey = String(request.transactionNo || request.id || request.requestNo || '').trim();
+      if (transactionKey && seenTransactions.has(transactionKey)) {
+        return sum;
+      }
+
+      if (transactionKey) {
+        seenTransactions.add(transactionKey);
+      }
+
+      return sum + getRequestTotalAmount(request);
+    }, 0);
+};
+
+const pendingManagementApprovalStatuses = [
+  'PENDING_PROJECT_MANAGER_APPROVAL',
+  'PENDING_FINANCIAL_MANAGER_APPROVAL',
+  'PENDING_GENERAL_MANAGER_APPROVAL',
+];
+
+const approvedNotDeliveredStatuses = [
+  'READY_FOR_DISBURSEMENT',
+];
+
+const deliveredAmountStatuses = [
+  'DISBURSED',
+  'PENDING_RECEIPT_CONFIRMATION',
+  'RECEIVED',
+  'CLOSED',
+];
+
 const createMonthAnchor = (value = new Date()) => {
   const safeValue = value || new Date();
   if (typeof safeValue === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(safeValue)) {
@@ -883,6 +919,16 @@ export default function FinancialDisbursementsPage() {
       summaryRequests
         .filter((request) => statuses.includes(request.status))
         .reduce((sum, request) => sum + amountResolver(request), 0);
+    const financialApprovedAmount = sumByStatuses(['READY_FOR_DISBURSEMENT', 'DISBURSED', 'CLOSED'], getRequestApprovedAmount);
+    const financialPendingAmount = sumUniqueTransactionTotalsByStatuses(summaryRequests, ['PENDING_FINANCIAL_MANAGER_APPROVAL']);
+    const projectPendingAmount = sumUniqueTransactionTotalsByStatuses(summaryRequests, ['PENDING_PROJECT_MANAGER_APPROVAL']);
+    const generalPendingAmount = sumUniqueTransactionTotalsByStatuses(summaryRequests, ['PENDING_GENERAL_MANAGER_APPROVAL']);
+    const deliveredAmount = sumByStatuses(deliveredAmountStatuses, getRequestApprovedAmount);
+    const totalPendingAndApprovedAmount = financialPendingAmount
+      + projectPendingAmount
+      + generalPendingAmount
+      + financialApprovedAmount
+      - deliveredAmount;
 
     return {
       hasSearch: true,
@@ -893,37 +939,37 @@ export default function FinancialDisbursementsPage() {
           key: 'financial-approved',
           label: 'المعتمد من المدير المالي',
           statuses: ['READY_FOR_DISBURSEMENT', 'DISBURSED', 'CLOSED'],
-          amount: sumByStatuses(['READY_FOR_DISBURSEMENT', 'DISBURSED', 'CLOSED'], getRequestApprovedAmount),
+          amount: financialApprovedAmount,
         },
         {
           key: 'financial-pending',
           label: 'بانتظار المدير المالي',
           statuses: ['PENDING_FINANCIAL_MANAGER_APPROVAL'],
-          amount: sumByStatuses(['PENDING_FINANCIAL_MANAGER_APPROVAL']),
+          amount: financialPendingAmount,
         },
         {
           key: 'project-pending',
           label: 'متوقف عند مدير المشاريع',
           statuses: ['PENDING_PROJECT_MANAGER_APPROVAL'],
-          amount: sumByStatuses(['PENDING_PROJECT_MANAGER_APPROVAL']),
+          amount: projectPendingAmount,
         },
         {
           key: 'general-pending',
           label: 'متوقف عند المدير العام',
           statuses: ['PENDING_GENERAL_MANAGER_APPROVAL'],
-          amount: sumByStatuses(['PENDING_GENERAL_MANAGER_APPROVAL'], getRequestApprovedAmount),
+          amount: generalPendingAmount,
         },
         {
           key: 'delivered',
           label: 'المبالغ التي تم تسليمها فعليًا للموظف',
-          statuses: ['DISBURSED', 'CLOSED'],
-          amount: sumByStatuses(['DISBURSED', 'CLOSED'], getRequestApprovedAmount),
+          statuses: deliveredAmountStatuses,
+          amount: deliveredAmount,
         },
         {
           key: 'total',
           label: 'المجموع الكلي',
-          statuses: null,
-          amount: summaryRequests.reduce((sum, request) => sum + getRequestTotalAmount(request), 0),
+          statuses: [...pendingManagementApprovalStatuses, ...approvedNotDeliveredStatuses],
+          amount: totalPendingAndApprovedAmount,
         },
       ],
     };
