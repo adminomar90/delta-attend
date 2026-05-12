@@ -35,7 +35,7 @@ export const COLORS = {
   rowOdd:    '#f0f5fb',
 };
 
-const FONT_REGULAR = path.resolve(__dirname, 'fonts', 'arial.ttf');
+const FONT_REGULAR = path.resolve(__dirname, 'fonts', 'cairo.ttf');
 const FONT_BOLD    = path.resolve(__dirname, 'fonts', 'arialbd.ttf');
 
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -82,7 +82,7 @@ export const resolveImageUrl = (publicUrl, base = '') => {
  * Creates a pre-configured PDFDocument and returns a context object (`ctx`)
  * that every other draw helper expects.
  */
-export const createDoc = ({ title = 'Delta Plus Report', author = 'Delta Plus' } = {}) => {
+export const createDoc = ({ title = 'Delta Plus Report', author = 'Delta Plus', fontScale = 1 } = {}) => {
   const doc = new PDFDocument({
     margin: 36,
     size: 'A4',
@@ -104,8 +104,11 @@ export const createDoc = ({ title = 'Delta Plus Report', author = 'Delta Plus' }
   const CW     = PW - ML - doc.page.margins.right;
   const BOTTOM = doc.page.height - doc.page.margins.bottom - 30;
 
-  return { doc, F, FB, PW, ML, CW, BOTTOM };
+  return { doc, F, FB, PW, ML, CW, BOTTOM, S: fontScale };
 };
+
+const scaledFont = (ctx, size) => Number((size * (ctx.S || 1)).toFixed(1));
+const scaledBox = (ctx, size) => Math.ceil(size * (ctx.S || 1));
 
 /* ═══════════════════════════════════════════════════════════════════════════
    DRAWING PRIMITIVES
@@ -143,16 +146,16 @@ export const drawHeader = (ctx, { title, subtitle, reportId = '', date } = {}) =
   doc.rect(0, 78, PW, 3).fill(COLORS.gold);
 
   // Company name
-  doc.font(FB).fontSize(22).fillColor(COLORS.white);
+  doc.font(FB).fontSize(scaledFont(ctx, 22)).fillColor(COLORS.white);
   doc.text('DELTA PLUS', ML, 14, { width: CW, align: 'center' });
 
   // Title
-  doc.font(F).fontSize(12).fillColor('#a0c4e8');
+  doc.font(F).fontSize(scaledFont(ctx, 12)).fillColor('#a0c4e8');
   doc.text(title || 'تقرير', ML, 42, { width: CW, align: 'center', features: ['arab'] });
 
   // Bottom-left: date
   const dateStr = fmtDateTime(date || new Date());
-  doc.font(F).fontSize(7).fillColor('#8aafc8');
+  doc.font(F).fontSize(scaledFont(ctx, 7)).fillColor('#8aafc8');
   doc.text(dateStr, ML, 62, { width: CW * 0.5, align: 'left' });
 
   // Bottom-right: ID
@@ -165,7 +168,7 @@ export const drawHeader = (ctx, { title, subtitle, reportId = '', date } = {}) =
 
   // Subtitle (if provided)
   if (subtitle) {
-    doc.font(F).fontSize(8).fillColor(COLORS.soft);
+    doc.font(F).fontSize(scaledFont(ctx, 8)).fillColor(COLORS.soft);
     doc.text(subtitle, ML, doc.y, { width: CW, align: 'center', features: ['arab'] });
     doc.y += 14;
   }
@@ -178,7 +181,7 @@ export const drawStatusBadge = (ctx, { label, color = COLORS.warning } = {}) => 
   const badgeW = 130;
   const badgeX = ML + CW - badgeW;
   doc.roundedRect(badgeX, doc.y, badgeW, 20, 3).fill(color);
-  doc.font(FB).fontSize(9).fillColor(COLORS.white);
+  doc.font(FB).fontSize(scaledFont(ctx, 9)).fillColor(COLORS.white);
   doc.text(label || '-', badgeX, doc.y + 5, { width: badgeW, align: 'center', features: ['arab'] });
   doc.y += 28;
   doc.fillColor(COLORS.text);
@@ -194,7 +197,7 @@ export const drawSectionTitle = (ctx, text) => {
   doc.rect(ML + CW - 4, y, 4, 20).fill(COLORS.accent);
   // Navy background
   doc.rect(ML, y, CW - 5, 20).fill(COLORS.navy);
-  doc.font(FB).fontSize(10).fillColor(COLORS.white);
+  doc.font(FB).fontSize(scaledFont(ctx, 10)).fillColor(COLORS.white);
   doc.text(text, ML + 6, y + 4, { width: CW - 16, align: 'right', features: ['arab'] });
   doc.y = y + 24;
   doc.fillColor(COLORS.text);
@@ -203,7 +206,7 @@ export const drawSectionTitle = (ctx, text) => {
 /* ─── Table Row (label : value) ───────────────────────────────────────────── */
 
 export const drawTableRow = (ctx, label, value, idx) => {
-  const H = 20;
+  const H = scaledBox(ctx, 20);
   const { doc, F, FB, ML, CW } = ctx;
   const y = doc.y;
   const bg = idx % 2 === 0 ? COLORS.rowEven : COLORS.rowOdd;
@@ -217,9 +220,9 @@ export const drawTableRow = (ctx, label, value, idx) => {
   const sepX = ML + valW + 4;
   doc.moveTo(sepX, y).lineTo(sepX, y + H).strokeColor(COLORS.border).lineWidth(0.3).stroke();
 
-  doc.font(FB).fontSize(8.5).fillColor(COLORS.navy);
+  doc.font(FB).fontSize(scaledFont(ctx, 8.5)).fillColor(COLORS.navy);
   doc.text(String(label), sepX + 4, y + 5, { width: labelW - 8, align: 'right', lineBreak: false, features: ['arab'] });
-  doc.font(F).fontSize(8.5).fillColor(COLORS.text);
+  doc.font(ctx.S > 1 ? FB : F).fontSize(scaledFont(ctx, 8.5)).fillColor(COLORS.text);
   doc.text(String(value), ML + 4, y + 5, { width: valW - 4, align: 'left', lineBreak: false, features: ['arab'] });
 
   doc.y = y + H;
@@ -252,10 +255,10 @@ export const drawKpiCards = (ctx, cards = []) => {
     // top accent
     doc.rect(x, startY, cardW, 3).fill(COLORS.accent);
     // value
-    doc.font(FB).fontSize(14).fillColor(COLORS.navy);
+    doc.font(FB).fontSize(scaledFont(ctx, 14)).fillColor(COLORS.navy);
     doc.text(String(card.value), x, startY + 10, { width: cardW, align: 'center', features: ['arab'] });
     // label
-    doc.font(F).fontSize(7.5).fillColor(COLORS.soft);
+    doc.font(F).fontSize(scaledFont(ctx, 7.5)).fillColor(COLORS.soft);
     doc.text(card.label, x, startY + 32, { width: cardW, align: 'center', features: ['arab'] });
   });
 
@@ -277,7 +280,7 @@ export const drawProgressBar = (ctx, percent = 0) => {
     const c = pct >= 80 ? COLORS.success : pct >= 50 ? COLORS.accent : COLORS.warning;
     doc.rect(ML, barY, CW * pct / 100, barH).fill(c);
   }
-  doc.font(FB).fontSize(6.5).fillColor(COLORS.navy);
+  doc.font(FB).fontSize(scaledFont(ctx, 6.5)).fillColor(COLORS.navy);
   doc.text(`${pct}%`, ML, barY + 1.5, { width: CW, align: 'center' });
   doc.y = barY + barH + 10;
 };
@@ -292,18 +295,18 @@ export const drawTextBlock = (ctx, label, value) => {
   doc.moveDown(0.25);
 
   // Label
-  doc.font(FB).fontSize(9).fillColor(COLORS.accent);
+  doc.font(FB).fontSize(scaledFont(ctx, 9)).fillColor(COLORS.accent);
   doc.text(`■  ${label}`, ML, doc.y, { width: CW, align: 'right', features: ['arab'] });
   doc.moveDown(0.1);
 
   // Box
   const textY = doc.y;
-  doc.font(F).fontSize(8.5).fillColor(COLORS.text);
+  doc.font(ctx.S > 1 ? FB : F).fontSize(scaledFont(ctx, 8.5)).fillColor(COLORS.text);
   const textH = doc.heightOfString(String(value), { width: CW - 16, align: 'right' });
   const boxH  = Math.max(textH + 10, 18);
   doc.rect(ML, textY - 2, CW, boxH + 4).lineWidth(0.4)
     .strokeColor(COLORS.border).fillAndStroke(COLORS.paleBlue, COLORS.border);
-  doc.fillColor(COLORS.text).font(F).fontSize(8.5);
+  doc.fillColor(COLORS.text).font(ctx.S > 1 ? FB : F).fontSize(scaledFont(ctx, 8.5));
   doc.text(String(value), ML + 8, textY + 3, { width: CW - 16, align: 'right', features: ['arab'] });
   doc.y = textY + boxH + 6;
 };
@@ -326,7 +329,7 @@ export const drawDataTable = (ctx, { headers = [], rows = [], colWidths } = {}) 
   const { doc, F, FB, ML, CW } = ctx;
   const colCount = headers.length;
   const widths = colWidths || headers.map(() => 1 / colCount);
-  const ROW_H = 20;
+  const ROW_H = scaledBox(ctx, 20);
 
   // ── Header row ──
   const hy = doc.y;
@@ -334,7 +337,7 @@ export const drawDataTable = (ctx, { headers = [], rows = [], colWidths } = {}) 
   let xOffset = ML;
   headers.forEach((header, i) => {
     const w = CW * widths[i];
-    doc.font(FB).fontSize(7.5).fillColor(COLORS.white);
+    doc.font(FB).fontSize(scaledFont(ctx, 7.5)).fillColor(COLORS.white);
     doc.text(header, xOffset + 3, hy + 5, { width: w - 6, align: 'center', lineBreak: false, features: ['arab'] });
     xOffset += w;
   });
@@ -352,7 +355,7 @@ export const drawDataTable = (ctx, { headers = [], rows = [], colWidths } = {}) 
     let rx = ML;
     row.forEach((cell, i) => {
       const w = CW * (widths[i] || widths[0]);
-      doc.font(F).fontSize(7.5).fillColor(COLORS.text);
+      doc.font(ctx.S > 1 ? FB : F).fontSize(scaledFont(ctx, 7.5)).fillColor(COLORS.text);
       doc.text(String(cell ?? '-'), rx + 3, ry + 5, { width: w - 6, align: 'center', lineBreak: false, features: ['arab'] });
       rx += w;
     });

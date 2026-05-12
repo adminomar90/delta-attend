@@ -2,6 +2,7 @@
 import { UserRepository } from '../../infrastructure/db/repositories/UserRepository.js';
 import { ProjectRepository } from '../../infrastructure/db/repositories/ProjectRepository.js';
 import { CustomerRepository } from '../../infrastructure/db/repositories/CustomerRepository.js';
+import { FieldInspectionTicketRepository } from '../../infrastructure/db/repositories/FieldInspectionTicketRepository.js';
 import { auditService } from '../../application/services/auditService.js';
 import { notificationService } from '../../application/services/notificationService.js';
 import { performancePointsService } from '../../application/services/performancePointsService.js';
@@ -32,6 +33,7 @@ import {
   toDateOnly,
 } from '../../application/services/dailyWorkPlanService.js';
 import { createCustomerSnapshot } from '../../application/services/customerService.js';
+import { buildTimelineEntry as buildFieldInspectionTimelineEntry, FieldInspectionStatus } from '../../application/services/fieldInspectionService.js';
 import { buildDailyWorkPlansExcelBuffer } from '../../infrastructure/reports/dailyWorkPlansExcelBuilder.js';
 import { buildDailyWorkPlansPdfBuffer } from '../../infrastructure/reports/dailyWorkPlansPdfBuilder.js';
 import {
@@ -47,6 +49,7 @@ const dailyWorkPlanRepository = new DailyWorkPlanRepository();
 const userRepository = new UserRepository();
 const projectRepository = new ProjectRepository();
 const customerRepository = new CustomerRepository();
+const fieldInspectionTicketRepository = new FieldInspectionTicketRepository();
 
 const toId = (value) => String(value?._id || value?.id || value || '').trim();
 
@@ -1293,6 +1296,30 @@ export const approveDailyWorkPlan = asyncHandler(async (req, res) => {
     });
   } catch (notifyErr) {
     console.error('[Approve] Plan event notification failed:', notifyErr.message);
+  }
+
+  const linkedFieldInspectionId = toId(updatedPlan.fieldInspection?.ticket);
+  if (linkedFieldInspectionId) {
+    try {
+      await fieldInspectionTicketRepository.updateById(linkedFieldInspectionId, {
+        status: FieldInspectionStatus.CLOSED,
+        closedAt: new Date(),
+        closedBy: req.user.id,
+        closedByName: actorLabel(req),
+        $push: {
+          timeline: buildFieldInspectionTimelineEntry({
+            type: 'FIELD_INSPECTION_AUTO_CLOSED_FROM_DAILY_PLAN',
+            actor: req.user.id,
+            actorName: actorLabel(req),
+            actorRole: req.user.role,
+            message: `تم إغلاق تذكرة الكشف تلقائيًا بعد اعتماد البلان ${updatedPlan.title}.`,
+            metadata: { planId: toId(updatedPlan) },
+          }),
+        },
+      });
+    } catch (fieldInspectionErr) {
+      console.error('[Approve] Failed to close linked field inspection:', fieldInspectionErr.message);
+    }
   }
 
   res.json({

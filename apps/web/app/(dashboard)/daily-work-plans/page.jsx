@@ -98,6 +98,7 @@ export default function DailyWorkPlansPage() {
   const [calendarMonth, setCalendarMonth] = useState(() => createMonthAnchor(new Date()));
   const [calendarSelectedDate, setCalendarSelectedDate] = useState(() => toDateInputValue(new Date()));
   const calendarSectionRef = useRef(null);
+  const openedLinkedPlanRef = useRef('');
   const isArchiveTab = activeTab === 'archive';
 
   const queryString = useMemo(() => {
@@ -165,6 +166,25 @@ export default function DailyWorkPlansPage() {
   useEffect(() => { if (!canView || !calendarOpen || isArchiveTab) return undefined; const interval = window.setInterval(() => loadCalendar(true), 30000); return () => window.clearInterval(interval); }, [calendarOpen, calendarQueryString, canView, isArchiveTab]);
   useEffect(() => { if (!calendarOpen || isArchiveTab) return undefined; const rafId = window.requestAnimationFrame(() => { const el = calendarSectionRef.current; if (!el) return; const targetTop = el.getBoundingClientRect().top + window.scrollY - 88; window.scrollTo({ top: Math.max(0, targetTop), behavior: 'smooth' }); }); return () => window.cancelAnimationFrame(rafId); }, [calendarOpen, isArchiveTab]);
   useEffect(() => { if (isArchiveTab) setCalendarOpen(false); }, [isArchiveTab]);
+  useEffect(() => {
+    if (!canView || typeof window === 'undefined') return;
+    const planId = new URLSearchParams(window.location.search).get('planId');
+    if (!planId || openedLinkedPlanRef.current === planId) return;
+    openedLinkedPlanRef.current = planId;
+
+    const openLinkedPlan = async () => {
+      try {
+        const response = await api.get(`/daily-work-plans/${planId}`);
+        const plan = enrichPlan(response.plan, { currentUserId: currentUser?.id, canManage });
+        if (canManage) setEditingPlan(plan);
+        else setDetailsPlan(plan);
+      } catch (err) {
+        setError(err.message || 'تعذر فتح البلان المرتبط');
+      }
+    };
+
+    openLinkedPlan();
+  }, [canManage, canView, currentUser?.id]);
 
   const mutate = async (callback, successMessage) => {
     setSaving(true); setError(''); setInfo('');

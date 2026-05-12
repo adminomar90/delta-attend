@@ -20,6 +20,7 @@ import dailyWorkPlansRoutes from './dailyWorkPlansRoutes.js';
 import customersRoutes from './customersRoutes.js';
 import customerFormsRoutes from './customerFormsRoutes.js';
 import customerEvaluationsRoutes from './customerEvaluationsRoutes.js';
+import fieldInspectionsRoutes from './fieldInspectionsRoutes.js';
 
 const router = Router();
 
@@ -43,6 +44,7 @@ router.use('/daily-work-plans', dailyWorkPlansRoutes);
 router.use('/customers', customersRoutes);
 router.use('/customer-forms', customerFormsRoutes);
 router.use('/customer-evaluations', customerEvaluationsRoutes);
+router.use('/field-inspections', fieldInspectionsRoutes);
 router.use('/network-docs', networkDocsRoutes);
 
 export default router;

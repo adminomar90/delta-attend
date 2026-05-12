@@ -15,6 +15,7 @@ const menuIcons = {
   '/maintenance-reports': '🛠️',
   '/maintenance-plans': '🗓️',
   '/daily-work-plans': '🧭',
+  '/field-inspections': '🧪',
   '/customers': '☎️',
   '/customers?tab=forms': '🧾',
   '/customer-evaluations': '⭐',
@@ -88,6 +89,16 @@ const menu = [
       Permission.MANAGE_DAILY_WORK_PLANS,
       Permission.UPDATE_ASSIGNED_DAILY_WORK_PLANS,
       Permission.APPROVE_DAILY_WORK_PLANS,
+    ],
+  },
+  {
+    href: '/field-inspections',
+    label: 'الكشف الميداني',
+    anyPermissions: [
+      Permission.VIEW_FIELD_INSPECTIONS,
+      Permission.CREATE_FIELD_INSPECTIONS,
+      Permission.MANAGE_FIELD_INSPECTIONS,
+      Permission.HANDLE_FIELD_INSPECTIONS,
     ],
   },
   {

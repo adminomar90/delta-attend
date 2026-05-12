@@ -6,7 +6,8 @@ const applyPopulate = (query) =>
     .populate('lastModifiedBy', 'fullName role jobTitle')
     .populate('archivedBy', 'fullName role jobTitle')
     .populate('linkedProjects', 'name code status')
-    .populate('linkedDailyWorkPlans', 'title planDate status');
+    .populate('linkedDailyWorkPlans', 'title planDate status')
+    .populate('linkedFieldInspections', 'ticketNo status appointmentAt serviceType closedAt linkedDailyWorkPlan');
 
 export class CustomerRepository {
   async create(payload) {

@@ -78,6 +78,16 @@ export const uploadDailyWorkPlanAttachmentsMiddleware = multer({
   },
 });
 
+export const uploadFieldInspectionAttachmentsMiddleware = multer({
+  storage: diskStorage,
+  limits: {
+    fileSize: 25 * 1024 * 1024,
+    files: 30,
+    fieldSize: 10 * 1024 * 1024,
+    fields: 200,
+  },
+});
+
 export const uploadImportFileMiddleware = multer({
   storage: multer.memoryStorage(),
   limits: {

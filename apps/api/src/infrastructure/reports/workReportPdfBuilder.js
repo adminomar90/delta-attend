@@ -25,7 +25,7 @@ export const buildWorkReportPdfBuffer = async (
   report,
   { publicBaseUrl = '', uploadRootDir = '' } = {},
 ) => {
-  const ctx = createDoc({ title: `تقرير العمل - ${safe(report?.title)}` });
+  const ctx = createDoc({ title: `تقرير العمل - ${safe(report?.title)}`, fontScale: 1.18 });
 
   /* ═══════════════════════════════════════════════════════════════════════
      1. HEADER BANNER
@@ -94,7 +94,7 @@ export const buildWorkReportPdfBuffer = async (
       colWidths: [0.08, 0.34, 0.2, 0.18, 0.2],
     });
   } else {
-    ctx.doc.font(ctx.F).fontSize(8.5).fillColor(COLORS.soft);
+    ctx.doc.font(ctx.FB).fontSize(10).fillColor(COLORS.soft);
     ctx.doc.text(
       participantCount > 0 ? `${participantCount} مشاركين` : 'لا يوجد كادر مشارك',
       ctx.ML, ctx.doc.y, { width: ctx.CW, align: 'right', features: ['arab'] },
@@ -120,10 +120,10 @@ export const buildWorkReportPdfBuffer = async (
   ctx.doc.moveDown(0.2);
   const titleY = ctx.doc.y;
   const titleText = safe(report?.title);
-  const titleH = Math.max(ctx.doc.font(ctx.FB).fontSize(11).heightOfString(titleText, { width: ctx.CW - 24, align: 'right' }) + 14, 28);
+  const titleH = Math.max(ctx.doc.font(ctx.FB).fontSize(13).heightOfString(titleText, { width: ctx.CW - 24, align: 'right' }) + 16, 32);
   ctx.doc.rect(ctx.ML, titleY, ctx.CW, titleH).fill(COLORS.lightBlue);
   ctx.doc.rect(ctx.ML + ctx.CW - 3, titleY, 3, titleH).fill(COLORS.accent);
-  ctx.doc.font(ctx.FB).fontSize(11).fillColor(COLORS.navy);
+  ctx.doc.font(ctx.FB).fontSize(13).fillColor(COLORS.navy);
   ctx.doc.text(titleText, ctx.ML + 8, titleY + 7, { width: ctx.CW - 24, align: 'right', features: ['arab'] });
   ctx.doc.y = titleY + titleH + 6;
   ctx.doc.fillColor(COLORS.text);

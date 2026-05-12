@@ -15,7 +15,11 @@ export const sanitizeWhatsappNumber = (value) => {
   }
 
   const withoutDoubleZero = cleaned.startsWith('00') ? cleaned.slice(2) : cleaned;
-  return withoutDoubleZero.replace(/\+/g, '');
+  const compact = withoutDoubleZero.replace(/\+/g, '');
+  if (compact.startsWith('964')) return compact;
+  if (compact.startsWith('0')) return `964${compact.slice(1)}`;
+  if (compact.length === 10 && compact.startsWith('7')) return `964${compact}`;
+  return compact;
 };
 
 export const buildWhatsAppSendUrl = (phone, message) => {
@@ -24,7 +28,7 @@ export const buildWhatsAppSendUrl = (phone, message) => {
     return '';
   }
 
-  return `https://api.whatsapp.com/send?phone=${normalized}&text=${encodeURIComponent(message || '')}`;
+  return `https://wa.me/${normalized}?text=${encodeURIComponent(message || '')}`;
 };
 
 export const haversineDistanceMeters = (lat1, lon1, lat2, lon2) => {

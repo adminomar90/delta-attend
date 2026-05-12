@@ -9,7 +9,8 @@ import {
 
 test('sanitizeWhatsappNumber normalizes international number', () => {
   assert.equal(sanitizeWhatsappNumber('+964 770 123 4567'), '9647701234567');
-  assert.equal(sanitizeWhatsappNumber('00770-123-4567'), '7701234567');
+  assert.equal(sanitizeWhatsappNumber('00770-123-4567'), '9647701234567');
+  assert.equal(sanitizeWhatsappNumber('07721661664'), '9647721661664');
 });
 
 test('haversineDistanceMeters returns zero for same coordinates', () => {

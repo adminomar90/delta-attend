@@ -96,6 +96,7 @@ const customerSchema = new mongoose.Schema(
     formSubmissions: { type: [customerFormSubmissionSchema], default: [] },
     linkedProjects: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Project' }],
     linkedDailyWorkPlans: [{ type: mongoose.Schema.Types.ObjectId, ref: 'DailyWorkPlan' }],
+    linkedFieldInspections: [{ type: mongoose.Schema.Types.ObjectId, ref: 'FieldInspectionTicket' }],
     archived: { type: Boolean, default: false, index: true },
     archivedAt: { type: Date, default: null },
     archivedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },

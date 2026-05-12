@@ -579,6 +579,20 @@ export default function CustomersPage() {
                   </div>
                 </section>
               ) : null}
+              {detailsCustomer.linkedFieldInspections?.length ? (
+                <section className="daily-plan-form-section">
+                  <h4>سجل الكشف الميداني</h4>
+                  <div className="daily-plan-attachment-grid">
+                    {detailsCustomer.linkedFieldInspections.map((ticket) => (
+                      <a className="daily-plan-attachment-card" key={ticket._id || ticket.id} href={`/field-inspections?ticket=${ticket._id || ticket.id}`}>
+                        <strong>{ticket.ticketNo || '-'}</strong>
+                        <span>{ticket.serviceType || '-'} - {ticket.status || '-'}</span>
+                        <span>موعد الكشف: {formatDate(ticket.appointmentAt)} - الإغلاق: {formatDate(ticket.closedAt)}</span>
+                      </a>
+                    ))}
+                  </div>
+                </section>
+              ) : null}
             </div>
           </div>
         </div>

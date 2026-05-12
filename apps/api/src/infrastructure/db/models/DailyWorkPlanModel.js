@@ -315,6 +315,10 @@ const dailyWorkPlanSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.Mixed,
       default: null,
     },
+    fieldInspection: {
+      ticket: { type: mongoose.Schema.Types.ObjectId, ref: 'FieldInspectionTicket', default: null, index: true },
+      ticketNo: { type: String, default: '' },
+    },
   },
   {
     timestamps: true,
