@@ -350,6 +350,9 @@ export default function FieldInspectionsPage() {
     setSelectedAttachmentIds([]);
   };
 
+  const getReportWhatsappRedirectUrl = (ticket) =>
+    ticket?.id ? assetUrl(`/api/field-inspections/${ticket.id}/send-report/redirect`) : '#';
+
   const load = async ({ preserveSelected = true } = {}) => {
     setLoading(true);
     try {
@@ -677,35 +680,6 @@ export default function FieldInspectionsPage() {
     }
   };
 
-  const sendTicketReport = async (ticket) => {
-    if (!ticket?.report?.publicUrl) return;
-    const whatsappWindow = window.open('', '_blank', 'noopener,noreferrer');
-    setSaving(true);
-    try {
-      const response = await api.post(`/field-inspections/${ticket.id}/send-report`, {});
-      if (response.message && navigator.clipboard?.writeText) {
-        await navigator.clipboard.writeText(response.message).catch(() => {});
-      }
-      const whatsappUrl = response.whatsappUrl || (response.message ? `https://wa.me/?text=${encodeURIComponent(response.message)}` : '');
-      if (whatsappUrl) {
-        if (whatsappWindow) whatsappWindow.location.href = whatsappUrl;
-        else window.open(whatsappUrl, '_blank', 'noopener,noreferrer');
-      } else if (whatsappWindow) {
-        whatsappWindow.close();
-      }
-      if (response.ticket) {
-        setTickets((prev) => prev.map((item) => (item.id === response.ticket.id ? response.ticket : item)));
-        if (selected?.id === response.ticket.id) setSelected(response.ticket);
-      }
-      setError('');
-      setInfo('تم فتح واتساب مع رسالة التقرير، وتم نسخ الرسالة احتياطيًا.');
-    } catch (err) {
-      if (whatsappWindow) whatsappWindow.close();
-      setError(err.message || 'تعذر إرسال التقرير للزبون');
-    } finally {
-      setSaving(false);
-    }
-  };
   const deleteTicket = async (ticketToDelete = selected) => {
     if (!ticketToDelete || !canManage) return;
     const confirmed = window.confirm(`هل تريد حذف التذكرة ${ticketToDelete.ticketNo} نهائيًا؟`);
@@ -1071,7 +1045,7 @@ export default function FieldInspectionsPage() {
                 {canHandle && ['SCHEDULED', 'AWAITING_SCHEDULE'].includes(ticket.status) ? <button className="btn btn-primary btn-sm" type="button" onClick={() => startTicketInspection(ticket)} disabled={saving}>بدء الكشف</button> : null}
                 {canManage && ['AWAITING_DAILY_PLAN', 'INSPECTION_COMPLETED'].includes(ticket.status) && !ticket.linkedDailyWorkPlan ? <button className="btn btn-primary btn-sm" type="button" onClick={() => activateTicketDailyPlan(ticket)} disabled={saving}>تفعيل بلان العمل اليومي</button> : null}
                 {ticket.report?.publicUrl ? <a className="btn btn-soft btn-sm" href={assetUrl(`/api/field-inspections/${ticket.id}/report/download`)} target="_blank" rel="noreferrer">تحميل PDF</a> : null}
-                {ticket.report?.publicUrl ? <button className="btn btn-soft btn-sm" type="button" onClick={() => sendTicketReport(ticket)} disabled={saving}>إرسال التقرير للزبون</button> : null}
+                {ticket.report?.publicUrl ? <a className="btn btn-soft btn-sm" href={getReportWhatsappRedirectUrl(ticket)} target="_blank" rel="noreferrer">إرسال التقرير للزبون</a> : null}
                 {canManage ? <button className="btn btn-danger btn-sm" type="button" onClick={() => deleteTicket(ticket)} disabled={saving}>حذف التذكرة</button> : null}
               </div>
             </article>
@@ -1127,7 +1101,7 @@ export default function FieldInspectionsPage() {
             }} disabled={saving}>تعديل الكشف</button> : null}
             {canHandle && selected.status === 'IN_INSPECTION' ? <button className="btn btn-primary" type="button" onClick={completeInspection} disabled={saving}>إنهاء الكشف</button> : null}
             {selected.report?.publicUrl ? <a className="btn btn-soft" href={assetUrl(`/api/field-inspections/${selected.id}/report/download`)} target="_blank" rel="noreferrer">فتح تقرير PDF</a> : null}
-            {selected.report?.publicUrl ? <button className="btn btn-soft" type="button" onClick={() => sendTicketReport(selected)} disabled={saving}>إرسال نسخة للزبون</button> : null}
+            {selected.report?.publicUrl ? <a className="btn btn-soft" href={getReportWhatsappRedirectUrl(selected)} target="_blank" rel="noreferrer">إرسال نسخة للزبون</a> : null}
             {canManage && ['AWAITING_DAILY_PLAN', 'INSPECTION_COMPLETED'].includes(selected.status) && !selected.linkedDailyWorkPlan ? <button className="btn btn-primary" type="button" onClick={() => runAction('activate-daily-plan')} disabled={saving}>تفعيل بلان عمل يومي</button> : null}
             {selected.linkedDailyWorkPlan ? <a className="btn btn-soft" href={`/daily-work-plans?planId=${selected.linkedDailyWorkPlan._id || selected.linkedDailyWorkPlan.id || selected.linkedDailyWorkPlan}`}>فتح البلان المرتبط</a> : null}
             {canManage && selected.linkedDailyWorkPlan && selected.status !== 'CLOSED' ? <button className="btn btn-soft" type="button" onClick={() => runAction('close', { message: 'تم إغلاق التذكرة.' })} disabled={saving}>إغلاق التذكرة</button> : null}

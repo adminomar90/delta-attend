@@ -9,6 +9,7 @@ import {
   getFieldInspectionTicket,
   listFieldInspectionMeta,
   listFieldInspectionTickets,
+  redirectFieldInspectionReportToWhatsapp,
   saveFieldInspectionForm,
   sendFieldInspectionAppointment,
   sendFieldInspectionReport,
@@ -43,6 +44,7 @@ fieldInspectionsRoutes.post('/:id/start', startFieldInspection);
 fieldInspectionsRoutes.patch('/:id/form', uploadFieldInspectionAttachmentsMiddleware.array('attachments', 30), saveFieldInspectionForm);
 fieldInspectionsRoutes.post('/:id/complete', completeFieldInspection);
 fieldInspectionsRoutes.get('/:id/report/download', downloadFieldInspectionReport);
+fieldInspectionsRoutes.get('/:id/send-report/redirect', redirectFieldInspectionReportToWhatsapp);
 fieldInspectionsRoutes.post('/:id/send-report', sendFieldInspectionReport);
 fieldInspectionsRoutes.post('/:id/activate-daily-plan', activateFieldInspectionDailyPlan);
 fieldInspectionsRoutes.post('/:id/close', closeFieldInspectionTicket);

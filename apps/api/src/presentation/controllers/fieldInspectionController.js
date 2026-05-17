@@ -500,7 +500,7 @@ export const downloadFieldInspectionReport = asyncHandler(async (req, res) => {
   res.send(pdfBuffer);
 });
 
-export const sendFieldInspectionReport = asyncHandler(async (req, res) => {
+const buildFieldInspectionReportShare = async (req) => {
   const ticket = await ticketRepository.findById(req.params.id);
   if (!ticket) throw new AppError('Field inspection ticket not found', 404);
   assertCanRead(req, ticket);
@@ -529,7 +529,16 @@ export const sendFieldInspectionReport = asyncHandler(async (req, res) => {
     'شاكرين ثقتكم بنا.',
   ].join('\n');
   const phone = updated.customerSnapshot?.whatsapp || updated.customerSnapshot?.phone || '';
-  res.json({ ticket: serializeTicket(updated), whatsappUrl: buildFieldInspectionWhatsappUrl(phone, message), message });
+  return { ticket: serializeTicket(updated), whatsappUrl: buildFieldInspectionWhatsappUrl(phone, message), message };
+};
+
+export const sendFieldInspectionReport = asyncHandler(async (req, res) => {
+  res.json(await buildFieldInspectionReportShare(req));
+});
+
+export const redirectFieldInspectionReportToWhatsapp = asyncHandler(async (req, res) => {
+  const { whatsappUrl } = await buildFieldInspectionReportShare(req);
+  res.redirect(302, whatsappUrl);
 });
 
 export const activateFieldInspectionDailyPlan = asyncHandler(async (req, res) => {
