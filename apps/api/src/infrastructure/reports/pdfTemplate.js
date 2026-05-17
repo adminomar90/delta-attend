@@ -51,6 +51,11 @@ export const safe = (v) => {
   return s || '-';
 };
 
+const LRM = '\u200e';
+
+export const fixMixedDirectionText = (value) =>
+  String(value ?? '').replace(/([A-Za-z0-9][A-Za-z0-9.,:/+_%#-]*)/g, `${LRM}$1${LRM}`);
+
 export const fmtPoints = (v) => {
   const n = Number(v || 0);
   if (!Number.isFinite(n)) return '0';
@@ -221,9 +226,9 @@ export const drawTableRow = (ctx, label, value, idx) => {
   doc.moveTo(sepX, y).lineTo(sepX, y + H).strokeColor(COLORS.border).lineWidth(0.3).stroke();
 
   doc.font(FB).fontSize(scaledFont(ctx, 8.5)).fillColor(COLORS.navy);
-  doc.text(String(label), sepX + 4, y + 5, { width: labelW - 8, align: 'right', lineBreak: false, features: ['arab'] });
+  doc.text(fixMixedDirectionText(label), sepX + 4, y + 5, { width: labelW - 8, align: 'right', lineBreak: false, features: ['arab'] });
   doc.font(ctx.S > 1 ? FB : F).fontSize(scaledFont(ctx, 8.5)).fillColor(COLORS.text);
-  doc.text(String(value), ML + 4, y + 5, { width: valW - 4, align: 'left', lineBreak: false, features: ['arab'] });
+  doc.text(fixMixedDirectionText(value), ML + 4, y + 5, { width: valW - 4, align: 'left', lineBreak: false, features: ['arab'] });
 
   doc.y = y + H;
   doc.fillColor(COLORS.text);
@@ -256,10 +261,10 @@ export const drawKpiCards = (ctx, cards = []) => {
     doc.rect(x, startY, cardW, 3).fill(COLORS.accent);
     // value
     doc.font(FB).fontSize(scaledFont(ctx, 14)).fillColor(COLORS.navy);
-    doc.text(String(card.value), x, startY + 10, { width: cardW, align: 'center', features: ['arab'] });
+    doc.text(fixMixedDirectionText(card.value), x, startY + 10, { width: cardW, align: 'center', features: ['arab'] });
     // label
     doc.font(F).fontSize(scaledFont(ctx, 7.5)).fillColor(COLORS.soft);
-    doc.text(card.label, x, startY + 32, { width: cardW, align: 'center', features: ['arab'] });
+    doc.text(fixMixedDirectionText(card.label), x, startY + 32, { width: cardW, align: 'center', features: ['arab'] });
   });
 
   doc.y = startY + cardH + 10;
@@ -302,12 +307,13 @@ export const drawTextBlock = (ctx, label, value) => {
   // Box
   const textY = doc.y;
   doc.font(ctx.S > 1 ? FB : F).fontSize(scaledFont(ctx, 8.5)).fillColor(COLORS.text);
-  const textH = doc.heightOfString(String(value), { width: CW - 16, align: 'right' });
+  const printableValue = fixMixedDirectionText(value);
+  const textH = doc.heightOfString(printableValue, { width: CW - 16, align: 'right' });
   const boxH  = Math.max(textH + 10, 18);
   doc.rect(ML, textY - 2, CW, boxH + 4).lineWidth(0.4)
     .strokeColor(COLORS.border).fillAndStroke(COLORS.paleBlue, COLORS.border);
   doc.fillColor(COLORS.text).font(ctx.S > 1 ? FB : F).fontSize(scaledFont(ctx, 8.5));
-  doc.text(String(value), ML + 8, textY + 3, { width: CW - 16, align: 'right', features: ['arab'] });
+  doc.text(printableValue, ML + 8, textY + 3, { width: CW - 16, align: 'right', features: ['arab'] });
   doc.y = textY + boxH + 6;
 };
 
@@ -338,7 +344,7 @@ export const drawDataTable = (ctx, { headers = [], rows = [], colWidths } = {}) 
   headers.forEach((header, i) => {
     const w = CW * widths[i];
     doc.font(FB).fontSize(scaledFont(ctx, 7.5)).fillColor(COLORS.white);
-    doc.text(header, xOffset + 3, hy + 5, { width: w - 6, align: 'center', lineBreak: false, features: ['arab'] });
+    doc.text(fixMixedDirectionText(header), xOffset + 3, hy + 5, { width: w - 6, align: 'center', lineBreak: false, features: ['arab'] });
     xOffset += w;
   });
   doc.y = hy + ROW_H;
@@ -356,7 +362,7 @@ export const drawDataTable = (ctx, { headers = [], rows = [], colWidths } = {}) 
     row.forEach((cell, i) => {
       const w = CW * (widths[i] || widths[0]);
       doc.font(ctx.S > 1 ? FB : F).fontSize(scaledFont(ctx, 7.5)).fillColor(COLORS.text);
-      doc.text(String(cell ?? '-'), rx + 3, ry + 5, { width: w - 6, align: 'center', lineBreak: false, features: ['arab'] });
+      doc.text(fixMixedDirectionText(cell ?? '-'), rx + 3, ry + 5, { width: w - 6, align: 'center', lineBreak: false, features: ['arab'] });
       rx += w;
     });
     doc.y = ry + ROW_H;
