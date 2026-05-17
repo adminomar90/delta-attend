@@ -276,6 +276,7 @@ export default function FieldInspectionsPage() {
   const [error, setError] = useState('');
   const [info, setInfo] = useState('');
   const [attachments, setAttachments] = useState([]);
+  const [selectedAttachmentIds, setSelectedAttachmentIds] = useState([]);
   const [editingInspectionForm, setEditingInspectionForm] = useState(false);
   const [scrollToTicketDetails, setScrollToTicketDetails] = useState(false);
   const [scrollToInspectionForm, setScrollToInspectionForm] = useState(false);
@@ -288,6 +289,7 @@ export default function FieldInspectionsPage() {
   const inspectionFormRef = useRef(null);
   const calendarSectionRef = useRef(null);
   const signatureCanvasRef = useRef(null);
+  const attachmentInputRef = useRef(null);
   const isSigningRef = useRef(false);
 
   const filteredTickets = useMemo(() => tickets.filter((ticket) => ticketMatches(ticket, filters)), [tickets, filters]);
@@ -309,9 +311,43 @@ export default function FieldInspectionsPage() {
     setSelected(null);
     setInspectionForm(emptyInspectionForm);
     setAttachments([]);
+    setSelectedAttachmentIds([]);
+    if (attachmentInputRef.current) attachmentInputRef.current.value = '';
     setEditingInspectionForm(false);
     setScrollToTicketDetails(false);
     setScrollToInspectionForm(false);
+  };
+
+  const handleAttachmentSelect = (event) => {
+    const files = Array.from(event.target.files || []);
+    if (!files.length) return;
+    setAttachments((prev) => [
+      ...prev,
+      ...files.map((file) => ({
+        id: `${file.name}-${file.lastModified}-${file.size}-${Math.random().toString(36).slice(2)}`,
+        file,
+      })),
+    ]);
+    setSelectedAttachmentIds([]);
+    event.target.value = '';
+  };
+
+  const toggleAttachmentSelection = (id) => {
+    setSelectedAttachmentIds((prev) => (
+      prev.includes(id) ? prev.filter((itemId) => itemId !== id) : [...prev, id]
+    ));
+  };
+
+  const removeAttachment = (id) => {
+    setAttachments((prev) => prev.filter((item) => item.id !== id));
+    setSelectedAttachmentIds((prev) => prev.filter((itemId) => itemId !== id));
+  };
+
+  const removeSelectedAttachments = () => {
+    if (!selectedAttachmentIds.length) return;
+    const selectedIds = new Set(selectedAttachmentIds);
+    setAttachments((prev) => prev.filter((item) => !selectedIds.has(item.id)));
+    setSelectedAttachmentIds([]);
   };
 
   const load = async ({ preserveSelected = true } = {}) => {
@@ -433,6 +469,8 @@ export default function FieldInspectionsPage() {
       setSelected(response.ticket);
       setInspectionForm({ ...emptyInspectionForm, ...(response.ticket.inspectionForm || {}) });
       setAttachments([]);
+      setSelectedAttachmentIds([]);
+      if (attachmentInputRef.current) attachmentInputRef.current.value = '';
       setError('');
       setInfo('');
       setShowForm(false);
@@ -600,6 +638,8 @@ export default function FieldInspectionsPage() {
         setSelected(response.ticket);
         setInspectionForm({ ...emptyInspectionForm, ...(response.ticket.inspectionForm || {}) });
         setAttachments([]);
+        setSelectedAttachmentIds([]);
+        if (attachmentInputRef.current) attachmentInputRef.current.value = '';
         setShowForm(false);
         setEditingInspectionForm(true);
         setScrollToInspectionForm(true);
@@ -700,7 +740,9 @@ export default function FieldInspectionsPage() {
         body.append(key, value || '');
       }
     });
-    Array.from(attachments || []).forEach((file) => body.append('attachments', file));
+    attachments.forEach((item) => {
+      if (item?.file) body.append('attachments', item.file);
+    });
     return body;
   };
 
@@ -1084,7 +1126,7 @@ export default function FieldInspectionsPage() {
             }} disabled={saving}>تعديل الكشف</button> : null}
             {canHandle && selected.status === 'IN_INSPECTION' ? <button className="btn btn-primary" type="button" onClick={completeInspection} disabled={saving}>إنهاء الكشف</button> : null}
             {selected.report?.publicUrl ? <a className="btn btn-soft" href={assetUrl(`/api/field-inspections/${selected.id}/report/download`)} target="_blank" rel="noreferrer">فتح تقرير PDF</a> : null}
-            {selected.report?.publicUrl ? <button className="btn btn-soft" type="button" onClick={() => runAction('send-report', { message: 'تم فتح واتساب لإرسال التقرير.' })} disabled={saving}>إرسال نسخة للزبون</button> : null}
+            {selected.report?.publicUrl ? <button className="btn btn-soft" type="button" onClick={() => sendTicketReport(selected)} disabled={saving}>إرسال نسخة للزبون</button> : null}
             {canManage && ['AWAITING_DAILY_PLAN', 'INSPECTION_COMPLETED'].includes(selected.status) && !selected.linkedDailyWorkPlan ? <button className="btn btn-primary" type="button" onClick={() => runAction('activate-daily-plan')} disabled={saving}>تفعيل بلان عمل يومي</button> : null}
             {selected.linkedDailyWorkPlan ? <a className="btn btn-soft" href={`/daily-work-plans?planId=${selected.linkedDailyWorkPlan._id || selected.linkedDailyWorkPlan.id || selected.linkedDailyWorkPlan}`}>فتح البلان المرتبط</a> : null}
             {canManage && selected.linkedDailyWorkPlan && selected.status !== 'CLOSED' ? <button className="btn btn-soft" type="button" onClick={() => runAction('close', { message: 'تم إغلاق التذكرة.' })} disabled={saving}>إغلاق التذكرة</button> : null}
@@ -1221,7 +1263,28 @@ export default function FieldInspectionsPage() {
                   {renderSelect('نتيجة الكشف', inspectionForm.inspectionResult, inspectionResultOptions, (value) => setInspectionField('inspectionResult', value), true)}
                   <label style={{ gridColumn: '1 / -1' }}>توصية الفني<textarea className="input" rows={2} value={inspectionForm.technicianRecommendation || ''} onChange={(event) => setInspectionField('technicianRecommendation', event.target.value)} /></label>
                   <label style={{ gridColumn: '1 / -1' }}>ملاحظات عامة<textarea className="input" rows={2} value={inspectionForm.generalNotes || ''} onChange={(event) => setInspectionField('generalNotes', event.target.value)} /></label>
-                  <label style={{ gridColumn: '1 / -1' }}>الصور والمرفقات<input className="input" type="file" multiple onChange={(event) => setAttachments(event.target.files)} /></label>
+                  <div style={{ gridColumn: '1 / -1' }}>
+                    <label>الصور والمرفقات<input ref={attachmentInputRef} className="input" type="file" multiple onChange={handleAttachmentSelect} /></label>
+                    {attachments.length ? (
+                      <div style={{ marginTop: 10, padding: 10, border: '1px solid var(--border)', borderRadius: 8 }}>
+                        <div className="form-actions" style={{ justifyContent: 'space-between', marginBottom: 8 }}>
+                          <strong>المرفقات المختارة</strong>
+                          <button className="btn btn-danger btn-sm" type="button" onClick={removeSelectedAttachments} disabled={!selectedAttachmentIds.length}>
+                            حذف المحدد
+                          </button>
+                        </div>
+                        {attachments.map((item) => (
+                          <div key={item.id} className="daily-plan-card-subtitle" style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 6 }}>
+                            <label style={{ display: 'flex', alignItems: 'center', gap: 8, flex: 1 }}>
+                              <input type="checkbox" checked={selectedAttachmentIds.includes(item.id)} onChange={() => toggleAttachmentSelection(item.id)} />
+                              <span>{item.file.name} - {Math.ceil(item.file.size / 1024)} KB</span>
+                            </label>
+                            <button className="btn btn-soft btn-sm" type="button" onClick={() => removeAttachment(item.id)}>حذف</button>
+                          </div>
+                        ))}
+                      </div>
+                    ) : null}
+                  </div>
                 </div>
               </div>
               <div className="card section" style={{ marginTop: 12, padding: 12 }}>
