@@ -52,9 +52,13 @@ export const safe = (v) => {
 };
 
 const LRM = '\u200e';
+const ARABIC_INDIC_DIGITS = ['٠', '١', '٢', '٣', '٤', '٥', '٦', '٧', '٨', '٩'];
+
+export const toArabicIndicDigits = (value) =>
+  String(value ?? '').replace(/\d/g, (digit) => ARABIC_INDIC_DIGITS[Number(digit)] || digit);
 
 export const fixMixedDirectionText = (value) =>
-  String(value ?? '').replace(/([A-Za-z0-9][A-Za-z0-9.,:/+_%#-]*)/g, `${LRM}$1${LRM}`);
+  toArabicIndicDigits(value).replace(/([A-Za-z][A-Za-z.,:/+_%#-]*)/g, `${LRM}$1${LRM}`);
 
 export const fmtPoints = (v) => {
   const n = Number(v || 0);

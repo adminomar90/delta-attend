@@ -33,6 +33,9 @@ const valueText = (value) => {
   return safe(value);
 };
 
+const fixMaterialNumbersForPdf = (value) =>
+  String(value ?? '').replace(/\d+/g, (digits) => digits.split('').reverse().join(''));
+
 const toRows = (entries = []) =>
   entries
     .map(([label, value]) => [label, valueText(value)])
@@ -75,7 +78,7 @@ const drawRequiredMaterialsTable = (ctx, form = {}) => {
   const requiredMaterialItems = Array.isArray(form.requiredMaterialItems) ? form.requiredMaterialItems : [];
   drawSectionTitle(ctx, 'المواد المطلوبة للعمل');
   if (!requiredMaterialItems.length) {
-    drawTextBlock(ctx, 'المواد المطلوبة', form.requiredMaterials || 'لم يتم تسجيل مواد مطلوبة لهذه التذكرة.');
+    drawTextBlock(ctx, 'المواد المطلوبة', fixMaterialNumbersForPdf(form.requiredMaterials || 'لم يتم تسجيل مواد مطلوبة لهذه التذكرة.'));
     return;
   }
 
@@ -83,10 +86,10 @@ const drawRequiredMaterialsTable = (ctx, form = {}) => {
     headers: ['رقم', 'اسم المادة', 'الكمية', 'الوحدة', 'الملاحظات'],
     rows: requiredMaterialItems.map((item, index) => [
       String(index + 1),
-      safe(item.materialName),
-      safe(item.quantity),
+      fixMaterialNumbersForPdf(safe(item.materialName)),
+      fixMaterialNumbersForPdf(safe(item.quantity)),
       safe(item.unit),
-      safe(item.notes),
+      fixMaterialNumbersForPdf(safe(item.notes)),
     ]),
     colWidths: [0.08, 0.34, 0.14, 0.14, 0.3],
   });
@@ -205,7 +208,7 @@ export const buildFieldInspectionPdfBuffer = async (
     ['نوع الأعمال المطلوبة', form.requiredWorkType],
     ['الأجهزة أو الأنظمة الموجودة حاليا في الموقع', form.existingSystems],
     ['الأعمال المقترحة', form.proposedWorks],
-    ['المواد أو الأجهزة المطلوبة', form.requiredMaterials || materials.join('، ')],
+    ['المواد أو الأجهزة المطلوبة', fixMaterialNumbersForPdf(form.requiredMaterials || materials.join('، '))],
     ['القياسات أو الملاحظات الفنية', form.technicalMeasurements],
     ['التوصيات النهائية', form.finalRecommendations],
     ['توصية الفني', form.technicianRecommendation],
@@ -233,7 +236,7 @@ export const buildFieldInspectionPdfBuffer = async (
     .map((item) => [item.materialName, item.quantity, item.unit].filter(Boolean).join(' '))
     .filter(Boolean)
     .join('، ');
-  drawTextBlock(ctx, 'المواد أو الأجهزة المطلوبة', materialRowsSummary || materials.join('، ') || '-');
+  drawTextBlock(ctx, 'المواد أو الأجهزة المطلوبة', fixMaterialNumbersForPdf(materialRowsSummary || materials.join('، ') || '-'));
   drawTextBlock(ctx, 'توصية الفني', form.technicianRecommendation);
   drawTextBlock(ctx, 'ملاحظات عامة', form.generalNotes || ticket?.notes);
   drawTextBlock(ctx, 'وصف طلب الزبون', ticket?.requestDescription);
