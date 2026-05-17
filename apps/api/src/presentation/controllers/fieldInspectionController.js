@@ -43,7 +43,16 @@ const dailyWorkPlanRepository = new DailyWorkPlanRepository();
 
 const uploadRootDir = path.resolve(process.cwd(), env.uploadsDir);
 const toId = (value) => String(value?._id || value?.id || value || '').trim();
-const resolvePublicBaseUrl = (req) => `${req.protocol}://${req.get('host')}`;
+const resolvePublicBaseUrl = (req) => {
+  if (env.publicBaseUrl) return env.publicBaseUrl;
+  const forwardedProto = String(req.headers['x-forwarded-proto'] || '').split(',')[0].trim();
+  const forwardedHost = String(req.headers['x-forwarded-host'] || '').split(',')[0].trim();
+  const protocol = forwardedProto || req.protocol;
+  const host = forwardedHost || req.get('host');
+  return `${protocol}://${host}`;
+};
+const buildFieldInspectionWhatsappUrl = (phone, message) =>
+  buildWhatsAppSendUrl(phone, message) || `https://wa.me/?text=${encodeURIComponent(message || '')}`;
 const actorLabel = (req) => req.user?.fullName || req.user?.name || 'مستخدم النظام';
 
 const isManager = (user = {}) =>
@@ -316,7 +325,7 @@ export const sendFieldInspectionAppointment = asyncHandler(async (req, res) => {
 
   const phone = updated.customerSnapshot?.whatsapp || updated.customerSnapshot?.phone || '';
   const message = buildFieldInspectionWhatsappMessage(updated);
-  res.json({ ticket: serializeTicket(updated), whatsappUrl: buildWhatsAppSendUrl(phone, message), message });
+  res.json({ ticket: serializeTicket(updated), whatsappUrl: buildFieldInspectionWhatsappUrl(phone, message), message });
 });
 
 export const startFieldInspection = asyncHandler(async (req, res) => {
@@ -520,7 +529,7 @@ export const sendFieldInspectionReport = asyncHandler(async (req, res) => {
     'شاكرين ثقتكم بنا.',
   ].join('\n');
   const phone = updated.customerSnapshot?.whatsapp || updated.customerSnapshot?.phone || '';
-  res.json({ ticket: serializeTicket(updated), whatsappUrl: buildWhatsAppSendUrl(phone, message), message });
+  res.json({ ticket: serializeTicket(updated), whatsappUrl: buildFieldInspectionWhatsappUrl(phone, message), message });
 });
 
 export const activateFieldInspectionDailyPlan = asyncHandler(async (req, res) => {

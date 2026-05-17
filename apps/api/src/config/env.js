@@ -30,6 +30,7 @@ export const env = {
   jwtSecret: process.env.JWT_SECRET,
   jwtExpiresIn: process.env.JWT_EXPIRES_IN || '1d',
   frontendOrigin: (process.env.FRONTEND_ORIGIN || 'http://localhost:3000').split(',').map(s => s.trim()).filter(Boolean),
+  publicBaseUrl: (process.env.PUBLIC_BASE_URL || '').replace(/\/$/, ''),
   adminSetupSecret: process.env.ADMIN_SETUP_SECRET || 'SETUP_SECRET_KEY_CHANGE_ME',
   maxAuthFailures: Number(process.env.MAX_AUTH_FAILURES || 5),
   lockMinutes: Number(process.env.AUTH_LOCK_MINUTES || 15),

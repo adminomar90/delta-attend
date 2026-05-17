@@ -686,9 +686,10 @@ export default function FieldInspectionsPage() {
       if (response.message && navigator.clipboard?.writeText) {
         await navigator.clipboard.writeText(response.message).catch(() => {});
       }
-      if (response.whatsappUrl) {
-        if (whatsappWindow) whatsappWindow.location.href = response.whatsappUrl;
-        else window.open(response.whatsappUrl, '_blank', 'noopener,noreferrer');
+      const whatsappUrl = response.whatsappUrl || (response.message ? `https://wa.me/?text=${encodeURIComponent(response.message)}` : '');
+      if (whatsappUrl) {
+        if (whatsappWindow) whatsappWindow.location.href = whatsappUrl;
+        else window.open(whatsappUrl, '_blank', 'noopener,noreferrer');
       } else if (whatsappWindow) {
         whatsappWindow.close();
       }
