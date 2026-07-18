@@ -222,6 +222,9 @@ const userCanUpdateAssignments = (user) =>
 const userCanApproveDailyWorkPlans = (user) =>
   hasPermission(user, Permission.APPROVE_DAILY_WORK_PLANS);
 
+const userCanViewAllDailyWorkPlanEmployees = (user) =>
+  hasPermission(user, Permission.VIEW_ALL_DAILY_WORK_PLAN_EMPLOYEES);
+
 const isPlanReadyForArchive = (plan) =>
   Number(plan?.progressPercent || 0) >= 100
   || [DailyWorkPlanStatus.PENDING_APPROVAL, DailyWorkPlanStatus.COMPLETED].includes(plan?.status);
@@ -1557,7 +1560,9 @@ export const exportDailyWorkPlansPdf = asyncHandler(async (req, res) => {
 });
 
 export const listDailyWorkPlanMeta = asyncHandler(async (req, res) => {
-  const managedUserIds = await ensureManagedUsers(req);
+  const managedUserIds = userCanViewAllDailyWorkPlanEmployees(req.user)
+    ? undefined
+    : await ensureManagedUsers(req);
   const users = await userRepository.listForManagement({
     includeManager: true,
     userIds: managedUserIds,

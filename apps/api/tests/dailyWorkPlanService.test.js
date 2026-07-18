@@ -9,6 +9,23 @@ import {
   recalculatePlanState,
   syncOverdueDailyWorkPlans,
 } from '../src/application/services/dailyWorkPlanService.js';
+import { listDailyWorkPlanMeta } from '../src/presentation/controllers/dailyWorkPlanController.js';
+import { ProjectRepository } from '../src/infrastructure/db/repositories/ProjectRepository.js';
+import { UserRepository } from '../src/infrastructure/db/repositories/UserRepository.js';
+import { Permission, Roles } from '../src/shared/constants.js';
+
+const invokeController = (handler, req) =>
+  new Promise((resolve, reject) => {
+    const res = {
+      json(payload) {
+        resolve(payload);
+      },
+    };
+
+    handler(req, res, (error) => {
+      if (error) reject(error);
+    });
+  });
 
 test('recalculatePlanState marks active plans overdue after due time', () => {
   const result = recalculatePlanState({
@@ -121,4 +138,36 @@ test('syncOverdueDailyWorkPlans updates overdue candidates through repository', 
   assert.equal(result.updated, 1);
   assert.equal(updates[0].id, 'plan-1');
   assert.equal(updates[0].payload.status, DailyWorkPlanStatus.OVERDUE);
+});
+
+test('daily work plan employee visibility permission returns all employees in meta', async () => {
+  const userRepositoryPrototype = UserRepository.prototype;
+  const projectRepositoryPrototype = ProjectRepository.prototype;
+  const originalListForManagement = userRepositoryPrototype.listForManagement;
+  const originalProjectList = projectRepositoryPrototype.list;
+  let capturedOptions = null;
+
+  userRepositoryPrototype.listForManagement = async (options) => {
+    capturedOptions = options;
+    return [{ _id: 'emp-1', fullName: 'Employee 1' }];
+  };
+  projectRepositoryPrototype.list = async () => [];
+
+  try {
+    const payload = await invokeController(listDailyWorkPlanMeta, {
+      user: {
+        id: 'viewer-1',
+        role: Roles.TECHNICAL_STAFF,
+        customPermissions: [Permission.VIEW_ALL_DAILY_WORK_PLAN_EMPLOYEES],
+      },
+      headers: {},
+      ip: '127.0.0.1',
+    });
+
+    assert.equal(capturedOptions.userIds, undefined);
+    assert.equal(payload.users.length, 1);
+  } finally {
+    userRepositoryPrototype.listForManagement = originalListForManagement;
+    projectRepositoryPrototype.list = originalProjectList;
+  }
 });

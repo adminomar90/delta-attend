@@ -376,7 +376,7 @@ export default function EmployeesPage() {
       setUsers(usersResponse.users || []);
       setPermissions([...new Set([
         ...(permissionsResponse.permissions || []),
-        Permission.VIEW_ALL_FINANCIAL_DISBURSEMENTS,
+        ...Object.values(Permission),
       ])]);
     } catch (err) {
       setError(err.message || 'تعذر تحميل الموظفين');
