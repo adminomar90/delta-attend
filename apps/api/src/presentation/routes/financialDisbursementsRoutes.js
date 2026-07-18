@@ -33,6 +33,7 @@ const financialDisbursementsRoutes = Router();
 const canAccessFinancialDisbursementsModule = requireAnyPermission(
   Permission.CREATE_FINANCIAL_DISBURSEMENTS,
   Permission.REVIEW_FINANCIAL_DISBURSEMENTS,
+  Permission.VIEW_ALL_FINANCIAL_DISBURSEMENTS,
   Permission.DISBURSE_FINANCIAL_FUNDS,
   Permission.VIEW_FINANCIAL_REPORTS,
 );

@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   getFinancialDisbursement,
+  listFinancialDisbursements,
   reviewFinancialDisbursementAsFinancialManager,
   reviewFinancialDisbursementAsGeneralManager,
   reviewFinancialDisbursementAsProjectManager,
@@ -13,7 +14,7 @@ import {
 import { FinancialDisbursementRepository } from '../src/infrastructure/db/repositories/FinancialDisbursementRepository.js';
 import { notificationService } from '../src/application/services/notificationService.js';
 import { auditService } from '../src/application/services/auditService.js';
-import { Roles } from '../src/shared/constants.js';
+import { Permission, Roles } from '../src/shared/constants.js';
 
 const hasOwn = (value, key) => Object.prototype.hasOwnProperty.call(value, key);
 
@@ -244,4 +245,60 @@ test('general manager rejection clears the approval chain and returns the reques
       generalManagerRequestReason: 'Requires executive approval',
     }),
   });
+});
+
+test('custom permission allows listing all financial disbursement requests', async () => {
+  const repositoryPrototype = FinancialDisbursementRepository.prototype;
+  const originalList = repositoryPrototype.list;
+  let capturedFilter = null;
+
+  repositoryPrototype.list = async (filter) => {
+    capturedFilter = filter;
+    return [buildBaseRequest({ status: FinancialDisbursementStatus.CLOSED })];
+  };
+
+  try {
+    const payload = await invokeController(listFinancialDisbursements, {
+      query: {},
+      user: {
+        id: 'viewer-1',
+        role: Roles.TECHNICAL_STAFF,
+        customPermissions: [Permission.VIEW_ALL_FINANCIAL_DISBURSEMENTS],
+      },
+      headers: {},
+      ip: '127.0.0.1',
+    });
+
+    assert.deepEqual(capturedFilter, { archived: { $ne: true } });
+    assert.equal(payload.requests.length, 1);
+    assert.equal(payload.requests[0].id, 'fd-1');
+  } finally {
+    repositoryPrototype.list = originalList;
+  }
+});
+
+test('custom permission allows reading any financial disbursement request', async () => {
+  const repositoryPrototype = FinancialDisbursementRepository.prototype;
+  const originalFindById = repositoryPrototype.findById;
+
+  repositoryPrototype.findById = async () => buildBaseRequest({
+    status: FinancialDisbursementStatus.CLOSED,
+  });
+
+  try {
+    const payload = await invokeController(getFinancialDisbursement, {
+      params: { id: 'fd-1' },
+      user: {
+        id: 'viewer-1',
+        role: Roles.TECHNICAL_STAFF,
+        customPermissions: [Permission.VIEW_ALL_FINANCIAL_DISBURSEMENTS],
+      },
+      headers: {},
+      ip: '127.0.0.1',
+    });
+
+    assert.equal(payload.request.id, 'fd-1');
+  } finally {
+    repositoryPrototype.findById = originalFindById;
+  }
 });

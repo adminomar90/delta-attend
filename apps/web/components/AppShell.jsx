@@ -136,6 +136,13 @@ const routePermissionRules = {
     Permission.VIEW_EXECUTIVE_REPORTS,
     Permission.VIEW_FINANCIAL_REPORTS,
   ],
+  '/financial-disbursements': [
+    Permission.CREATE_FINANCIAL_DISBURSEMENTS,
+    Permission.REVIEW_FINANCIAL_DISBURSEMENTS,
+    Permission.VIEW_ALL_FINANCIAL_DISBURSEMENTS,
+    Permission.DISBURSE_FINANCIAL_FUNDS,
+    Permission.VIEW_FINANCIAL_REPORTS,
+  ],
   '/audit-log': [Permission.VIEW_AUDIT_LOGS],
   '/network-documentation': [
     Permission.VIEW_NETWORK_DOCUMENTATION,

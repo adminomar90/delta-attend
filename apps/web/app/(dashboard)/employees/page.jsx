@@ -71,7 +71,16 @@ const permissionCategoryDefinitions = [
     title: 'المالية والصرف',
     description: 'طلبات الصرف المالي، المراجعة، التسليم والتقارير المالية.',
     icon: '💰',
-    match: (permission) => permission.includes('FINANCIAL') || permission.includes('DISBURSE'),
+    match: (permission) => [
+      Permission.VIEW_FINANCIAL_REPORTS,
+      Permission.VIEW_ALL_FINANCIAL_DISBURSEMENTS,
+      Permission.CREATE_FINANCIAL_DISBURSEMENTS,
+      Permission.REVIEW_FINANCIAL_DISBURSEMENTS,
+      Permission.ESCALATE_FINANCIAL_DISBURSEMENTS,
+      Permission.DISBURSE_FINANCIAL_FUNDS,
+      Permission.VIEW_CUSTOMER_FINANCIAL_INFO,
+      Permission.VIEW_SUPPLIER_FINANCIALS,
+    ].includes(permission),
   },
   {
     key: 'purchases',
@@ -365,7 +374,10 @@ export default function EmployeesPage() {
         api.get('/auth/permissions').catch(() => ({ permissions: [] })),
       ]);
       setUsers(usersResponse.users || []);
-      setPermissions(permissionsResponse.permissions || []);
+      setPermissions([...new Set([
+        ...(permissionsResponse.permissions || []),
+        Permission.VIEW_ALL_FINANCIAL_DISBURSEMENTS,
+      ])]);
     } catch (err) {
       setError(err.message || 'تعذر تحميل الموظفين');
     }

@@ -43,6 +43,9 @@ const canEscalateFinancialRequest = (user = {}) =>
 const canDisburseFinancialFunds = (user = {}) =>
   hasPermission(user, Permission.DISBURSE_FINANCIAL_FUNDS);
 
+const canViewAllFinancialDisbursements = (user = {}) =>
+  hasPermission(user, Permission.VIEW_ALL_FINANCIAL_DISBURSEMENTS);
+
 const toCleanString = (value) => String(value || '').trim();
 
 const toPositiveAmount = (value) => {
@@ -134,7 +137,10 @@ const sumPointEvents = (request = {}) =>
   (request.pointsEvents || []).reduce((sum, entry) => sum + Number(entry.points || 0), 0);
 
 const buildAccessibleFilter = (req) => {
-  if ([Roles.GENERAL_MANAGER, Roles.FINANCIAL_MANAGER].includes(req.user?.role)) {
+  if (
+    [Roles.GENERAL_MANAGER, Roles.FINANCIAL_MANAGER].includes(req.user?.role)
+    || canViewAllFinancialDisbursements(req.user)
+  ) {
     return {};
   }
 
@@ -153,7 +159,7 @@ const canReadRequest = (req, request) => {
     return false;
   }
 
-  if (req.user?.role === Roles.GENERAL_MANAGER) {
+  if (req.user?.role === Roles.GENERAL_MANAGER || canViewAllFinancialDisbursements(req.user)) {
     return true;
   }
 

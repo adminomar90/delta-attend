@@ -170,6 +170,7 @@ export default function FinancialDisbursementsPage() {
   const canReview = hasPermission(currentUser, Permission.REVIEW_FINANCIAL_DISBURSEMENTS);
   const canDisburse = hasPermission(currentUser, Permission.DISBURSE_FINANCIAL_FUNDS);
   const canViewFinancial = hasPermission(currentUser, Permission.VIEW_FINANCIAL_REPORTS);
+  const canViewAllFinancialDisbursements = hasPermission(currentUser, Permission.VIEW_ALL_FINANCIAL_DISBURSEMENTS);
 
   const [requests, setRequests] = useState([]);
   const [archivedRequests, setArchivedRequests] = useState([]);
@@ -1266,7 +1267,7 @@ export default function FinancialDisbursementsPage() {
         </div>
       </section>
 
-      {activeTab === 'active' && (canReview || canDisburse || canViewFinancial || currentUser?.role === 'GENERAL_MANAGER') && summary ? (
+      {activeTab === 'active' && (canReview || canDisburse || canViewFinancial || canViewAllFinancialDisbursements || currentUser?.role === 'GENERAL_MANAGER') && summary ? (
         <section className="grid-4" style={{ marginBottom: 16 }}>
           {[
             { key: null, label: 'إجمالي الطلبات', count: summary.total || 0 },
