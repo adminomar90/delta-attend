@@ -1,2 +1,31 @@
 ✓ Connected to MongoDB
 ✓ API running on port 4000
+[0mPOST /api/auth/login [32m200[0m 384.315 ms - 9275[0m
+[0mGET /api/notifications/vapid-public-key [32m200[0m 1.242 ms - 103[0m
+[0mGET /api/auth/me [32m200[0m 175.221 ms - 9339[0m
+[0mGET /api/auth/me [32m200[0m 181.343 ms - 9339[0m
+[0mGET /api/auth/me [32m200[0m 182.271 ms - 9339[0m
+[0mGET /api/notifications/unread-count [32m200[0m 284.979 ms - 19[0m
+[0mGET /api/notifications/unread-count [32m200[0m 321.807 ms - 19[0m
+[0mPOST /api/notifications/push-subscribe [32m200[0m 202.000 ms - 72[0m
+[0mGET /uploads/1773250738007-239284511-WhatsApp-Image-2026-03-11-at-8.38.38-PM.jpeg [32m200[0m 20.004 ms - 192111[0m
+[0mGET /api/attendance/meta [32m200[0m 2853.418 ms - 861[0m
+[0mGET /api/auth/org-chart [32m200[0m 3004.543 ms - 1467[0m
+[0mGET /api/attendance/admin/overview [32m200[0m 3022.374 ms - 2671[0m
+[0mGET /api/gamification/me [32m200[0m 3036.455 ms - 219[0m
+[0mGET /api/attendance/meta [32m200[0m 41.572 ms - 861[0m
+[0mGET /api/auth/org-chart [32m200[0m 89.809 ms - 1467[0m
+[0mGET /api/attendance/admin/overview [32m200[0m 101.750 ms - 2671[0m
+[0mGET /api/gamification/me [32m200[0m 153.653 ms - 219[0m
+[0mGET /api/dashboard/summary [32m200[0m 3237.501 ms - 4537[0m
+[0mGET /api/dashboard/summary [32m200[0m 3338.394 ms - 4537[0m
+[0mGET /api/auth/permissions [32m200[0m 51.030 ms - 2762[0m
+[0mGET /api/auth/permissions [32m200[0m 43.371 ms - 2762[0m
+[0mGET /api/auth/me [32m200[0m 94.889 ms - 9339[0m
+[0mGET /api/auth/users?includeInactive=1 [32m200[0m 119.438 ms - 11856[0m
+[0mGET /api/auth/users?includeInactive=1 [32m200[0m 116.332 ms - 11856[0m
+[0mGET /api/notifications?limit=50 [32m200[0m 90.602 ms - 26932[0m
+[0mGET /api/auth/me [32m200[0m 101.456 ms - 9339[0m
+[0mGET /api/notifications?limit=50 [32m200[0m 115.465 ms - 26932[0m
+[0mGET /api/notifications/managers [32m200[0m 26.067 ms - 705[0m
+[0mGET /api/notifications/managers [32m200[0m 21.647 ms - 705[0m
