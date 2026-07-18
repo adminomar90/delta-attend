@@ -1,3 +1,4 @@
+import crypto from 'crypto';
 import { env } from '../../config/env.js';
 import { sequenceService } from '../../application/services/sequenceService.js';
 import { auditService } from '../../application/services/auditService.js';
@@ -8,6 +9,8 @@ import {
 } from '../../application/services/notificationAudienceService.js';
 import { buildWhatsAppSendUrl } from '../../shared/attendanceUtils.js';
 import { AppError, asyncHandler } from '../../shared/errors.js';
+import { Permission, Roles } from '../../shared/constants.js';
+import { hasPermission } from '../../shared/permissions.js';
 import {
   materialsRepository,
   projectRepository,
@@ -26,6 +29,7 @@ import {
   resolveRequestedUserIdsFromRequest,
   isWithinScope,
   assertRequestReadable,
+  ensureWarehouse,
   ensureWarehouseOptional,
   ensureMaterialFromItem,
   adjustOnHandStock,
@@ -37,6 +41,18 @@ import {
 } from './materialsCommon.js';
 
 const REQUEST_REVIEW_ACTIONS = ['APPROVE_FULL', 'APPROVE_PARTIAL', 'REJECT', 'MODIFY'];
+
+const dispatchOperationKey = ({ request, items, channel }) => {
+  const payload = JSON.stringify({
+    requestId: String(request._id),
+    version: request.updatedAt?.getTime?.() || String(request.updatedAt || ''),
+    channel,
+    items: [...items]
+      .map((item) => [String(item.material), roundQty(item.deliveredQty)])
+      .sort(([a], [b]) => a.localeCompare(b)),
+  });
+  return `MATERIAL_DISPATCH:${crypto.createHash('sha256').update(payload).digest('hex')}`;
+};
 
 const applyMaterialRequestScopeFilter = ({ filter, managedUserIds, userId }) => {
   if (!Array.isArray(managedUserIds)) {
@@ -240,9 +256,15 @@ export const listMaterialRequests = asyncHandler(async (req, res) => {
   }
 
   const managedUserIds = await resolveManagedScope(req);
+  const canSeeAllMaterialRequests = hasPermission(req.user, Permission.MANAGE_MATERIAL_INVENTORY)
+    || hasPermission(req.user, Permission.REVIEW_MATERIAL_REQUESTS)
+    || hasPermission(req.user, Permission.PREPARE_MATERIAL_REQUESTS)
+    || hasPermission(req.user, Permission.DISPATCH_MATERIAL_REQUESTS);
 
   if (String(req.query.mine || '').toLowerCase() === 'true') {
     filter.requestedBy = req.user.id;
+  } else if (canSeeAllMaterialRequests) {
+    /* material management and warehouse operators need the full workflow queue */
   } else {
     applyMaterialRequestScopeFilter({
       filter,
@@ -265,6 +287,174 @@ export const getMaterialRequest = asyncHandler(async (req, res) => {
   res.json({ request });
 });
 
+export const updateMaterialRequest = asyncHandler(async (req, res) => {
+  const request = await materialsRepository.findRequestById(req.params.id);
+  if (!request) {
+    throw new AppError('Material request not found', 404);
+  }
+
+  await assertRequestReadable(req, request);
+
+  const editableStatuses = ['PENDING_MANAGER_APPROVAL', 'PENDING_SUPPLIER_APPROVAL', 'NEW', 'UNDER_REVIEW', 'APPROVED'];
+  if (!editableStatuses.includes(request.status)) {
+    throw new AppError('لا يمكن تعديل الطلب بعد اعتماد المجهز أو بدء التجهيز', 409);
+  }
+
+  const hasPreparation = (request.preparations || []).length > 0
+    || (request.items || []).some((item) => roundQty(item.preparedQty || 0) > 0 || roundQty(item.deliveredQty || 0) > 0);
+  if (hasPreparation) {
+    throw new AppError('لا يمكن تعديل طلب تم تجهيزه أو تسليمه', 409);
+  }
+
+  const actorId = String(req.user.id);
+  const requestedById = String(request.requestedBy?._id || request.requestedBy || '');
+  const requestedForId = String(request.requestedFor?._id || request.requestedFor || '');
+  const canEdit = actorId === requestedById
+    || actorId === requestedForId
+    || req.user.role === 'GENERAL_MANAGER'
+    || hasPermission(req.user, Permission.MANAGE_MATERIAL_INVENTORY)
+    || hasPermission(req.user, Permission.REVIEW_MATERIAL_REQUESTS);
+  if (!canEdit) {
+    throw new AppError('لا تملك صلاحية تعديل هذا الطلب', 403);
+  }
+
+  const projectId = toCleanString(req.body.projectId || req.body.project);
+  const manualProjectName = toCleanString(req.body.manualProjectName);
+  const clientName = toCleanString(req.body.clientName || req.body.client);
+  const requestedForBody = toCleanString(req.body.requestedForId || req.body.requestedFor);
+  const assignedPreparerId = toCleanString(req.body.assignedPreparerId || req.body.assignedPreparer);
+
+  if (!projectId && !manualProjectName) {
+    throw new AppError('اسم المشروع مطلوب', 400);
+  }
+
+  const project = projectId ? await projectRepository.findById(projectId) : null;
+  if (projectId && !project) {
+    throw new AppError('Project not found', 404);
+  }
+
+  let requestedFor = null;
+  if (requestedForBody) {
+    requestedFor = await userRepository.findById(requestedForBody);
+    if (!requestedFor || !requestedFor.active) {
+      throw new AppError('Requested user not found', 404);
+    }
+  }
+
+  let assignedPreparer = null;
+  if (assignedPreparerId) {
+    assignedPreparer = await userRepository.findById(assignedPreparerId);
+    if (!assignedPreparer || !assignedPreparer.active) {
+      throw new AppError('Assigned preparer user not found', 404);
+    }
+  }
+
+  const itemsPayload = parseArrayPayload(req.body.items, 'items');
+  if (!itemsPayload.length) {
+    throw new AppError('At least one item is required', 400);
+  }
+
+  const requestItems = [];
+  for (const item of itemsPayload) {
+    const requestedQty = toPositiveQty(item.requestedQty, 'requestedQty');
+    const material = await ensureMaterialFromItem(item);
+    const requestedName = toCleanString(item.materialName || item.name);
+    requestItems.push({
+      material: material._id,
+      materialName: requestedName || material.name,
+      categorySnapshot: toUpper(item.category || material.category || 'GENERAL') || 'GENERAL',
+      unitSnapshot: toUpper(item.unit || material.unit || 'PIECE') || 'PIECE',
+      requestedQty,
+      availableQtyAtRequest: 0,
+      approvedQty: 0,
+      preparedQty: 0,
+      deliveredQty: 0,
+      lineStatus: 'PENDING',
+      lineNotes: toCleanString(item.notes || item.lineNotes),
+    });
+  }
+
+  const beforeSnapshot = {
+    status: request.status,
+    projectId: String(request.project?._id || request.project || ''),
+    manualProjectName: request.manualProjectName,
+    clientName: request.clientName,
+    priority: request.priority,
+    requestedForId,
+    assignedPreparerId: String(request.assignedPreparer?._id || request.assignedPreparer || ''),
+    generalNotes: request.generalNotes,
+    items: (request.items || []).map((item) => ({
+      material: String(item.material?._id || item.material),
+      materialName: item.materialName,
+      requestedQty: item.requestedQty,
+      unitSnapshot: item.unitSnapshot,
+      lineNotes: item.lineNotes,
+    })),
+  };
+
+  const updated = await materialsRepository.updateRequestById(request._id, {
+    project: project?._id || null,
+    projectName: project?.name || manualProjectName || '',
+    manualProjectName: project ? '' : (manualProjectName || ''),
+    clientName,
+    requestedFor: requestedFor?._id || null,
+    assignedPreparer: assignedPreparer?._id || null,
+    priority: mapPriority(req.body.priority),
+    generalNotes: toCleanString(req.body.generalNotes || req.body.notes),
+    status: 'PENDING_MANAGER_APPROVAL',
+    approvalSummary: {
+      approvalType: 'NONE',
+      approvedBy: null,
+      approvedAt: null,
+      notes: '',
+    },
+    items: requestItems,
+    preparations: [],
+    $push: {
+      approvals: {
+        action: 'MODIFY',
+        approvedBy: req.user.id,
+        approvedAt: new Date(),
+        comment: toCleanString(req.body.editReason || req.body.notes || 'تعديل الطلب قبل اعتماد المجهز'),
+        beforeSnapshot,
+        afterSnapshot: {
+          status: 'PENDING_MANAGER_APPROVAL',
+          projectId,
+          manualProjectName: project ? '' : manualProjectName,
+          clientName,
+          priority: mapPriority(req.body.priority),
+          requestedForId: requestedFor?._id || null,
+          assignedPreparerId: assignedPreparer?._id || null,
+          items: requestItems.map((item) => ({
+            material: String(item.material),
+            materialName: item.materialName,
+            requestedQty: item.requestedQty,
+            unitSnapshot: item.unitSnapshot,
+            lineNotes: item.lineNotes,
+          })),
+        },
+      },
+    },
+  });
+
+  await auditService.log({
+    actorId: req.user.id,
+    action: 'MATERIAL_REQUEST_UPDATED_BEFORE_PREPARER_APPROVAL',
+    entityType: 'MATERIAL_REQUEST',
+    entityId: request._id,
+    before: beforeSnapshot,
+    after: {
+      status: updated.status,
+      projectId,
+      itemsCount: updated.items.length,
+      assignedPreparerId: updated.assignedPreparer?._id || updated.assignedPreparer || null,
+    },
+    req,
+  });
+
+  res.json({ request: updated });
+});
+
 export const reviewMaterialRequest = asyncHandler(async (req, res) => {
   const request = await materialsRepository.findRequestById(req.params.id);
   if (!request) {
@@ -273,7 +463,9 @@ export const reviewMaterialRequest = asyncHandler(async (req, res) => {
 
   await assertRequestReadable(req, request);
 
-  if (String(request.requestedBy?._id || request.requestedBy) === String(req.user.id)) {
+  const isOwnRequest = String(request.requestedBy?._id || request.requestedBy) === String(req.user.id);
+  const canReviewOwnRequest = req.user.role === Roles.GENERAL_MANAGER;
+  if (isOwnRequest && !canReviewOwnRequest) {
     throw new AppError('You cannot review your own material request', 403);
   }
 
@@ -484,7 +676,10 @@ export const prepareMaterialRequest = asyncHandler(async (req, res) => {
   const myId = String(req.user.id);
   const preparerId = String(request.assignedPreparer?._id || request.assignedPreparer || '');
   const isGM = req.user.role === 'GENERAL_MANAGER';
-  if (preparerId !== myId && !isGM) {
+  const canWarehousePrepare = hasPermission(req.user, Permission.MANAGE_MATERIAL_INVENTORY)
+    || hasPermission(req.user, Permission.DISPATCH_MATERIAL_REQUESTS)
+    || hasPermission(req.user, Permission.PREPARE_MATERIAL_REQUESTS);
+  if (preparerId !== myId && !isGM && !canWarehousePrepare) {
     throw new AppError('فقط المجهز المعيّن أو المدير العام يمكنه تجهيز الطلب', 403);
   }
 
@@ -551,19 +746,6 @@ export const prepareMaterialRequest = asyncHandler(async (req, res) => {
         );
       }
 
-      await adjustOnHandStock({
-        materialId,
-        warehouseId: warehouse._id,
-        qtyDelta: -toPrepare,
-        avgCost: toNumber(balance?.avgCost, 0),
-        transactionType: 'OUT',
-        projectId: request.project?._id || request.project,
-        requestId: request._id,
-        referenceType: 'MATERIAL_PREPARATION',
-        referenceId: request.requestNo,
-        notes: `Preparation for request ${request.requestNo}`,
-        actorId: req.user.id,
-      });
     }
 
     const preparedQty = roundQty(alreadyPrepared + toPrepare);
@@ -675,7 +857,12 @@ export const dispatchMaterialRequest = asyncHandler(async (req, res) => {
     throw new AppError('Request is not ready for dispatch', 409);
   }
 
-  const warehouse = await ensureWarehouseOptional(req.body.warehouseId || req.body.warehouse);
+  const latestPreparationWarehouse = [...(request.preparations || [])]
+    .reverse()
+    .find((entry) => entry.warehouse)?.warehouse;
+  const warehouse = await ensureWarehouse(
+    req.body.warehouseId || req.body.warehouse || latestPreparationWarehouse?._id || latestPreparationWarehouse,
+  );
   const itemsPayload = parseArrayPayload(req.body.items, 'items');
   if (!itemsPayload.length) {
     throw new AppError('At least one dispatch line is required', 400);
@@ -767,9 +954,12 @@ export const dispatchMaterialRequest = asyncHandler(async (req, res) => {
   }
 
   const dispatchNo = await sequenceService.next('MATERIAL_DISPATCH', { prefix: 'DN', digits: 5 });
-
-  const dispatch = await materialsRepository.createDispatch({
+  const operationKey = dispatchOperationKey({ request, items: dispatchItems, channel: 'WAREHOUSE' });
+  let dispatch;
+  try {
+    dispatch = await materialsRepository.createDispatch({
     dispatchNo,
+    operationKey,
     request: request._id,
     project: request.project?._id || request.project || null,
     manualProjectName: request.manualProjectName || '',
@@ -779,10 +969,54 @@ export const dispatchMaterialRequest = asyncHandler(async (req, res) => {
     warehouse: warehouse?._id || null,
     deliveredAt: new Date(),
     confirmationMethod: toUpper(req.body.confirmationMethod || 'CHECKBOX'),
-    status: 'CONFIRMED',
+    status: 'ISSUED',
     notes: toCleanString(req.body.notes),
     items: dispatchItems,
-  });
+    });
+  } catch (error) {
+    if (error?.code === 11000) throw new AppError('عملية التسليم نفسها قيد التنفيذ أو تم تنفيذها بالفعل', 409);
+    throw error;
+  }
+
+  const appliedStockLines = [];
+  try {
+    for (const line of dispatchItems) {
+      const balance = await materialsRepository.findStockBalance(line.material, warehouse._id);
+      await adjustOnHandStock({
+        materialId: line.material,
+        warehouseId: warehouse._id,
+        qtyDelta: -line.deliveredQty,
+        avgCost: toNumber(balance?.avgCost, 0),
+        transactionType: 'OUT',
+        projectId: request.project?._id || request.project,
+        requestId: request._id,
+        referenceType: 'MATERIAL_DISPATCH',
+        referenceId: dispatchNo,
+        notes: `Dispatch for request ${request.requestNo}`,
+        actorId: req.user.id,
+        operationKey: `${operationKey}:${String(line.material)}`,
+      });
+      appliedStockLines.push(line);
+    }
+  } catch (error) {
+    for (const line of appliedStockLines) {
+      await adjustOnHandStock({
+        materialId: line.material,
+        warehouseId: warehouse._id,
+        qtyDelta: line.deliveredQty,
+        transactionType: 'ADJUSTMENT',
+        projectId: request.project?._id || request.project,
+        requestId: request._id,
+        referenceType: 'MATERIAL_DISPATCH_ROLLBACK',
+        referenceId: dispatchNo,
+        notes: `Rollback failed dispatch ${dispatchNo}`,
+        actorId: req.user.id,
+        operationKey: `ROLLBACK:${operationKey}:${String(line.material)}`,
+      });
+    }
+    await materialsRepository.updateDispatchById(dispatch._id, { status: 'CANCELLED' });
+    throw error;
+  }
 
   let custody = request.custodyRef
     ? await materialsRepository.findCustodyById(request.custodyRef)
@@ -869,6 +1103,7 @@ export const dispatchMaterialRequest = asyncHandler(async (req, res) => {
     dispatchRef: dispatch._id,
     custodyRef: custody._id,
   });
+  dispatch = await materialsRepository.updateDispatchById(dispatch._id, { status: 'CONFIRMED' });
 
   await notificationService.notifySystem(
     recipient._id,
@@ -1112,15 +1347,20 @@ export const confirmReceipt = asyncHandler(async (req, res) => {
     throw new AppError('المستلم غير موجود', 404);
   }
 
-  const warehouse = await ensureWarehouseOptional(req.body.warehouseId);
+  const latestPreparationWarehouse = [...(request.preparations || [])]
+    .reverse()
+    .find((entry) => entry.warehouse)?.warehouse;
+  const warehouse = await ensureWarehouse(
+    req.body.warehouseId || latestPreparationWarehouse?._id || latestPreparationWarehouse,
+  );
 
   const dispatchItems = (request.items || [])
-    .filter((line) => roundQty(line.preparedQty || 0) > 0)
+    .filter((line) => roundQty(line.preparedQty || 0) > roundQty(line.deliveredQty || 0))
     .map((line) => ({
       material: line.material?._id || line.material,
       materialName: line.materialName || '',
       unit: line.unitSnapshot || '',
-      deliveredQty: roundQty(line.preparedQty || 0),
+      deliveredQty: roundQty(line.preparedQty || 0) - roundQty(line.deliveredQty || 0),
       notes: '',
     }));
 
@@ -1129,8 +1369,12 @@ export const confirmReceipt = asyncHandler(async (req, res) => {
   }
 
   const dispatchNo = await sequenceService.next('MATERIAL_DISPATCH', { prefix: 'DN', digits: 5 });
-  const dispatch = await materialsRepository.createDispatch({
+  const operationKey = dispatchOperationKey({ request, items: dispatchItems, channel: 'EMPLOYEE_CONFIRM' });
+  let dispatch;
+  try {
+    dispatch = await materialsRepository.createDispatch({
     dispatchNo,
+    operationKey,
     request: request._id,
     project: request.project?._id || request.project || null,
     manualProjectName: request.manualProjectName || '',
@@ -1140,10 +1384,52 @@ export const confirmReceipt = asyncHandler(async (req, res) => {
     warehouse: warehouse?._id || null,
     deliveredAt: new Date(),
     confirmationMethod: 'EMPLOYEE_CONFIRM',
-    status: 'CONFIRMED',
+    status: 'ISSUED',
     notes: notes || 'تأكيد استلام من الموظف',
     items: dispatchItems,
-  });
+    });
+  } catch (error) {
+    if (error?.code === 11000) throw new AppError('تم تأكيد الاستلام بالفعل أو أن العملية قيد التنفيذ', 409);
+    throw error;
+  }
+
+  const appliedStockLines = [];
+  try {
+    for (const line of dispatchItems) {
+      const balance = await materialsRepository.findStockBalance(line.material, warehouse._id);
+      await adjustOnHandStock({
+        materialId: line.material,
+        warehouseId: warehouse._id,
+        qtyDelta: -line.deliveredQty,
+        avgCost: toNumber(balance?.avgCost, 0),
+        transactionType: 'OUT',
+        projectId: request.project?._id || request.project,
+        requestId: request._id,
+        referenceType: 'MATERIAL_DISPATCH',
+        referenceId: dispatchNo,
+        notes: `Employee confirmed receipt for ${request.requestNo}`,
+        actorId: req.user.id,
+        operationKey: `${operationKey}:${String(line.material)}`,
+      });
+      appliedStockLines.push(line);
+    }
+  } catch (error) {
+    for (const line of appliedStockLines) {
+      await adjustOnHandStock({
+        materialId: line.material,
+        warehouseId: warehouse._id,
+        qtyDelta: line.deliveredQty,
+        transactionType: 'ADJUSTMENT',
+        requestId: request._id,
+        referenceType: 'MATERIAL_DISPATCH_ROLLBACK',
+        referenceId: dispatchNo,
+        actorId: req.user.id,
+        operationKey: `ROLLBACK:${operationKey}:${String(line.material)}`,
+      });
+    }
+    await materialsRepository.updateDispatchById(dispatch._id, { status: 'CANCELLED' });
+    throw error;
+  }
 
   let custody = request.custodyRef
     ? await materialsRepository.findCustodyById(request.custodyRef)
@@ -1179,9 +1465,10 @@ export const confirmReceipt = asyncHandler(async (req, res) => {
 
   const updatedItems = (request.items || []).map((line) => {
     const prepared = roundQty(line.preparedQty || 0);
+    const delivered = roundQty(line.deliveredQty || 0);
     return {
       ...line.toObject(),
-      deliveredQty: prepared,
+      deliveredQty: Math.max(delivered, prepared),
       lineStatus: prepared >= roundQty(line.approvedQty || 0) ? 'DELIVERED' : 'PARTIAL',
     };
   });
@@ -1202,6 +1489,7 @@ export const confirmReceipt = asyncHandler(async (req, res) => {
       },
     },
   });
+  dispatch = await materialsRepository.updateDispatchById(dispatch._id, { status: 'CONFIRMED' });
 
   const preparerId = request.assignedPreparer?._id || request.assignedPreparer;
   if (preparerId) {
@@ -1322,6 +1610,8 @@ export const archiveMaterialRequest = asyncHandler(async (req, res) => {
 /* ────────── OPEN CUSTODIES SUMMARY ────────── */
 export const openCustodiesSummary = asyncHandler(async (req, res) => {
   const userId = String(req.user.id);
+  const canSeeAllCustodies = hasPermission(req.user, Permission.MANAGE_MATERIAL_INVENTORY)
+    || hasPermission(req.user, Permission.RECONCILE_OTHERS_MATERIAL_CUSTODY);
 
   /* 1. load all non-closed custodies with deep population */
   const allCustodies = await materialsRepository.listCustodies(
@@ -1349,6 +1639,7 @@ export const openCustodiesSummary = asyncHandler(async (req, res) => {
     const holderId = String(cu.holder?._id || cu.holder || '');
     const reqData = requestMap.get(String(cu.request?._id || cu.request || ''));
     const preparerId = String(reqData?.assignedPreparer?._id || reqData?.assignedPreparer || '');
+    if (canSeeAllCustodies) return true;
     /* holder can always see own custodies */
     if (holderId === userId) return true;
     /* preparer can see custodies of requests they prepared */

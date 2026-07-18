@@ -1,6 +1,10 @@
 import { env } from '../../config/env.js';
 import { sequenceService } from '../../application/services/sequenceService.js';
 import { auditService } from '../../application/services/auditService.js';
+import {
+  deriveCustodyStatus,
+  normalizeReconciliationQuantities,
+} from '../../application/services/materialReconciliationService.js';
 import { notificationService } from '../../application/services/notificationService.js';
 import { buildWhatsAppSendUrl } from '../../shared/attendanceUtils.js';
 import { AppError, asyncHandler } from '../../shared/errors.js';
@@ -16,7 +20,6 @@ import {
   parseArrayPayload,
   assertCustodyReadable,
   resolveManagedScope,
-  isWithinScope,
   resolveRecipientPhone,
   sendWhatsappOps,
   buildCustodyWhatsappMessage,
@@ -42,8 +45,11 @@ export const listCustodies = asyncHandler(async (req, res) => {
 
   if (String(req.query.mine || '').toLowerCase() === 'true') {
     filter.holder = req.user.id;
-  } else if (hasPermission(req.user, Permission.PREPARE_MATERIAL_REQUESTS)) {
-    /* preparers can see all custodies */
+  } else if (
+    hasPermission(req.user, Permission.MANAGE_MATERIAL_INVENTORY)
+    || hasPermission(req.user, Permission.RECONCILE_OTHERS_MATERIAL_CUSTODY)
+  ) {
+    /* explicitly authorized warehouse staff can see all custodies */
   } else {
     const managedUserIds = await resolveManagedScope(req);
     if (Array.isArray(managedUserIds)) {
@@ -104,15 +110,20 @@ export const submitCustodyReconciliation = asyncHandler(async (req, res) => {
   const holderId = String(custody.holder?._id || custody.holder || '');
   const actorId = String(req.user.id);
 
-  if (holderId !== actorId && !hasPermission(req.user, Permission.PREPARE_MATERIAL_REQUESTS)) {
-    const managedUserIds = await resolveManagedScope(req);
-    if (!isWithinScope(managedUserIds, holderId)) {
-      throw new AppError('You cannot submit reconciliation for this custody', 403);
-    }
+  const canReconcileOutsideOwnCustody =
+    hasPermission(req.user, Permission.RECONCILE_OTHERS_MATERIAL_CUSTODY);
+
+  if (holderId !== actorId && !canReconcileOutsideOwnCustody) {
+    throw new AppError('You cannot submit reconciliation for this custody', 403);
   }
 
   if (['CLOSED'].includes(custody.status)) {
     throw new AppError('Cannot reconcile a closed custody', 409);
+  }
+
+  const activeReconciliation = await materialsRepository.findActiveReconciliationByCustody(custody._id);
+  if (activeReconciliation) {
+    throw new AppError(`توجد تصفية نشطة لهذه الذمة بالفعل (${activeReconciliation.reconcileNo})`, 409);
   }
 
   const request = await materialsRepository.findRequestById(custody.request?._id || custody.request);
@@ -130,48 +141,40 @@ export const submitCustodyReconciliation = asyncHandler(async (req, res) => {
       String(item.materialId || item.material || ''),
       {
         consumedQty: Math.max(0, roundQty(item.consumedQty)),
-        remainingQty: Math.max(0, roundQty(item.remainingQty)),
+        remainingQty: item.remainingQty === undefined || item.remainingQty === null
+          ? undefined
+          : Math.max(0, roundQty(item.remainingQty)),
         damagedQty: Math.max(0, roundQty(item.damagedQty)),
         lostQty: Math.max(0, roundQty(item.lostQty)),
-        toReturnQty: Math.max(0, roundQty(item.toReturnQty)),
+        toReturnQty: item.toReturnQty === undefined || item.toReturnQty === null
+          ? undefined
+          : Math.max(0, roundQty(item.toReturnQty)),
         notes: toCleanString(item.notes),
       },
     ]),
   );
 
-  const nextCustodyItems = [];
   const reconciliationItems = [];
 
   for (const line of custody.items || []) {
     const materialId = String(line.material?._id || line.material);
     const input = inputByMaterial.get(materialId);
     if (!input) {
-      nextCustodyItems.push(line.toObject());
       continue;
     }
 
-    const receivedQty = roundQty(line.receivedQty || 0);
-    const consumedQty = Math.min(receivedQty, input.consumedQty);
-    const damagedQty = Math.min(receivedQty, input.damagedQty);
-    const lostQty = Math.min(receivedQty, input.lostQty);
-
-    const maxRemaining = roundQty(Math.max(0, receivedQty - consumedQty - damagedQty - lostQty));
-    const remainingQty = Math.min(maxRemaining, input.remainingQty || maxRemaining);
-    const toReturnQty = Math.min(remainingQty, input.toReturnQty || remainingQty);
-
-    const lineStatus = toReturnQty > roundQty(line.returnedQty || 0)
-      ? 'PARTIAL'
-      : 'RECONCILED';
-
-    nextCustodyItems.push({
-      ...line.toObject(),
+    const normalized = normalizeReconciliationQuantities({
+      receivedQty: line.receivedQty,
+      input,
+    });
+    const {
+      receivedQty,
       consumedQty,
-      remainingQty,
       damagedQty,
       lostQty,
-      lineStatus,
-      notes: input.notes || line.notes,
-    });
+      remainingQty,
+      toReturnQty,
+    } = normalized;
 
     reconciliationItems.push({
       custodyItem: line._id,
@@ -195,28 +198,33 @@ export const submitCustodyReconciliation = asyncHandler(async (req, res) => {
 
   const reconcileNo = await sequenceService.next('MATERIAL_RECONCILIATION', { prefix: 'RC', digits: 5 });
 
-  const reconciliation = await materialsRepository.createReconciliation({
-    reconcileNo,
-    custody: custody._id,
-    request: request._id,
-    project: custody.project?._id || custody.project,
-    submittedBy: req.user.id,
-    reviewedBy: null,
-    submittedAt: new Date(),
-    status: 'SUBMITTED',
-    notes: toCleanString(req.body.notes),
-    reviewNotes: '',
-    pointsAwarded: 0,
-    items: reconciliationItems,
-  });
+  let reconciliation;
+  try {
+    reconciliation = await materialsRepository.createReconciliation({
+      reconcileNo,
+      custody: custody._id,
+      request: request._id,
+      project: custody.project?._id || custody.project,
+      submittedBy: req.user.id,
+      reviewedBy: null,
+      submittedAt: new Date(),
+      status: 'SUBMITTED',
+      notes: toCleanString(req.body.notes),
+      reviewNotes: '',
+      pointsAwarded: 0,
+      items: reconciliationItems,
+    });
+  } catch (error) {
+    if (error?.code === 11000) throw new AppError('توجد تصفية نشطة لهذه الذمة بالفعل', 409);
+    throw error;
+  }
 
   const pendingReturn = reconciliationItems.some(
     (line) => roundQty(line.toReturnQty) > roundQty(line.returnedQtyConfirmed || 0),
   );
 
   const updatedCustody = await materialsRepository.updateCustodyById(custody._id, {
-    items: nextCustodyItems,
-    status: pendingReturn ? 'PENDING_RECONCILIATION' : 'FULLY_RECONCILED',
+    status: 'PENDING_RECONCILIATION',
     isOverdue: false,
   });
 
@@ -319,6 +327,13 @@ export const reviewReconciliation = asyncHandler(async (req, res) => {
       pointsAwarded: 0,
     });
 
+    const restoredCustody = await materialsRepository.updateCustodyById(custody._id, {
+      status: deriveCustodyStatus(custody.items || []),
+    });
+    await materialsRepository.updateRequestById(reconciliation.request?._id || reconciliation.request, {
+      status: 'PENDING_SETTLEMENT',
+    });
+
     await notificationService.notifySystem(
       reconciliation.submittedBy?._id || reconciliation.submittedBy,
       'رفض تصفية ذمة المواد',
@@ -341,7 +356,7 @@ export const reviewReconciliation = asyncHandler(async (req, res) => {
       req,
     });
 
-    res.json({ reconciliation: rejected });
+    res.json({ reconciliation: rejected, custody: restoredCustody });
     return;
   }
 

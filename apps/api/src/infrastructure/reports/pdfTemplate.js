@@ -60,6 +60,9 @@ export const toArabicIndicDigits = (value) =>
 export const fixMixedDirectionText = (value) =>
   toArabicIndicDigits(value).replace(/([A-Za-z][A-Za-z.,:/+_%#-]*)/g, `${LRM}$1${LRM}`);
 
+export const fixMixedDirectionEnglishDigits = (value) =>
+  String(value ?? '');
+
 export const fmtPoints = (v) => {
   const n = Number(v || 0);
   if (!Number.isFinite(n)) return '0';
@@ -146,7 +149,7 @@ export const drawLine = (ctx, y, color = COLORS.border) => {
  * @param {string} [opts.reportId] — report/request number
  * @param {Date}   [opts.date]     — generation date
  */
-export const drawHeader = (ctx, { title, subtitle, reportId = '', date } = {}) => {
+export const drawHeader = (ctx, { title, subtitle, reportId = '', date, dateText = '' } = {}) => {
   const { doc, F, FB, PW, ML, CW } = ctx;
 
   // Navy banner
@@ -163,7 +166,7 @@ export const drawHeader = (ctx, { title, subtitle, reportId = '', date } = {}) =
   doc.text(title || 'تقرير', ML, 42, { width: CW, align: 'center', features: ['arab'] });
 
   // Bottom-left: date
-  const dateStr = fmtDateTime(date || new Date());
+  const dateStr = dateText || fmtDateTime(date || new Date());
   doc.font(F).fontSize(scaledFont(ctx, 7)).fillColor('#8aafc8');
   doc.text(dateStr, ML, 62, { width: CW * 0.5, align: 'left' });
 
@@ -244,7 +247,7 @@ export const drawTableRow = (ctx, label, value, idx) => {
  * @param {object} ctx
  * @param {Array<{label:string, value:string}>} cards — up to 4 cards
  */
-export const drawKpiCards = (ctx, cards = []) => {
+export const drawKpiCards = (ctx, cards = [], { englishDigits = false } = {}) => {
   if (!cards.length) return;
   needPage(ctx, 70);
 
@@ -265,7 +268,7 @@ export const drawKpiCards = (ctx, cards = []) => {
     doc.rect(x, startY, cardW, 3).fill(COLORS.accent);
     // value
     doc.font(FB).fontSize(scaledFont(ctx, 14)).fillColor(COLORS.navy);
-    doc.text(fixMixedDirectionText(card.value), x, startY + 10, { width: cardW, align: 'center', features: ['arab'] });
+    doc.text((englishDigits ? fixMixedDirectionEnglishDigits : fixMixedDirectionText)(card.value), x, startY + 10, { width: cardW, align: 'center', features: ['arab'] });
     // label
     doc.font(F).fontSize(scaledFont(ctx, 7.5)).fillColor(COLORS.soft);
     doc.text(fixMixedDirectionText(card.label), x, startY + 32, { width: cardW, align: 'center', features: ['arab'] });
@@ -332,7 +335,7 @@ export const drawTextBlock = (ctx, label, value) => {
  * @param {string[][]} opts.rows      — rows of cell values
  * @param {number[]}   [opts.colWidths] — relative widths (sum to 1.0)
  */
-export const drawDataTable = (ctx, { headers = [], rows = [], colWidths } = {}) => {
+export const drawDataTable = (ctx, { headers = [], rows = [], colWidths, englishDigits = false } = {}) => {
   if (!headers.length) return;
   needPage(ctx, 40);
 
@@ -366,7 +369,7 @@ export const drawDataTable = (ctx, { headers = [], rows = [], colWidths } = {}) 
     row.forEach((cell, i) => {
       const w = CW * (widths[i] || widths[0]);
       doc.font(ctx.S > 1 ? FB : F).fontSize(scaledFont(ctx, 7.5)).fillColor(COLORS.text);
-      doc.text(fixMixedDirectionText(cell ?? '-'), rx + 3, ry + 5, { width: w - 6, align: 'center', lineBreak: false, features: ['arab'] });
+      doc.text((englishDigits ? fixMixedDirectionEnglishDigits : fixMixedDirectionText)(cell ?? '-'), rx + 3, ry + 5, { width: w - 6, align: 'center', lineBreak: false, features: ['arab'] });
       rx += w;
     });
     doc.y = ry + ROW_H;

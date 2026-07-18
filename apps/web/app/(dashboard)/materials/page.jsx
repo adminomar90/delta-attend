@@ -116,6 +116,7 @@ export default function MaterialsPage() {
   const [returnModal, setReturnModal] = useState(null);
   const [detailModal, setDetailModal] = useState(null);
   const [custodyDetailModal, setCustodyDetailModal] = useState(null);
+  const [editRequestModal, setEditRequestModal] = useState(null);
 
   /* request form */
   const [requestForm, setRequestForm] = useState({
@@ -128,11 +129,40 @@ export default function MaterialsPage() {
   const [projectDropdownOpen, setProjectDropdownOpen] = useState(false);
   const projectComboRef = useRef(null);
 
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const params = new URLSearchParams(window.location.search);
+    const projectId = params.get('projectId') || '';
+    const requestedTab = params.get('tab');
+    if (projectId) setRequestForm((prev) => ({ ...prev, projectId, manualProjectName: '' }));
+    if (requestedTab === 'custodies') setActiveTab('custodies');
+    else if (params.get('action') === 'request') setActiveTab('requests');
+  }, []);
+
+  useEffect(() => {
+    if (!requestForm.projectId || projectSearch) return;
+    const linkedProject = projects.find((project) => project._id === requestForm.projectId);
+    if (linkedProject) setProjectSearch(linkedProject.name || linkedProject.code || '');
+  }, [projects, requestForm.projectId, projectSearch]);
+
   const filteredProjects = useMemo(() => {
     if (!projectSearch.trim()) return projects;
     const q = projectSearch.trim().toLowerCase();
     return projects.filter((p) => p.name?.toLowerCase().includes(q));
   }, [projects, projectSearch]);
+
+  const activeWarehouses = useMemo(
+    () => warehouses.filter((warehouse) => warehouse?.active !== false),
+    [warehouses],
+  );
+
+  useEffect(() => {
+    if (!activeWarehouses.length) return;
+    setRequestForm((prev) => {
+      if (prev.warehouseId && activeWarehouses.some((warehouse) => warehouse._id === prev.warehouseId)) return prev;
+      return { ...prev, warehouseId: activeWarehouses[0]._id };
+    });
+  }, [activeWarehouses]);
 
   const filteredRequests = useMemo(() => {
     let list = requests;
@@ -202,7 +232,7 @@ export default function MaterialsPage() {
   const canReview = hasPermission(currentUser, Permission.REVIEW_MATERIAL_REQUESTS);
   const canPrepare = hasPermission(currentUser, Permission.PREPARE_MATERIAL_REQUESTS);
   const canDispatch = hasPermission(currentUser, Permission.DISPATCH_MATERIAL_REQUESTS);
-  const canReconcile = hasPermission(currentUser, Permission.RECONCILE_MATERIAL_CUSTODY);
+  const canReconcile = hasAnyPermission(currentUser, [Permission.RECONCILE_MATERIAL_CUSTODY, Permission.RECONCILE_OTHERS_MATERIAL_CUSTODY]);
   const canClose = hasPermission(currentUser, Permission.CLOSE_MATERIAL_CUSTODY);
   const canReports = hasPermission(currentUser, Permission.VIEW_MATERIAL_REPORTS);
 
@@ -221,13 +251,21 @@ export default function MaterialsPage() {
     return rid === String(myId) || fid === String(myId) || isGM;
   };
 
+  const canEditBeforePreparerApproval = (req) => {
+    if (!req) return false;
+    const editableStatuses = ['PENDING_MANAGER_APPROVAL', 'PENDING_SUPPLIER_APPROVAL', 'NEW', 'UNDER_REVIEW', 'APPROVED'];
+    const hasPreparation = (req.preparations || []).length > 0
+      || (req.items || []).some((item) => toNum(item.preparedQty) > 0 || toNum(item.deliveredQty) > 0);
+    return editableStatuses.includes(req.status) && !hasPreparation && (isMyRequest(req) || canReview || currentUser?.role === 'GENERAL_MANAGER');
+  };
+
   /* data loader */
   const load = useCallback(async () => {
     setLoading(true); setError('');
     try {
       const [mRes, wRes, pRes, uRes, allURes, rqRes, cuRes, rcRes, smRes, arRes, ocRes] = await Promise.all([
         api.get('/materials/catalog'),
-        api.get('/materials/warehouses'),
+        api.get('/materials/warehouses?active=true'),
         api.get('/projects').catch(() => ({ projects: [] })),
         api.get('/auth/users').catch(async () => {
           const chart = await api.get('/auth/org-chart').catch(() => ({ roots: [] }));
@@ -394,21 +432,112 @@ export default function MaterialsPage() {
         .map((it) => ({ materialName: it.materialName.trim(), unit: it.unit || 'PIECE', requestedQty: toNum(it.requestedQty), notes: it.notes }));
       if (!items.length) throw new Error('يرجى إضافة مادة واحدة على الأقل مع كمية أكبر من صفر.');
       await api.post('/materials/requests', { ...requestForm, items });
-      setRequestForm({ projectId: '', manualProjectName: '', priority: 'NORMAL', clientName: '', requestedForId: '', assignedPreparerId: '', warehouseId: '', generalNotes: '', items: [makeItem()] });
+      setRequestForm({ projectId: '', manualProjectName: '', priority: 'NORMAL', clientName: '', requestedForId: '', assignedPreparerId: '', warehouseId: activeWarehouses[0]?._id || '', generalNotes: '', items: [makeItem()] });
       setProjectSearch('');
       setInfo('تم إنشاء الطلب بنجاح'); await load();
     } catch (err) { setError(err.message || 'فشل إنشاء الطلب'); }
     finally { setBusy(''); }
   };
 
+  const openEditRequest = (req) => {
+    setEditRequestModal({
+      request: req,
+      projectId: req.project?._id || req.project || '',
+      manualProjectName: req.manualProjectName || req.projectName || '',
+      priority: req.priority || 'NORMAL',
+      clientName: req.clientName || '',
+      requestedForId: req.requestedFor?._id || req.requestedFor || '',
+      assignedPreparerId: req.assignedPreparer?._id || req.assignedPreparer || '',
+      generalNotes: req.generalNotes || '',
+      editReason: 'تعديل الطلب قبل اعتماد المجهز',
+      items: (req.items || []).map((it) => ({
+        id: uid(),
+        materialName: it.materialName || it.material?.name || '',
+        unit: it.unitSnapshot || it.material?.unit || 'PIECE',
+        requestedQty: it.requestedQty || '',
+        notes: it.lineNotes || '',
+      })),
+    });
+  };
+
+  const updateEditRequestItem = (itemId, changes) => {
+    setEditRequestModal((prev) => prev ? ({
+      ...prev,
+      items: prev.items.map((it) => (it.id === itemId ? { ...it, ...changes } : it)),
+    }) : prev);
+  };
+
+  const submitEditRequest = async (e) => {
+    e.preventDefault();
+    if (!editRequestModal?.request?._id) return;
+    setBusy('editRequest'); setError(''); setInfo('');
+    try {
+      const items = editRequestModal.items
+        .filter((it) => it.materialName?.trim() && toNum(it.requestedQty) > 0)
+        .map((it) => ({
+          materialName: it.materialName.trim(),
+          unit: it.unit || 'PIECE',
+          requestedQty: toNum(it.requestedQty),
+          notes: it.notes,
+        }));
+      if (!items.length) throw new Error('يرجى إضافة مادة واحدة على الأقل مع كمية أكبر من صفر.');
+      await api.patch(`/materials/requests/${editRequestModal.request._id}`, {
+        projectId: editRequestModal.projectId,
+        manualProjectName: editRequestModal.projectId ? '' : editRequestModal.manualProjectName,
+        priority: editRequestModal.priority,
+        clientName: editRequestModal.clientName,
+        requestedForId: editRequestModal.requestedForId,
+        assignedPreparerId: editRequestModal.assignedPreparerId,
+        generalNotes: editRequestModal.generalNotes,
+        editReason: editRequestModal.editReason,
+        items,
+      });
+      setInfo('تم تعديل الطلب وإعادته لمرحلة اعتماد مدير المشاريع');
+      setEditRequestModal(null);
+      await load();
+    } catch (err) {
+      setError(err.message || 'فشل تعديل الطلب');
+    } finally {
+      setBusy('');
+    }
+  };
+
   /* ────────── REVIEW ────────── */
-  const openReview = (req) => setReviewModal({ request: req, action: 'APPROVE_FULL', rejectReason: '' });
+  const openReview = (req) => setReviewModal({
+    request: req,
+    action: 'APPROVE_FULL',
+    rejectReason: '',
+    items: (req.items || []).map((it) => ({
+      materialId: it.material?._id || it.material,
+      materialName: it.materialName || it.material?.name || '',
+      requestedQty: toNum(it.requestedQty),
+      approvedQty: toNum(it.approvedQty) > 0 ? toNum(it.approvedQty) : toNum(it.requestedQty),
+      unit: it.unitSnapshot || it.material?.unit || 'PIECE',
+      lineNotes: it.lineNotes || '',
+    })),
+  });
+  const updateReviewItem = (materialId, changes) => {
+    setReviewModal((prev) => prev ? ({
+      ...prev,
+      items: prev.items.map((item) => (String(item.materialId) === String(materialId) ? { ...item, ...changes } : item)),
+    }) : prev);
+  };
   const submitReview = async () => {
     if (!reviewModal) return;
     setBusy('review');
     await doAction(async () => {
       const body = { action: reviewModal.action };
-      if (reviewModal.action === 'REJECT') body.rejectReason = reviewModal.rejectReason;
+      if (reviewModal.action === 'REJECT') {
+        body.rejectReason = reviewModal.rejectReason;
+        body.comment = reviewModal.rejectReason;
+      }
+      if (reviewModal.action === 'APPROVE_PARTIAL') {
+        body.items = reviewModal.items.map((item) => ({
+          materialId: item.materialId,
+          approvedQty: Math.max(0, Math.min(toNum(item.requestedQty), toNum(item.approvedQty))),
+          lineNotes: item.lineNotes,
+        }));
+      }
       await api.patch(`/materials/requests/${reviewModal.request._id}/review`, body);
       setInfo(reviewModal.action === 'REJECT' ? 'تم رفض الطلب' : 'تم اعتماد الطلب');
       setReviewModal(null);
@@ -573,7 +702,12 @@ export default function MaterialsPage() {
                     )}
                   </div>
                 </label>
-                <label>المخزن<select className="select" value={requestForm.warehouseId} onChange={(e) => setRequestForm((p) => ({ ...p, warehouseId: e.target.value }))}><option value="">افتراضي</option>{warehouses.map((w) => <option key={w._id} value={w._id}>{w.name}</option>)}</select></label>
+                <label>المخزن *
+                  <select className="select" required value={requestForm.warehouseId} onChange={(e) => setRequestForm((p) => ({ ...p, warehouseId: e.target.value }))}>
+                    <option value="" disabled>{activeWarehouses.length ? 'اختر المخزن' : 'لا توجد مخازن متاحة'}</option>
+                    {activeWarehouses.map((w) => <option key={w._id} value={w._id}>{w.name}{w.code ? ` - ${w.code}` : ''}</option>)}
+                  </select>
+                </label>
                 <label>مجهز الطلب<select className="select" value={requestForm.assignedPreparerId} onChange={(e) => setRequestForm((p) => ({ ...p, assignedPreparerId: e.target.value }))}><option value="">بدون تعيين</option>{allUsers.map((u) => <option key={u.id || u._id} value={u.id || u._id}>{u.fullName}{u.employeeCode ? ` (${u.employeeCode})` : ''}</option>)}</select></label>
                 <label>المستلم (طالب المواد)<select className="select" value={requestForm.requestedForId} onChange={(e) => setRequestForm((p) => ({ ...p, requestedForId: e.target.value }))}><option value="">نفس المستخدم</option>{users.map((u) => <option key={u.id || u._id} value={u.id || u._id}>{u.fullName}{u.employeeCode ? ` (${u.employeeCode})` : ''}</option>)}</select></label>
                 <label>العميل<input className="input" value={requestForm.clientName} onChange={(e) => setRequestForm((p) => ({ ...p, clientName: e.target.value }))} /></label>
@@ -632,6 +766,7 @@ export default function MaterialsPage() {
                         <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
                           <button className="btn btn-soft" style={{ fontSize: 11, padding: '3px 8px' }} type="button" onClick={() => sendRequestWhatsapp(req)}>واتساب</button>
                           <button className="btn btn-soft" style={{ fontSize: 11, padding: '3px 8px' }} type="button" onClick={() => downloadRequestPdf(req)}>PDF</button>
+                          {canEditBeforePreparerApproval(req) && <button className="btn btn-primary btn-sm" style={{ fontSize: 11, padding: '3px 10px' }} type="button" disabled={!!busy} onClick={() => openEditRequest(req)}>تعديل</button>}
                           {/* Step 2: Manager approves */}
                           {canReview && ['PENDING_MANAGER_APPROVAL', 'NEW', 'UNDER_REVIEW'].includes(req.status) && <button className="btn btn-soft" style={{ fontSize: 11, padding: '3px 8px', color: '#81c784' }} type="button" disabled={!!busy} onClick={() => openReview(req)}>اعتماد المدير</button>}
                           {/* Step 3: Supplier/Preparer approves */}
@@ -867,15 +1002,34 @@ export default function MaterialsPage() {
           <>
             <p>طلب رقم: <strong>{reviewModal.request.requestNo}</strong> — {reviewModal.request.project?.name}</p>
             <table className="table" style={{ marginBottom: 12 }}>
-              <thead><tr><th>المادة</th><th>الكمية المطلوبة</th><th>الوحدة</th></tr></thead>
+              <thead><tr><th>المادة</th><th>الكمية المطلوبة</th><th>الكمية المعتمدة</th><th>الوحدة</th><th>ملاحظات</th></tr></thead>
               <tbody>
-                {(reviewModal.request.items || []).map((it, i) => (
-                  <tr key={i}><td>{it.materialName}</td><td>{it.requestedQty}</td><td>{unitLabels[it.unitSnapshot] || it.unitSnapshot}</td></tr>
+                {(reviewModal.items || []).map((it, i) => (
+                  <tr key={it.materialId || i}>
+                    <td>{it.materialName}</td>
+                    <td>{it.requestedQty}</td>
+                    <td>
+                      <input
+                        className="input"
+                        type="number"
+                        min={0}
+                        max={it.requestedQty}
+                        step="any"
+                        value={it.approvedQty}
+                        disabled={reviewModal.action !== 'APPROVE_PARTIAL'}
+                        onChange={(e) => updateReviewItem(it.materialId, { approvedQty: e.target.value })}
+                        style={{ width: 120 }}
+                      />
+                    </td>
+                    <td>{unitLabels[it.unit] || it.unit}</td>
+                    <td><input className="input" value={it.lineNotes} disabled={reviewModal.action === 'REJECT'} onChange={(e) => updateReviewItem(it.materialId, { lineNotes: e.target.value })} placeholder="ملاحظة على البند" /></td>
+                  </tr>
                 ))}
               </tbody>
             </table>
             <label>القرار<select className="select" value={reviewModal.action} onChange={(e) => setReviewModal((p) => ({ ...p, action: e.target.value }))}>
               <option value="APPROVE_FULL">اعتماد كامل</option>
+              <option value="APPROVE_PARTIAL">اعتماد بكميات معدلة</option>
               <option value="REJECT">رفض</option>
             </select></label>
             {reviewModal.action === 'REJECT' && <label style={{ display: 'block', marginTop: 8 }}>سبب الرفض<input className="input" value={reviewModal.rejectReason} onChange={(e) => setReviewModal((p) => ({ ...p, rejectReason: e.target.value }))} style={{ width: '100%' }} /></label>}
@@ -1187,6 +1341,81 @@ export default function MaterialsPage() {
         })()}
       </Modal>
 
+      {/* Edit Request Modal */}
+      <Modal open={!!editRequestModal} title={`تعديل الطلب ${editRequestModal?.request?.requestNo || ''}`} onClose={() => setEditRequestModal(null)}>
+        {editRequestModal && (
+          <form onSubmit={submitEditRequest}>
+            <p style={{ marginTop: 0, color: 'var(--text-soft)' }}>
+              يمكن تعديل الطلب قبل اعتماد المجهز فقط. بعد الحفظ سيعود الطلب إلى مرحلة اعتماد مدير المشاريع حتى تتم مراجعة الكميات الجديدة.
+            </p>
+            <div className="grid-3" style={{ marginBottom: 12 }}>
+              <label>المشروع
+                <select className="select" value={editRequestModal.projectId} onChange={(e) => setEditRequestModal((p) => ({ ...p, projectId: e.target.value, manualProjectName: e.target.value ? '' : p.manualProjectName }))}>
+                  <option value="">مشروع يدوي</option>
+                  {projects.map((project) => <option key={project._id} value={project._id}>{project.name}</option>)}
+                </select>
+              </label>
+              <label>اسم المشروع اليدوي
+                <input className="input" value={editRequestModal.manualProjectName} disabled={!!editRequestModal.projectId} onChange={(e) => setEditRequestModal((p) => ({ ...p, manualProjectName: e.target.value }))} placeholder="اكتب اسم المشروع" />
+              </label>
+              <label>مجهز الطلب
+                <select className="select" value={editRequestModal.assignedPreparerId} onChange={(e) => setEditRequestModal((p) => ({ ...p, assignedPreparerId: e.target.value }))}>
+                  <option value="">بدون تعيين</option>
+                  {allUsers.map((u) => <option key={u.id || u._id} value={u.id || u._id}>{u.fullName}{u.employeeCode ? ` (${u.employeeCode})` : ''}</option>)}
+                </select>
+              </label>
+              <label>المستلم
+                <select className="select" value={editRequestModal.requestedForId} onChange={(e) => setEditRequestModal((p) => ({ ...p, requestedForId: e.target.value }))}>
+                  <option value="">نفس المستخدم</option>
+                  {users.map((u) => <option key={u.id || u._id} value={u.id || u._id}>{u.fullName}{u.employeeCode ? ` (${u.employeeCode})` : ''}</option>)}
+                </select>
+              </label>
+              <label>العميل
+                <input className="input" value={editRequestModal.clientName} onChange={(e) => setEditRequestModal((p) => ({ ...p, clientName: e.target.value }))} />
+              </label>
+              <label>الأولوية
+                <select className="select" value={editRequestModal.priority} onChange={(e) => setEditRequestModal((p) => ({ ...p, priority: e.target.value }))}>
+                  <option value="URGENT">عاجل</option>
+                  <option value="NORMAL">طبيعي</option>
+                  <option value="LOW">منخفض</option>
+                </select>
+              </label>
+            </div>
+            <label style={{ display: 'block', marginBottom: 12 }}>سبب التعديل
+              <input className="input" value={editRequestModal.editReason} onChange={(e) => setEditRequestModal((p) => ({ ...p, editReason: e.target.value }))} required />
+            </label>
+            <label style={{ display: 'block', marginBottom: 12 }}>ملاحظات عامة
+              <input className="input" value={editRequestModal.generalNotes} onChange={(e) => setEditRequestModal((p) => ({ ...p, generalNotes: e.target.value }))} style={{ width: '100%' }} />
+            </label>
+            <h4 style={{ margin: '8px 0' }}>بنود الطلب</h4>
+            <table className="table" style={{ marginBottom: 8 }}>
+              <thead><tr><th>المادة</th><th>الكمية</th><th>الوحدة</th><th>ملاحظات</th><th></th></tr></thead>
+              <tbody>
+                {editRequestModal.items.map((it) => (
+                  <tr key={it.id}>
+                    <td><input className="input" value={it.materialName} onChange={(e) => updateEditRequestItem(it.id, { materialName: e.target.value })} placeholder="اسم المادة" style={{ minWidth: 200 }} /></td>
+                    <td><input className="input" type="number" min={0} step="any" value={it.requestedQty} onChange={(e) => updateEditRequestItem(it.id, { requestedQty: e.target.value })} placeholder="الكمية" style={{ width: 100 }} /></td>
+                    <td>
+                      <select className="select" value={it.unit} onChange={(e) => updateEditRequestItem(it.id, { unit: e.target.value })} style={{ minWidth: 90 }}>
+                        {Object.entries(unitLabels).map(([value, labelText]) => <option key={value} value={value}>{labelText}</option>)}
+                      </select>
+                    </td>
+                    <td><input className="input" value={it.notes} onChange={(e) => updateEditRequestItem(it.id, { notes: e.target.value })} placeholder="ملاحظات" /></td>
+                    <td>{editRequestModal.items.length > 1 && <button type="button" className="btn btn-soft" style={{ color: '#e57373', padding: '2px 8px' }} onClick={() => setEditRequestModal((p) => ({ ...p, items: p.items.filter((x) => x.id !== it.id) }))}>✕</button>}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              <button className="btn btn-soft" type="button" onClick={() => setEditRequestModal((p) => ({ ...p, items: [...p.items, makeItem()] }))}>+ إضافة بند</button>
+              <div style={{ flex: 1 }} />
+              <button className="btn btn-soft" type="button" onClick={() => setEditRequestModal(null)}>إلغاء</button>
+              <button className="btn btn-primary" type="submit" disabled={busy === 'editRequest'}>{busy === 'editRequest' ? 'جارٍ الحفظ...' : 'حفظ التعديل'}</button>
+            </div>
+          </form>
+        )}
+      </Modal>
+
       {/* Detail Modal */}
       <Modal open={!!detailModal} title={`تفاصيل الطلب ${detailModal?.requestNo || ''}`} onClose={() => setDetailModal(null)}>
         {detailModal && (
@@ -1225,7 +1454,7 @@ export default function MaterialsPage() {
                 <ul style={{ margin: 0, padding: '0 16px', fontSize: 13 }}>
                   {detailModal.approvals.map((a, i) => (
                     <li key={i} style={{ marginBottom: 4 }}>
-                      <strong>{a.approvedBy?.fullName || '-'}</strong> — {a.action === 'APPROVE_FULL' ? 'اعتماد كامل' : a.action === 'REJECT' ? 'رفض' : a.action} — {a.approvedAt ? new Date(a.approvedAt).toLocaleString('ar-IQ') : '-'}
+                      <strong>{a.approvedBy?.fullName || '-'}</strong> — {a.action === 'APPROVE_FULL' ? 'اعتماد كامل' : a.action === 'APPROVE_PARTIAL' ? 'اعتماد بكميات معدلة' : a.action === 'REJECT' ? 'رفض' : a.action} — {a.approvedAt ? new Date(a.approvedAt).toLocaleString('ar-IQ') : '-'}
                       {a.comment && <span style={{ color: 'var(--text-soft)' }}> — {a.comment}</span>}
                     </li>
                   ))}

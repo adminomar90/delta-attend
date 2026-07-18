@@ -31,20 +31,21 @@ const requestPopulate = [
 
 const dispatchPopulate = [
   { path: 'request', select: 'requestNo status project requestedBy requestedFor' },
-  { path: 'project', select: 'name code' },
+  { path: 'project', select: 'name code status clientName clientPhone location owner projectManager' },
   { path: 'recipient', select: 'fullName role employeeCode phone' },
   { path: 'deliveredBy', select: 'fullName role employeeCode' },
   { path: 'preparedBy', select: 'fullName role employeeCode' },
   { path: 'warehouse', select: 'name code' },
-  { path: 'items.material', select: 'code name category unit' },
+  { path: 'items.material', select: 'code name model barcode imageUrl category unit estimatedUnitCost' },
 ];
 
 const custodyPopulate = [
   { path: 'request', select: 'requestNo status project requestedBy requestedFor assignedPreparer' },
-  { path: 'project', select: 'name code' },
+  { path: 'project', select: 'name code status clientName clientPhone location owner projectManager' },
   { path: 'holder', select: 'fullName role employeeCode phone manager' },
-  { path: 'dispatchNotes', select: 'dispatchNo status deliveredAt recipient' },
-  { path: 'items.material', select: 'code name category unit' },
+  { path: 'items.assignedTechnician', select: 'fullName role employeeCode phone manager' },
+  { path: 'dispatchNotes', select: 'dispatchNo status deliveredAt recipient deliveredBy warehouse items' },
+  { path: 'items.material', select: 'code name model barcode imageUrl category unit estimatedUnitCost' },
 ];
 
 const reconciliationPopulate = [
@@ -99,9 +100,23 @@ export class MaterialsRepository {
     }).populate(materialPopulate);
   }
 
+  async findMaterialByBarcode(barcode) {
+    const safeBarcode = String(barcode || '').trim();
+    if (!safeBarcode) {
+      return null;
+    }
+
+    return MaterialModel.findOne({ barcode: safeBarcode })
+      .populate(materialPopulate);
+  }
+
   async updateMaterialById(id, payload) {
     return MaterialModel.findByIdAndUpdate(id, payload, { new: true })
       .populate(materialPopulate);
+  }
+
+  async updateMaterialsByCategory(category, payload) {
+    return MaterialModel.updateMany({ category }, payload);
   }
 
   async createWarehouse(payload) {
@@ -120,33 +135,46 @@ export class MaterialsRepository {
     return WarehouseModel.findByIdAndUpdate(id, payload, { new: true });
   }
 
+  async deleteWarehouseById(id) {
+    return WarehouseModel.findByIdAndDelete(id);
+  }
+
+  async deleteStockBalancesByWarehouse(warehouseId) {
+    return StockBalanceModel.deleteMany({ warehouse: warehouseId });
+  }
+
   async listStockBalances(filter = {}) {
     return StockBalanceModel.find(filter)
-      .populate('material', 'code name category unit active minStock estimatedUnitCost')
+      .populate('material', 'code name barcode brand model category unit active minStock estimatedUnitCost')
       .populate('warehouse', 'name code location active')
       .sort({ updatedAt: -1 });
   }
 
   async findStockBalance(materialId, warehouseId) {
     return StockBalanceModel.findOne({ material: materialId, warehouse: warehouseId })
-      .populate('material', 'code name category unit active minStock estimatedUnitCost')
+      .populate('material', 'code name barcode brand model category unit active minStock estimatedUnitCost')
       .populate('warehouse', 'name code location active');
   }
 
   async upsertStockBalance(materialId, warehouseId, payload = {}) {
+    const setOnInsert = {
+      material: materialId,
+      warehouse: warehouseId,
+      qtyOnHand: 0,
+      qtyReserved: 0,
+      avgCost: 0,
+    };
+    Object.keys(payload.$set || {}).forEach((key) => {
+      delete setOnInsert[key];
+    });
+
     return StockBalanceModel.findOneAndUpdate(
       {
         material: materialId,
         warehouse: warehouseId,
       },
       {
-        $setOnInsert: {
-          material: materialId,
-          warehouse: warehouseId,
-          qtyOnHand: 0,
-          qtyReserved: 0,
-          avgCost: 0,
-        },
+        $setOnInsert: setOnInsert,
         ...payload,
       },
       {
@@ -158,8 +186,50 @@ export class MaterialsRepository {
       .populate('warehouse', 'name code location active');
   }
 
+  async adjustStockBalanceAtomic({ materialId, warehouseId, qtyDelta, avgCost, operationKey = '' }) {
+    await StockBalanceModel.updateOne(
+      { material: materialId, warehouse: warehouseId },
+      {
+        $setOnInsert: {
+          material: materialId,
+          warehouse: warehouseId,
+          qtyOnHand: 0,
+          qtyReserved: 0,
+          avgCost: 0,
+          appliedOperationKeys: [],
+        },
+      },
+      { upsert: true },
+    );
+
+    const filter = { material: materialId, warehouse: warehouseId };
+    if (qtyDelta < 0) filter.qtyOnHand = { $gte: Math.abs(qtyDelta) };
+    if (operationKey) filter.appliedOperationKeys = { $ne: operationKey };
+
+    const update = { $inc: { qtyOnHand: qtyDelta } };
+    if (Number.isFinite(avgCost) && avgCost >= 0) update.$set = { avgCost };
+    if (operationKey) update.$addToSet = { appliedOperationKeys: operationKey };
+
+    const balance = await StockBalanceModel.findOneAndUpdate(filter, update, { new: true })
+      .populate('material', 'code name category unit active minStock estimatedUnitCost')
+      .populate('warehouse', 'name code location active');
+    if (balance) return { balance, alreadyApplied: false };
+
+    const existing = await StockBalanceModel.findOne({ material: materialId, warehouse: warehouseId })
+      .select('+appliedOperationKeys')
+      .populate('material', 'code name category unit active minStock estimatedUnitCost')
+      .populate('warehouse', 'name code location active');
+    const alreadyApplied = !!operationKey && (existing?.appliedOperationKeys || []).includes(operationKey);
+    return { balance: existing, alreadyApplied, insufficient: qtyDelta < 0 && !alreadyApplied };
+  }
+
   async createStockTransaction(payload) {
     return StockTransactionModel.create(payload);
+  }
+
+  async findStockTransactionByOperationKey(operationKey) {
+    if (!operationKey) return null;
+    return StockTransactionModel.findOne({ operationKey });
   }
 
   async listStockTransactions(filter = {}, options = {}) {
@@ -199,6 +269,10 @@ export class MaterialsRepository {
       .populate(requestPopulate);
   }
 
+  async findRequestByOperationKey(operationKey) {
+    return MaterialRequestModel.findOne({ operationKey }).populate(requestPopulate);
+  }
+
   async updateRequestById(id, payload) {
     return MaterialRequestModel.findByIdAndUpdate(id, payload, { new: true })
       .populate(requestPopulate);
@@ -206,6 +280,14 @@ export class MaterialsRepository {
 
   async createDispatch(payload) {
     return MaterialDispatchModel.create(payload);
+  }
+
+  async findDispatchByOperationKey(operationKey) {
+    return MaterialDispatchModel.findOne({ operationKey }).populate(dispatchPopulate);
+  }
+
+  async updateDispatchById(id, payload) {
+    return MaterialDispatchModel.findByIdAndUpdate(id, payload, { new: true }).populate(dispatchPopulate);
   }
 
   async listDispatches(filter = {}, options = {}) {
@@ -253,6 +335,13 @@ export class MaterialsRepository {
 
   async createReconciliation(payload) {
     return MaterialReconciliationModel.create(payload);
+  }
+
+  async findActiveReconciliationByCustody(custodyId) {
+    return MaterialReconciliationModel.findOne({
+      custody: custodyId,
+      status: { $in: ['SUBMITTED', 'UNDER_REVIEW'] },
+    }).populate(reconciliationPopulate);
   }
 
   async listReconciliations(filter = {}, options = {}) {

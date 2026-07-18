@@ -55,6 +55,7 @@ const materialDispatchSchema = new mongoose.Schema(
       unique: true,
       index: true,
     },
+    operationKey: { type: String, default: '', trim: true },
     request: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'MaterialRequest',
@@ -75,9 +76,10 @@ const materialDispatchSchema = new mongoose.Schema(
     recipient: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'User',
-      required: true,
+      default: null,
       index: true,
     },
+    custodyType: { type: String, enum: ['TECHNICIAN', 'PROJECT', 'BOTH'], default: 'BOTH', index: true },
     deliveredBy: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'User',
@@ -100,7 +102,7 @@ const materialDispatchSchema = new mongoose.Schema(
     },
     confirmationMethod: {
       type: String,
-      enum: ['PIN', 'SIGNATURE', 'CHECKBOX'],
+      enum: ['PIN', 'SIGNATURE', 'CHECKBOX', 'EMPLOYEE_CONFIRM'],
       default: 'CHECKBOX',
     },
     status: {
@@ -122,6 +124,11 @@ const materialDispatchSchema = new mongoose.Schema(
   {
     timestamps: true,
   },
+);
+
+materialDispatchSchema.index(
+  { operationKey: 1 },
+  { unique: true, partialFilterExpression: { operationKey: { $type: 'string', $gt: '' } } },
 );
 
 export const MaterialDispatchModel = mongoose.model('MaterialDispatch', materialDispatchSchema);

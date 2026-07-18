@@ -79,7 +79,6 @@ const materialReconciliationSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: 'MaterialCustody',
       required: true,
-      index: true,
     },
     request: {
       type: mongoose.Schema.Types.ObjectId,
@@ -150,5 +149,14 @@ const materialReconciliationSchema = new mongoose.Schema(
     timestamps: true,
   },
 );
+
+materialReconciliationSchema.index(
+  { custody: 1 },
+  {
+    unique: true,
+    partialFilterExpression: { status: { $in: ['SUBMITTED', 'UNDER_REVIEW'] } },
+  },
+);
+materialReconciliationSchema.index({ custody: 1, createdAt: -1 });
 
 export const MaterialReconciliationModel = mongoose.model('MaterialReconciliation', materialReconciliationSchema);

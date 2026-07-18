@@ -46,6 +46,10 @@ const stockTransactionSchema = new mongoose.Schema(
       required: true,
       min: 0,
     },
+    quantityDelta: {
+      type: Number,
+      default: 0,
+    },
     unitCost: {
       type: Number,
       default: 0,
@@ -58,6 +62,11 @@ const stockTransactionSchema = new mongoose.Schema(
       uppercase: true,
     },
     referenceId: {
+      type: String,
+      default: '',
+      trim: true,
+    },
+    operationKey: {
       type: String,
       default: '',
       trim: true,
@@ -82,6 +91,11 @@ const stockTransactionSchema = new mongoose.Schema(
   {
     timestamps: true,
   },
+);
+
+stockTransactionSchema.index(
+  { operationKey: 1 },
+  { unique: true, partialFilterExpression: { operationKey: { $type: 'string', $gt: '' } } },
 );
 
 export const StockTransactionModel = mongoose.model('StockTransaction', stockTransactionSchema);

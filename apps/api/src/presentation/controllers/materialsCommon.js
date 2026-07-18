@@ -127,6 +127,15 @@ export const resolveRequestedUserIdsFromRequest = (request) => {
 
 export const assertRequestReadable = async (req, request) => {
   const actorId = String(req.user.id);
+  if (
+    hasPermission(req.user, Permission.MANAGE_MATERIAL_INVENTORY)
+    || hasPermission(req.user, Permission.REVIEW_MATERIAL_REQUESTS)
+    || hasPermission(req.user, Permission.PREPARE_MATERIAL_REQUESTS)
+    || hasPermission(req.user, Permission.DISPATCH_MATERIAL_REQUESTS)
+  ) {
+    return;
+  }
+
   const relatedUserIds = resolveRequestedUserIdsFromRequest(request);
   if (relatedUserIds.includes(actorId)) {
     return;
@@ -147,7 +156,10 @@ export const assertCustodyReadable = async (req, custody) => {
     return;
   }
 
-  if (hasPermission(req.user, Permission.PREPARE_MATERIAL_REQUESTS)) {
+  if (
+    hasPermission(req.user, Permission.MANAGE_MATERIAL_INVENTORY)
+    || hasPermission(req.user, Permission.RECONCILE_OTHERS_MATERIAL_CUSTODY)
+  ) {
     return;
   }
 
@@ -252,42 +264,53 @@ export const adjustOnHandStock = async ({
   referenceId = '',
   notes = '',
   actorId = null,
+  operationKey = '',
 }) => {
-  const balance = await materialsRepository.upsertStockBalance(materialId, warehouseId, {});
+  const delta = roundQty(qtyDelta);
+  if (!delta) throw new AppError('Stock quantity change cannot be zero', 400);
 
-  const currentOnHand = roundQty(balance.qtyOnHand || 0);
-  const currentReserved = roundQty(balance.qtyReserved || 0);
-  const nextOnHand = roundQty(currentOnHand + roundQty(qtyDelta));
+  const safeOperationKey = toCleanString(operationKey);
+  const result = await materialsRepository.adjustStockBalanceAtomic({
+    materialId,
+    warehouseId,
+    qtyDelta: delta,
+    avgCost: Number.isFinite(avgCost) && avgCost >= 0 ? Number(avgCost) : undefined,
+    operationKey: safeOperationKey,
+  });
 
-  if (nextOnHand < 0) {
+  if (!result.balance || result.insufficient) {
     throw new AppError('Insufficient stock in warehouse for requested operation', 409);
   }
 
-  const payload = {
-    qtyOnHand: nextOnHand,
-    qtyReserved: currentReserved,
-  };
+  const existingTransaction = safeOperationKey
+    ? await materialsRepository.findStockTransactionByOperationKey(safeOperationKey)
+    : null;
+  if (existingTransaction) return { balance: result.balance, transaction: existingTransaction, alreadyApplied: true };
 
-  if (Number.isFinite(avgCost) && avgCost >= 0) {
-    payload.avgCost = Number(avgCost);
-  }
-
-  await materialsRepository.upsertStockBalance(materialId, warehouseId, { $set: payload });
-
-  await materialsRepository.createStockTransaction({
+  let transaction;
+  try {
+    transaction = await materialsRepository.createStockTransaction({
     material: materialId,
     warehouse: warehouseId,
     project: projectId || null,
     request: requestId || null,
     transactionType,
-    quantity: Math.abs(roundQty(qtyDelta)),
+    quantity: Math.abs(delta),
+    quantityDelta: delta,
     unitCost: Number(avgCost || 0),
     referenceType,
     referenceId,
     performedBy: actorId,
     performedAt: new Date(),
     notes,
-  });
+    operationKey: safeOperationKey,
+    });
+  } catch (error) {
+    if (error?.code !== 11000 || !safeOperationKey) throw error;
+    transaction = await materialsRepository.findStockTransactionByOperationKey(safeOperationKey);
+  }
+
+  return { balance: result.balance, transaction, alreadyApplied: result.alreadyApplied };
 };
 
 export const resolveRecipientPhone = async ({ userId, fallback }) => {
@@ -433,4 +456,3 @@ export const defaultReportPeriod = (query = {}) => {
 };
 
 export const appDetailsUrl = (path) => `${env.frontendOrigin[0].replace(/\/$/, '')}${path}`;
-

@@ -13,6 +13,7 @@ const custodyItemSchema = new mongoose.Schema(
       default: '',
       trim: true,
     },
+    assignedTechnician: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null, index: true },
     unit: {
       type: String,
       default: '',
@@ -51,7 +52,7 @@ const custodyItemSchema = new mongoose.Schema(
     },
     lineStatus: {
       type: String,
-      enum: ['OPEN', 'PARTIAL', 'RECONCILED', 'CLOSED'],
+      enum: ['OPEN', 'PARTIAL', 'RECONCILED', 'CLOSED', 'CANCELLED'],
       default: 'OPEN',
       index: true,
     },
@@ -60,6 +61,9 @@ const custodyItemSchema = new mongoose.Schema(
       default: '',
       trim: true,
     },
+    cancelledAt: { type: Date, default: null },
+    cancelledBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+    cancellationReason: { type: String, default: '', trim: true },
   },
   { _id: true },
 );
@@ -92,9 +96,14 @@ const materialCustodySchema = new mongoose.Schema(
     holder: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'User',
-      required: true,
+      default: null,
       index: true,
     },
+    custodyType: { type: String, enum: ['TECHNICIAN', 'PROJECT', 'BOTH'], default: 'BOTH', index: true },
+    recipientDepartment: { type: String, default: '', trim: true },
+    receiptConfirmedAt: { type: Date, default: null },
+    attachments: { type: [mongoose.Schema.Types.Mixed], default: [] },
+    revisions: { type: [mongoose.Schema.Types.Mixed], default: [] },
     openedAt: {
       type: Date,
       default: Date.now,

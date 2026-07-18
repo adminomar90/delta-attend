@@ -63,7 +63,8 @@ export const api = {
           emitAuthExpired();
         }
         const payload = await response.json().catch(() => ({ message: 'Request failed' }));
-        throw new Error(payload.message || 'Request failed');
+        const details = Array.isArray(payload.details) ? payload.details.filter(Boolean).join('، ') : '';
+        throw new Error(details ? `${payload.message || 'Request failed'}: ${details}` : (payload.message || 'Request failed'));
       }
 
       const contentType = response.headers.get('content-type') || '';

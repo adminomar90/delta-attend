@@ -175,6 +175,7 @@ const materialRequestSchema = new mongoose.Schema(
       unique: true,
       index: true,
     },
+    operationKey: { type: String, default: '', trim: true },
     project: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'Project',
@@ -332,6 +333,11 @@ const materialRequestSchema = new mongoose.Schema(
   {
     timestamps: true,
   },
+);
+
+materialRequestSchema.index(
+  { operationKey: 1 },
+  { unique: true, partialFilterExpression: { operationKey: { $type: 'string', $gt: '' } } },
 );
 
 export const MaterialRequestModel = mongoose.model('MaterialRequest', materialRequestSchema);

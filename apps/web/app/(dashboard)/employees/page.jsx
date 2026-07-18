@@ -38,6 +38,106 @@ const roleColorMap = {
   SERVICE_STAFF: '#e091c9',
 };
 
+const permissionCategoryDefinitions = [
+  {
+    key: 'employees',
+    title: 'الموظفون والصلاحيات',
+    description: 'إدارة المستخدمين، الحالة، كلمات المرور والسلم الهرمي.',
+    icon: '👥',
+    match: (permission) => [
+      Permission.MANAGE_USERS,
+      Permission.MANAGE_USER_STATUS,
+      Permission.RESET_USER_PASSWORDS,
+      Permission.MANAGE_PERMISSIONS,
+      Permission.VIEW_EMPLOYEES_HIERARCHY,
+    ].includes(permission),
+  },
+  {
+    key: 'warehouses',
+    title: 'المخازن والمواد والذمم',
+    description: 'المواد، الطلبات، الصرف، التسليم، الذمم وتقارير المخازن.',
+    icon: '📦',
+    match: (permission) => permission.includes('MATERIAL') || permission.includes('PROJECT_CUSTODY') || permission === Permission.ADD_PROJECT_FROM_WAREHOUSE,
+  },
+  {
+    key: 'projects',
+    title: 'المشاريع والمهام',
+    description: 'إدارة المشاريع واعتمادها والمهام المرتبطة بها.',
+    icon: '🏗️',
+    match: (permission) => permission.includes('PROJECTS') || permission.includes('TASKS'),
+  },
+  {
+    key: 'finance',
+    title: 'المالية والصرف',
+    description: 'طلبات الصرف المالي، المراجعة، التسليم والتقارير المالية.',
+    icon: '💰',
+    match: (permission) => permission.includes('FINANCIAL') || permission.includes('DISBURSE'),
+  },
+  {
+    key: 'purchases',
+    title: 'المشتريات والموردون',
+    description: 'طلبات الشراء، التسعير، الاعتماد، الاستلام والموردون.',
+    icon: '🧾',
+    match: (permission) => permission.includes('PURCHASE') || permission.includes('SUPPLIER'),
+  },
+  {
+    key: 'customers',
+    title: 'الزبائن والتقييمات',
+    description: 'إدارة الزبائن ومعلوماتهم وتقييماتهم.',
+    icon: '🤝',
+    match: (permission) => permission.includes('CUSTOMER'),
+  },
+  {
+    key: 'maintenance',
+    title: 'الصيانة',
+    description: 'تقارير الصيانة وخطط الصيانة الدورية والزيارات.',
+    icon: '🛠️',
+    match: (permission) => permission.includes('MAINTENANCE'),
+  },
+  {
+    key: 'daily-work',
+    title: 'بلان العمل اليومي والتقارير',
+    description: 'البلانات اليومية، تقارير العمل، الإنجاز والإرسال عبر واتساب.',
+    icon: '📅',
+    match: (permission) => permission.includes('DAILY_WORK') || permission.includes('WORK_REPORT') || permission === Permission.VIEW_OWN_WORK_REPORTS || permission === Permission.VIEW_TEAM_WORK_REPORTS || permission === Permission.VIEW_COMPLETED_WORK_REPORTS || permission === Permission.SEND_REPORTS_WHATSAPP,
+  },
+  {
+    key: 'field',
+    title: 'الكشف الميداني',
+    description: 'إنشاء وإدارة وتنفيذ تذاكر الكشف الميداني.',
+    icon: '🔎',
+    match: (permission) => permission.includes('FIELD_INSPECTION'),
+  },
+  {
+    key: 'network',
+    title: 'توثيق الشبكات',
+    description: 'الزبائن، الفروع، الأجهزة، IP/VLAN/WAN/VPN/Wi-Fi والمرفقات.',
+    icon: '🌐',
+    match: (permission) => permission.includes('NETWORK'),
+  },
+  {
+    key: 'reports',
+    title: 'التقارير والاعتمادات والتدقيق',
+    description: 'التقارير التنفيذية، التحليلات، سجل التدقيق وسجل الاعتمادات.',
+    icon: '📊',
+    match: (permission) => permission.includes('REPORT') || permission.includes('AUDIT') || permission.includes('ANALYTICS') || permission.includes('APPROVAL_HISTORY'),
+  },
+  {
+    key: 'attendance',
+    title: 'الحضور والإشعارات',
+    description: 'متابعة الحضور، إشعارات النظام والتبليغات الداخلية.',
+    icon: '🔔',
+    match: (permission) => permission.includes('ATTENDANCE') || permission.includes('NOTIFICATION'),
+  },
+  {
+    key: 'gamification',
+    title: 'النقاط ولوحة الصدارة',
+    description: 'إدارة النقاط والمستويات وعرض لوحة الصدارة.',
+    icon: '🏆',
+    match: (permission) => permission.includes('GAMIFICATION') || permission === Permission.VIEW_LEADERBOARD,
+  },
+];
+
 const managerRoleValues = new Set([
   'GENERAL_MANAGER',
   'HR_MANAGER',
@@ -231,6 +331,31 @@ export default function EmployeesPage() {
     }, {});
   }, [users]);
 
+  const permissionGroups = useMemo(() => {
+    const groups = permissionCategoryDefinitions.map((category) => ({
+      ...category,
+      permissions: [],
+    }));
+    const fallbackGroup = {
+      key: 'other',
+      title: 'صلاحيات أخرى',
+      description: 'صلاحيات عامة أو جديدة لم يتم تصنيفها بعد.',
+      icon: '⚙️',
+      permissions: [],
+    };
+
+    (permissions || []).forEach((permission) => {
+      const targetGroup = groups.find((group) => group.match(permission));
+      if (targetGroup) {
+        targetGroup.permissions.push(permission);
+      } else {
+        fallbackGroup.permissions.push(permission);
+      }
+    });
+
+    return [...groups.filter((group) => group.permissions.length), ...(fallbackGroup.permissions.length ? [fallbackGroup] : [])];
+  }, [permissions]);
+
   const load = async () => {
     setError('');
 
@@ -382,6 +507,17 @@ export default function EmployeesPage() {
         return prev.filter((item) => item !== permission);
       }
       return [...prev, permission];
+    });
+  };
+
+  const togglePermissionGroup = (groupPermissions = []) => {
+    setSelectedPermissions((prev) => {
+      const groupSet = new Set(groupPermissions);
+      const allSelected = groupPermissions.every((permission) => prev.includes(permission));
+      if (allSelected) {
+        return prev.filter((permission) => !groupSet.has(permission));
+      }
+      return [...new Set([...prev, ...groupPermissions])];
     });
   };
 
@@ -603,33 +739,61 @@ export default function EmployeesPage() {
       ) : null}
 
       {permissionTarget && canManagePermissions ? (
-        <section className="card section" style={{ marginBottom: 16 }}>
-          <h2>تحديث صلاحيات العرض: {permissionTarget.fullName}</h2>
-          <p style={{ color: 'var(--text-soft)', marginTop: 0 }}>
-            هذه الصلاحيات إضافية فوق صلاحيات الدور الحالي.
-          </p>
-          <div className="grid-3" style={{ gap: 10 }}>
-            {(permissions || []).map((permission) => (
-              <label
-                key={permission}
-                style={{
-                  display: 'flex',
-                  gap: 8,
-                  alignItems: 'center',
-                  border: '1px solid var(--border)',
-                  borderRadius: 10,
-                  padding: '10px 12px',
-                }}
-              >
-                <input
-                  type="checkbox"
-                  checked={selectedPermissions.includes(permission)}
-                  onChange={() => togglePermissionSelection(permission)}
-                />
-                <span>{permissionLabelMap[permission] || permission}</span>
-              </label>
-            ))}
+        <section className="card section permission-editor-section" style={{ marginBottom: 16 }}>
+          <div className="section-header">
+            <div>
+              <h2>تحديث صلاحيات العرض: {permissionTarget.fullName}</h2>
+              <p style={{ color: 'var(--text-soft)', marginTop: 0 }}>
+                هذه الصلاحيات إضافية فوق صلاحيات الدور الحالي، وتم ترتيبها حسب الفئات لتسهيل الإدارة.
+              </p>
+            </div>
+            <span className="badge">{selectedPermissions.length} محددة</span>
           </div>
+
+          <div className="permission-category-grid">
+            {permissionGroups.map((group) => {
+              const selectedCount = group.permissions.filter((permission) => selectedPermissions.includes(permission)).length;
+              const allSelected = selectedCount === group.permissions.length;
+
+              return (
+                <article className="permission-category-card" key={group.key}>
+                  <div className="permission-category-head">
+                    <div className="permission-category-title">
+                      <span className="permission-category-icon">{group.icon}</span>
+                      <div>
+                        <h3>{group.title}</h3>
+                        <p>{group.description}</p>
+                      </div>
+                    </div>
+                    <div className="permission-category-meta">
+                      <span>{selectedCount}/{group.permissions.length}</span>
+                      <button
+                        type="button"
+                        className="btn btn-soft btn-sm"
+                        onClick={() => togglePermissionGroup(group.permissions)}
+                      >
+                        {allSelected ? 'إلغاء الكل' : 'تحديد الكل'}
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="permission-option-list">
+                    {group.permissions.map((permission) => (
+                      <label className="permission-option" key={permission}>
+                        <input
+                          type="checkbox"
+                          checked={selectedPermissions.includes(permission)}
+                          onChange={() => togglePermissionSelection(permission)}
+                        />
+                        <span>{permissionLabelMap[permission] || permission}</span>
+                      </label>
+                    ))}
+                  </div>
+                </article>
+              );
+            })}
+          </div>
+
           <div className="form-actions" style={{ marginTop: 12 }}>
             <button className="btn btn-primary" type="button" onClick={savePermissions} disabled={updatingPermissions}>
               {updatingPermissions ? 'جارٍ الحفظ...' : 'حفظ الصلاحيات'}
@@ -724,30 +888,23 @@ export default function EmployeesPage() {
 
       {canViewUsers ? (
         <section className="card section">
-          <h2>قائمة الموظفين</h2>
-          <table className="table">
-            <thead>
-              <tr>
-                <th>الموظف</th>
-                <th>الدور</th>
-                <th>القسم</th>
-                <th>المدير</th>
-                <th>صلاحيات العرض</th>
-                <th>الحالة</th>
-                <th>إجراءات</th>
-              </tr>
-            </thead>
-            <tbody>
-              {users.length ? users.map((user) => {
+          <div className="section-header">
+            <div>
+              <h2>قائمة الموظفين</h2>
+              <p style={{ margin: 0, color: 'var(--text-soft)' }}>عرض الموظفين ككروت مع الصورة الشخصية والأدوار والإجراءات السريعة.</p>
+            </div>
+            <span className="badge">{users.length} موظف</span>
+          </div>
+          {users.length ? (
+            <div className="employees-card-grid">
+              {users.map((user) => {
                 const uid = getUserId(user);
                 const color = roleColorMap[user.role] || '#7b93c2';
                 const directReportsCount = directReportsCountByManager[uid] || 0;
-
                 return (
-                <tr key={uid}>
-                  <td>
-                    <div className="emp-identity">
-                      <div className="emp-avatar-wrap" style={{ '--emp-accent': color }}>
+                  <article className="employee-card" key={uid} style={{ '--emp-accent': color }}>
+                    <div className="employee-card-header">
+                      <div className="emp-avatar-wrap employee-card-avatar" style={{ '--emp-accent': color }}>
                         <UserAvatar
                           fullName={user.fullName}
                           avatarUrl={user.avatarUrl}
@@ -768,85 +925,58 @@ export default function EmployeesPage() {
                           </label>
                         ) : null}
                       </div>
-                      <div className="emp-info">
-                        <strong>{user.fullName}</strong>
-                        <span className="emp-email">{user.email}</span>
-                        {user.employeeCode ? <span className="emp-code">{user.employeeCode}</span> : null}
-                        {directReportsCount ? <span className="emp-code">تابعون مباشرون: {directReportsCount}</span> : null}
+                      <div className="employee-card-title">
+                        <h3>{user.fullName}</h3>
+                        <span>{user.email}</span>
+                        <div className="employee-card-tags">
+                          <span className="emp-role-tag" style={{ borderColor: `${color}66`, color, background: `${color}14` }}>
+                            {roleLabelMap[user.role] || user.role}
+                          </span>
+                          <span className={`status-pill ${user.active ? 'status-approved' : 'status-rejected'}`}>
+                            {user.active ? 'نشط' : 'غير نشط'}
+                          </span>
+                        </div>
                       </div>
                     </div>
-                  </td>
-                  <td>
-                    <span className="emp-role-tag" style={{ borderColor: `${color}66`, color, background: `${color}14` }}>
-                      {roleLabelMap[user.role] || user.role}
-                    </span>
-                  </td>
-                  <td>{user.department || '-'}</td>
-                  <td>
-                    <div>{user.manager?.fullName || '-'}</div>
-                    {directReportsCount ? (
-                      <div style={{ color: 'var(--text-soft)', fontSize: 12, marginTop: 4 }}>
-                        {directReportsCount} موظف/موظفين
-                      </div>
-                    ) : null}
-                  </td>
-                  <td>
-                    {(user.customPermissions || []).length ? (
-                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                        {(user.customPermissions || []).map((item) => (
-                          <span key={item} className="badge">
-                            {permissionLabelMap[item] || item}
-                          </span>
-                        ))}
-                      </div>
-                    ) : (
-                      <span style={{ color: 'var(--text-soft)' }}>افتراضية حسب الدور</span>
-                    )}
-                  </td>
-                  <td>
-                    <span className={`status-pill ${user.active ? 'status-approved' : 'status-rejected'}`}>
-                      {user.active ? 'نشط' : 'غير نشط'}
-                    </span>
-                  </td>
-                  <td>
+
+                    <div className="employee-card-info-grid">
+                      <div><span>القسم</span><strong>{user.department || '-'}</strong></div>
+                      <div><span>المدير</span><strong>{user.manager?.fullName || '-'}</strong></div>
+                      <div><span>الكود</span><strong>{user.employeeCode || '-'}</strong></div>
+                      <div><span>التابعون</span><strong>{directReportsCount || '-'}</strong></div>
+                    </div>
+
+                    <div className="employee-card-permissions">
+                      {(user.customPermissions || []).length ? (
+                        (user.customPermissions || []).slice(0, 5).map((item) => (
+                          <span key={item} className="badge">{permissionLabelMap[item] || item}</span>
+                        ))
+                      ) : (
+                        <span className="employee-muted">الصلاحيات افتراضية حسب الدور</span>
+                      )}
+                    </div>
+
                     {canManageUsers || canManageStatus || canResetPasswords || canManagePermissions ? (
-                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                      <div className="employee-card-actions">
+                        {canManageUsers ? <button className="btn btn-primary btn-sm" onClick={() => beginEdit(user)} type="button">تعديل</button> : null}
+                        {canManageUsers ? <button className="btn btn-soft btn-sm" onClick={() => beginEdit(user)} type="button">المدير المباشر</button> : null}
+                        {canManageStatus ? <button className="btn btn-soft btn-sm" onClick={() => toggleStatus(user)} type="button">{user.active ? 'تعطيل' : 'إعادة التفعيل'}</button> : null}
+                        {canResetPasswords ? <button className="btn btn-soft btn-sm" onClick={() => resetPassword(user)} type="button">إعادة كلمة المرور</button> : null}
+                        {canManagePermissions ? <button className="btn btn-soft btn-sm" onClick={() => openPermissionEditor(user)} type="button">صلاحيات العرض</button> : null}
                         {canManageUsers ? (
-                          <button className="btn btn-soft" onClick={() => beginEdit(user)} type="button">تعديل</button>
-                        ) : null}
-                        {canManageUsers ? (
-                          <button className="btn btn-soft" onClick={() => beginEdit(user)} type="button">المدير المباشر</button>
-                        ) : null}
-                        {canManageStatus ? (
-                          <button className="btn btn-soft" onClick={() => toggleStatus(user)} type="button">{user.active ? 'تعطيل' : 'إعادة التفعيل'}</button>
-                        ) : null}
-                        {canResetPasswords ? (
-                          <button className="btn btn-soft" onClick={() => resetPassword(user)} type="button">إعادة كلمة المرور</button>
-                        ) : null}
-                        {canManagePermissions ? (
-                          <button className="btn btn-soft" onClick={() => openPermissionEditor(user)} type="button">صلاحيات العرض</button>
-                        ) : null}
-                        {canManageUsers ? (
-                          <label className="btn btn-soft" style={{ cursor: 'pointer' }}>
+                          <label className="btn btn-soft btn-sm employee-file-btn">
                             رفع مستند
                             <input type="file" style={{ display: 'none' }} onChange={(e) => uploadDocument(user, e.target.files?.[0])} />
                           </label>
                         ) : null}
-                        {canManageUsers ? (
-                          <button className="btn btn-soft" style={{ color: '#ff9b9b' }} onClick={() => setDeleteTarget(user)} type="button">حذف موظف</button>
-                        ) : null}
+                        {canManageUsers ? <button className="btn btn-danger btn-sm" onClick={() => setDeleteTarget(user)} type="button">حذف موظف</button> : null}
                       </div>
-                    ) : '-'}
-                  </td>
-                </tr>
+                    ) : null}
+                  </article>
                 );
-              }) : (
-                <tr>
-                  <td colSpan={7} style={{ color: 'var(--text-soft)' }}>لا يوجد موظفون حالياً.</td>
-                </tr>
-              )}
-            </tbody>
-          </table>
+              })}
+            </div>
+          ) : <p style={{ color: 'var(--text-soft)' }}>لا يوجد موظفون حالياً.</p>}
         </section>
       ) : null}
 

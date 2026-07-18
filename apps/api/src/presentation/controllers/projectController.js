@@ -1,90 +1,36 @@
 ﻿import { ProjectRepository } from '../../infrastructure/db/repositories/ProjectRepository.js';
 import { UserRepository } from '../../infrastructure/db/repositories/UserRepository.js';
-import { PointsLedgerRepository } from '../../infrastructure/db/repositories/PointsLedgerRepository.js';
-import { GoalRepository } from '../../infrastructure/db/repositories/GoalRepository.js';
+import { CustomerRepository } from '../../infrastructure/db/repositories/CustomerRepository.js';
+import { DailyWorkPlanRepository } from '../../infrastructure/db/repositories/DailyWorkPlanRepository.js';
 import { auditService } from '../../application/services/auditService.js';
 import { notificationService } from '../../application/services/notificationService.js';
-import { levelService } from '../../application/services/levelService.js';
-import { badgeService } from '../../application/services/badgeService.js';
 import {
   NotificationWatchPermission,
   resolveNotificationAudience,
 } from '../../application/services/notificationAudienceService.js';
-import { Roles } from '../../shared/constants.js';
 import { AppError, asyncHandler } from '../../shared/errors.js';
 
 const projectRepository = new ProjectRepository();
 const userRepository = new UserRepository();
-const pointsLedgerRepository = new PointsLedgerRepository();
-const goalRepository = new GoalRepository();
+const customerRepository = new CustomerRepository();
+const dailyWorkPlanRepository = new DailyWorkPlanRepository();
 
-const normalizeApprovalRoles = (roles = []) => {
-  const defaultRoles = [Roles.FINANCIAL_MANAGER, Roles.GENERAL_MANAGER];
-  if (!Array.isArray(roles) || roles.length === 0) {
-    return defaultRoles;
-  }
+const PROJECT_WORK_CATEGORIES = new Set([
+  'كاميرات مراقبة',
+  'بدالة داخلية',
+  'شبكة نيت ورك',
+  'أنظمة إنذار وإطفاء الحريق',
+  'برمجيات',
+  'أنظمة الصوت',
+  'طاقة شمسية',
+  'أخرى',
+]);
 
-  const validRoles = Object.values(Roles);
-  const resolved = [...new Set(roles.filter((item) => validRoles.includes(item)))];
-  return resolved.length ? resolved : defaultRoles;
-};
-
-const normalizeAwardedPoints = (value) => {
-  const parsed = Number(value || 0);
-  if (!Number.isFinite(parsed) || parsed < 0 || parsed > 1000) {
-    throw new AppError('points must be between 0 and 1000', 400);
-  }
-  return Math.round(parsed);
-};
-
-const awardProjectPoints = async ({ project, approverId, points }) => {
-  if (!points) {
-    return;
-  }
-
-  const ownerId = project.owner?._id || project.owner;
-
-  await pointsLedgerRepository.create({
-    user: ownerId,
-    points,
-    category: 'PROJECT_APPROVAL',
-    reason: `اعتماد مشروع: ${project.name}`,
-    approvedBy: approverId,
-  });
-
-  const ownerCurrent = await userRepository.findById(ownerId);
-  if (!ownerCurrent) {
-    return;
-  }
-
-  const updatedPoints = Number(ownerCurrent.pointsTotal || 0) + points;
-  const nextLevel = levelService.resolveLevel(updatedPoints);
-  const updatedUser = await userRepository.incrementPointsAndSetLevel(ownerCurrent._id, points, nextLevel);
-  const generatedBadges = badgeService.evaluate(updatedUser, 0);
-
-  for (const badgeCode of generatedBadges) {
-    if (!updatedUser.badges.includes(badgeCode)) {
-      await userRepository.attachBadge(updatedUser._id, badgeCode);
-    }
-  }
-
-  const goalUpdates = await goalRepository.incrementActiveGoals(updatedUser._id, points);
-  for (const goal of goalUpdates) {
-    if (goal.achieved) {
-      await notificationService.notifyGoalAchieved(updatedUser._id, goal);
-    }
-  }
-
-  await notificationService.notifySystem(
-    updatedUser._id,
-    'اعتماد المشروع',
-    `تم اعتماد مشروع "${project.name}" وإضافة ${points} نقطة.`,
-    {
-      projectId: String(project._id),
-      points,
-    },
-  );
-};
+const normalizeWorkCategories = (value) => (
+  Array.isArray(value)
+    ? [...new Set(value.map((item) => String(item || '').trim()).filter((item) => PROJECT_WORK_CATEGORIES.has(item)))]
+    : []
+);
 
 export const createProject = asyncHandler(async (req, res) => {
   const {
@@ -95,12 +41,22 @@ export const createProject = asyncHandler(async (req, res) => {
     startDate,
     endDate,
     budget = 0,
-    requiredApprovalRoles,
+    customerId = null,
+    workCategories = [],
+    clientName = '', clientPhone = '', location = '', notes = '', projectManager = null,
   } = req.body;
 
-  if (!name || !code) {
-    throw new AppError('name and code are required', 400);
+  if (!name || !code || !customerId) {
+    throw new AppError('اسم المشروع والرمز والزبون مطلوبة', 400);
   }
+  const normalizedWorkCategories = normalizeWorkCategories(workCategories);
+  if (!normalizedWorkCategories.length) throw new AppError('اختر تصنيفًا واحدًا على الأقل لنوع أعمال المشروع', 400);
+
+  const duplicate = await projectRepository.findDuplicate({ name, code });
+  if (duplicate) throw new AppError('يوجد مشروع مسجل بنفس الاسم أو الرمز', 409);
+
+  const customer = customerId ? await customerRepository.findById(customerId) : null;
+  if (customerId && (!customer || customer.archived)) throw new AppError('الزبون المحدد غير موجود أو مؤرشف', 404);
 
   const project = await projectRepository.create({
     name,
@@ -110,10 +66,19 @@ export const createProject = asyncHandler(async (req, res) => {
     startDate,
     endDate,
     budget,
-    status: 'PENDING_APPROVAL',
-    requiredApprovalRoles: normalizeApprovalRoles(requiredApprovalRoles),
+    status: 'ACTIVE',
+    requiredApprovalRoles: [],
+    approvedAt: new Date(),
+    customer: customer?._id || null,
+    clientName: customer?.name || clientName,
+    clientPhone: customer?.phone || clientPhone,
+    workCategories: normalizedWorkCategories,
+    location,
+    notes,
+    projectManager: projectManager || req.user.id,
     owner: req.user.id,
   });
+  if (customer) await customerRepository.updateById(customer._id, { $addToSet: { linkedProjects: project._id } });
 
   const projectFull = await projectRepository.findById(project._id);
 
@@ -126,7 +91,7 @@ export const createProject = asyncHandler(async (req, res) => {
       name,
       code,
       status: project.status,
-      requiredApprovalRoles: project.requiredApprovalRoles,
+      activationMode: 'DIRECT_WITHOUT_APPROVAL',
     },
     req,
   });
@@ -166,10 +131,59 @@ export const listProjects = asyncHandler(async (req, res) => {
   res.json({ projects });
 });
 
+export const listProjectCustomers = asyncHandler(async (req, res) => {
+  const customers = await customerRepository.list({ archived: { $ne: true } }, { limit: 1000, sort: { name: 1 } });
+  res.json({
+    customers: customers.map((customer) => ({
+      _id: customer._id,
+      name: customer.name,
+      phone: customer.phone || '',
+      province: customer.province || '',
+      address: customer.address || '',
+    })),
+  });
+});
+
+export const listProjectDailyWorkPlans = asyncHandler(async (req, res) => {
+  const project = await projectRepository.findById(req.params.id);
+  if (!project || project.archived) throw new AppError('Project not found', 404);
+
+  const filter = { project: project._id };
+  const from = req.query.from ? new Date(`${req.query.from}T00:00:00.000Z`) : null;
+  const to = req.query.to ? new Date(`${req.query.to}T23:59:59.999Z`) : null;
+  if ((from && Number.isNaN(from.getTime())) || (to && Number.isNaN(to.getTime()))) {
+    throw new AppError('Invalid project plan date range', 400);
+  }
+  if (from || to) {
+    filter.planDate = {};
+    if (from) filter.planDate.$gte = from;
+    if (to) filter.planDate.$lte = to;
+  }
+
+  const plans = await dailyWorkPlanRepository.list(filter, { limit: 2000, sort: { planDate: 1, createdAt: 1 } });
+  res.json({ project, plans });
+});
+
 export const updateProject = asyncHandler(async (req, res) => {
   const project = await projectRepository.findById(req.params.id);
   if (!project) {
     throw new AppError('Project not found', 404);
+  }
+  if (project.archived) throw new AppError('Cannot update an archived project', 409);
+
+  const duplicate = await projectRepository.findDuplicate({
+    name: req.body.name || project.name,
+    code: req.body.code || project.code,
+    excludeId: project._id,
+  });
+  if (duplicate) throw new AppError('يوجد مشروع مسجل بنفس الاسم أو الرمز', 409);
+
+  const requestedCustomerId = req.body.customerId ?? req.body.customer;
+  let nextCustomer = project.customer || null;
+  if (requestedCustomerId !== undefined) {
+    if (!requestedCustomerId) throw new AppError('اختيار الزبون مطلوب', 400);
+    nextCustomer = requestedCustomerId ? await customerRepository.findById(requestedCustomerId) : null;
+    if (requestedCustomerId && (!nextCustomer || nextCustomer.archived)) throw new AppError('الزبون المحدد غير موجود أو مؤرشف', 404);
   }
 
   if (['DONE', 'REJECTED'].includes(project.status)) {
@@ -186,12 +200,30 @@ export const updateProject = asyncHandler(async (req, res) => {
   const payload = {
     ...req.body,
   };
-
-  if (req.body.requiredApprovalRoles) {
-    payload.requiredApprovalRoles = normalizeApprovalRoles(req.body.requiredApprovalRoles);
+  delete payload.requiredApprovalRoles;
+  delete payload.approvalTrail;
+  delete payload.customerId;
+  if (requestedCustomerId !== undefined) {
+    payload.customer = nextCustomer?._id || null;
+    payload.clientName = nextCustomer?.name || '';
+    payload.clientPhone = nextCustomer?.phone || '';
+  }
+  if (req.body.workCategories !== undefined) {
+    payload.workCategories = normalizeWorkCategories(req.body.workCategories);
+    if (!payload.workCategories.length) throw new AppError('اختر تصنيفًا واحدًا على الأقل لنوع أعمال المشروع', 400);
+  }
+  if (payload.status && !['ACTIVE', 'ON_HOLD', 'DONE'].includes(payload.status)) {
+    throw new AppError('Project status must be ACTIVE, ON_HOLD, or DONE', 400);
   }
 
   const updatedProject = await projectRepository.updateById(req.params.id, payload);
+
+  const previousCustomerId = String(project.customer?._id || project.customer || '');
+  const nextCustomerId = String(nextCustomer?._id || nextCustomer || '');
+  if (previousCustomerId !== nextCustomerId) {
+    if (previousCustomerId) await customerRepository.updateById(previousCustomerId, { $pull: { linkedProjects: project._id } });
+    if (nextCustomerId) await customerRepository.updateById(nextCustomerId, { $addToSet: { linkedProjects: project._id } });
+  }
 
   await auditService.log({
     actorId: req.user.id,
@@ -210,123 +242,25 @@ export const updateProject = asyncHandler(async (req, res) => {
 
   res.json({ project: updatedProject });
 });
-
-export const approveProject = asyncHandler(async (req, res) => {
+export const archiveProject = asyncHandler(async (req, res) => {
   const project = await projectRepository.findById(req.params.id);
-  if (!project) {
-    throw new AppError('Project not found', 404);
-  }
+  if (!project) throw new AppError('Project not found', 404);
+  if (project.archived) throw new AppError('Project is already deleted', 409);
 
-  if (project.status !== 'PENDING_APPROVAL') {
-    throw new AppError('Project is not pending approval', 400);
-  }
-
-  const requiredRoles = project.requiredApprovalRoles || [];
-  const roleAllowed = requiredRoles.includes(req.user.role) || req.user.role === Roles.GENERAL_MANAGER;
-
-  if (!roleAllowed) {
-    throw new AppError('Your role cannot approve this project', 403);
-  }
-
-  const alreadyApproved = (project.approvalTrail || []).some(
-    (entry) => String(entry.approver?._id || entry.approver) === req.user.id,
-  );
-
-  if (alreadyApproved) {
-    throw new AppError('You already approved this project', 409);
-  }
-
-  const comment = String(req.body.comment || '').trim();
-  const requestedPoints = normalizeAwardedPoints(req.body.points || 0);
-
-  const stageProject = await projectRepository.updateById(project._id, {
-    $push: {
-      approvalTrail: {
-        approver: req.user.id,
-        role: req.user.role,
-        comment,
-        approvedAt: new Date(),
-      },
-    },
-  });
-
-  const approvedRoles = new Set((stageProject.approvalTrail || []).map((entry) => entry.role));
-  const completed = requiredRoles.every((role) => approvedRoles.has(role));
-
-  let finalProject = stageProject;
-  let grantedPoints = 0;
-
-  if (completed) {
-    grantedPoints = requestedPoints;
-    finalProject = await projectRepository.updateById(project._id, {
-      status: 'ACTIVE',
-      rejectionReason: '',
-      approvalPointsAwarded: grantedPoints,
-      approvedAt: new Date(),
-    });
-
-    await awardProjectPoints({
-      project,
-      approverId: req.user.id,
-      points: grantedPoints,
-    });
-  }
-
-  await auditService.log({
-    actorId: req.user.id,
-    action: completed ? 'PROJECT_APPROVED_FINAL' : 'PROJECT_APPROVED_STAGE',
-    entityType: 'PROJECT',
-    entityId: project._id,
-    after: {
-      status: finalProject.status,
-      approvalsCompleted: approvedRoles.size,
-      approvalsRequired: requiredRoles.length,
-      pointsAwarded: grantedPoints,
-    },
-    req,
-  });
-
-  res.json({
-    project: finalProject,
-    grantedPoints,
-    approvals: {
-      completed: approvedRoles.size,
-      required: requiredRoles.length,
-      pending: Math.max(0, requiredRoles.length - approvedRoles.size),
-    },
-  });
-});
-
-export const rejectProject = asyncHandler(async (req, res) => {
-  const project = await projectRepository.findById(req.params.id);
-  if (!project) {
-    throw new AppError('Project not found', 404);
-  }
-
-  if (project.status !== 'PENDING_APPROVAL') {
-    throw new AppError('Project is not pending approval', 400);
-  }
-
-  const reason = String(req.body.reason || '').trim();
-  if (!reason) {
-    throw new AppError('Rejection reason is required', 400);
-  }
-
-  const updatedProject = await projectRepository.updateById(req.params.id, {
-    status: 'REJECTED',
-    rejectedBy: req.user.id,
-    rejectionReason: reason,
+  const archivedAt = new Date();
+  const updatedProject = await projectRepository.updateById(project._id, {
+    archived: true,
+    archivedAt,
+    archivedBy: req.user.id,
   });
 
   await auditService.log({
     actorId: req.user.id,
-    action: 'PROJECT_REJECTED',
+    action: 'PROJECT_ARCHIVED',
     entityType: 'PROJECT',
     entityId: project._id,
-    after: {
-      status: 'REJECTED',
-      reason,
-    },
+    before: { archived: false, name: project.name, code: project.code },
+    after: { archived: true, archivedAt, archivedBy: req.user.id },
     req,
   });
 

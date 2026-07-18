@@ -158,6 +158,13 @@ export default function DailyWorkPlansPage() {
     }
   };
 
+  useEffect(() => {
+    const linkedProject = new URLSearchParams(window.location.search).get('project');
+    if (linkedProject) {
+      setFilters((previous) => ({ ...previous, project: linkedProject }));
+      setCalendarOpen(true);
+    }
+  }, []);
   useEffect(() => { load(); }, [queryString]);
   useEffect(() => { if (canView) loadMeta().catch(() => {}); }, [canView]);
   useEffect(() => { if (canView && calendarOpen && !isArchiveTab) loadCalendar(); }, [calendarOpen, calendarQueryString, canView, isArchiveTab]);

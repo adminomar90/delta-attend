@@ -18,6 +18,13 @@ const projectSchema = new mongoose.Schema(
       type: String,
       default: '',
     },
+    customer: { type: mongoose.Schema.Types.ObjectId, ref: 'Customer', default: null, index: true },
+    clientName: { type: String, default: '', trim: true },
+    clientPhone: { type: String, default: '', trim: true },
+    location: { type: String, default: '', trim: true },
+    notes: { type: String, default: '', trim: true },
+    workCategories: { type: [String], default: [] },
+    expectedEndDate: { type: Date, default: null },
     owner: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'User',
@@ -29,14 +36,15 @@ const projectSchema = new mongoose.Schema(
         ref: 'User',
       },
     ],
+    projectManager: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
     status: {
       type: String,
       enum: ['PENDING_APPROVAL', 'ACTIVE', 'ON_HOLD', 'DONE', 'REJECTED'],
-      default: 'PENDING_APPROVAL',
+      default: 'ACTIVE',
     },
     requiredApprovalRoles: {
       type: [String],
-      default: ['FINANCIAL_MANAGER', 'GENERAL_MANAGER'],
+      default: [],
     },
     approvalTrail: [
       {
@@ -83,6 +91,9 @@ const projectSchema = new mongoose.Schema(
       min: 0,
       default: 0,
     },
+    archived: { type: Boolean, default: false, index: true },
+    archivedAt: { type: Date, default: null },
+    archivedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
   },
   {
     timestamps: true,

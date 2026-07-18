@@ -1,0 +1,11 @@
+▲ Next.js 16.1.6 (Turbopack)
+- Local:         http://localhost:3000
+- Network:       http://26.149.121.217:3000
+- Environments: .env.local
+
+✓ Starting...
+Creating turbopack project {
+  dir: 'C:\\Users\\IT-ENG-HAKAM\\Desktop\\test\\apps\\web',
+  testMode: true
+}
+✓ Ready in 2.7s
