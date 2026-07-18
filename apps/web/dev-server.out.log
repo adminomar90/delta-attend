@@ -31,3 +31,4 @@ Creating turbopack project {
  GET /dashboard 200 in 669ms (compile: 564ms, render: 105ms)
  GET /employees 200 in 35ms (compile: 7ms, render: 29ms)
 ✓ Compiled in 160ms
+ GET /employees 200 in 303ms (compile: 124ms, render: 178ms)
