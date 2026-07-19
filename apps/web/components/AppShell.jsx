@@ -125,6 +125,7 @@ const routePermissionRules = {
   ],
   '/daily-work-plans': [
     Permission.VIEW_DAILY_WORK_PLANS,
+    Permission.VIEW_DAILY_WORK_PLAN_CALENDAR,
     Permission.VIEW_ALL_DAILY_WORK_PLAN_EMPLOYEES,
     Permission.CREATE_DAILY_WORK_PLANS,
     Permission.MANAGE_DAILY_WORK_PLANS,

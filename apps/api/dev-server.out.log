@@ -140,3 +140,10 @@
 [0mGET /api/auth/me [32m200[0m 130.579 ms - 9339[0m
 [0mGET /api/auth/users?includeInactive=1 [32m200[0m 174.171 ms - 11856[0m
 [0mGET /api/auth/users?includeInactive=1 [32m200[0m 148.821 ms - 11856[0m
+[0mGET /api/auth/me [32m200[0m 272.007 ms - 9339[0m
+[0mGET /api/auth/me [36m304[0m 34.578 ms - -[0m
+[0mGET /uploads/1773250738007-239284511-WhatsApp-Image-2026-03-11-at-8.38.38-PM.jpeg [36m304[0m 28.858 ms - -[0m
+[0mGET /api/auth/permissions [36m304[0m 18.497 ms - -[0m
+[0mGET /api/auth/users?includeInactive=1 [32m200[0m 44.175 ms - 11856[0m
+[0mGET /api/auth/permissions [36m304[0m 18.229 ms - -[0m
+[0mGET /api/auth/users?includeInactive=1 [36m304[0m 34.511 ms - -[0m

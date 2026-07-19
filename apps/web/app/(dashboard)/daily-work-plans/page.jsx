@@ -31,6 +31,7 @@ import ProgressGauge from '../../../components/ProgressGauge';
 
 const requiredPermissions = [
   Permission.VIEW_DAILY_WORK_PLANS,
+  Permission.VIEW_DAILY_WORK_PLAN_CALENDAR,
   Permission.CREATE_DAILY_WORK_PLANS,
   Permission.MANAGE_DAILY_WORK_PLANS,
   Permission.UPDATE_ASSIGNED_DAILY_WORK_PLANS,
@@ -74,6 +75,7 @@ export default function DailyWorkPlansPage() {
   const canManage = hasPermission(currentUser, Permission.MANAGE_DAILY_WORK_PLANS);
   const canApprove = hasPermission(currentUser, Permission.APPROVE_DAILY_WORK_PLANS);
   const canExport = hasPermission(currentUser, Permission.EXPORT_DAILY_WORK_PLANS);
+  const canViewCalendar = hasPermission(currentUser, Permission.VIEW_DAILY_WORK_PLAN_CALENDAR);
   const canUpdateAssigned = hasPermission(currentUser, Permission.UPDATE_ASSIGNED_DAILY_WORK_PLANS) || canManage;
 
   const [plans, setPlans] = useState([]);
@@ -146,7 +148,7 @@ export default function DailyWorkPlansPage() {
   };
 
   const loadCalendar = async (silent = false) => {
-    if (!canView || !calendarOpen || isArchiveTab) return;
+    if (!canViewCalendar || !calendarOpen || isArchiveTab) return;
     if (!silent) setCalendarLoading(true);
     try {
       const response = await api.get(`/daily-work-plans?${calendarQueryString}`);
@@ -167,10 +169,10 @@ export default function DailyWorkPlansPage() {
   }, []);
   useEffect(() => { load(); }, [queryString]);
   useEffect(() => { if (canView) loadMeta().catch(() => {}); }, [canView]);
-  useEffect(() => { if (canView && calendarOpen && !isArchiveTab) loadCalendar(); }, [calendarOpen, calendarQueryString, canView, isArchiveTab]);
+  useEffect(() => { if (canViewCalendar && calendarOpen && !isArchiveTab) loadCalendar(); }, [calendarOpen, calendarQueryString, canViewCalendar, isArchiveTab]);
   useEffect(() => { if (!canView) return undefined; const interval = window.setInterval(() => load(true), 30000); return () => window.clearInterval(interval); }, [canView, queryString]);
   useEffect(() => { if (!filters.planDate) return; setCalendarSelectedDate(filters.planDate); setCalendarMonth(createMonthAnchor(filters.planDate)); }, [filters.planDate]);
-  useEffect(() => { if (!canView || !calendarOpen || isArchiveTab) return undefined; const interval = window.setInterval(() => loadCalendar(true), 30000); return () => window.clearInterval(interval); }, [calendarOpen, calendarQueryString, canView, isArchiveTab]);
+  useEffect(() => { if (!canViewCalendar || !calendarOpen || isArchiveTab) return undefined; const interval = window.setInterval(() => loadCalendar(true), 30000); return () => window.clearInterval(interval); }, [calendarOpen, calendarQueryString, canViewCalendar, isArchiveTab]);
   useEffect(() => { if (!calendarOpen || isArchiveTab) return undefined; const rafId = window.requestAnimationFrame(() => { const el = calendarSectionRef.current; if (!el) return; const targetTop = el.getBoundingClientRect().top + window.scrollY - 88; window.scrollTo({ top: Math.max(0, targetTop), behavior: 'smooth' }); }); return () => window.cancelAnimationFrame(rafId); }, [calendarOpen, isArchiveTab]);
   useEffect(() => { if (isArchiveTab) setCalendarOpen(false); }, [isArchiveTab]);
   useEffect(() => {
@@ -201,7 +203,7 @@ export default function DailyWorkPlansPage() {
       setActionState({ mode: '', plan: null });
       setInfo(successMessage);
       await load();
-      if (calendarOpen && !isArchiveTab) await loadCalendar(true);
+      if (canViewCalendar && calendarOpen && !isArchiveTab) await loadCalendar(true);
     } catch (err) {
       setError(err.message || 'تعذر تنفيذ العملية');
     } finally {
@@ -411,7 +413,7 @@ export default function DailyWorkPlansPage() {
 
         <div className="action-row">
           {!isArchiveTab && canCreate ? <button className="btn btn-primary" onClick={() => setEditingPlan({})}>إضافة بلان جديد</button> : null}
-          {!isArchiveTab ? <button className="btn btn-soft" onClick={handleCalendarToggle}>{calendarOpen ? 'إخفاء التقويم' : 'عرض التقويم'}</button> : null}
+          {!isArchiveTab && canViewCalendar ? <button className="btn btn-soft" onClick={handleCalendarToggle}>{calendarOpen ? 'إخفاء التقويم' : 'عرض التقويم'}</button> : null}
           {isArchiveTab ? <button className="btn btn-soft" onClick={sendArchiveToWhatsApp}>واتساب الأرشيف</button> : null}
           {canExport ? <button className="btn btn-soft" onClick={() => downloadFile('excel')} disabled={saving}>Excel</button> : null}
           {canExport ? <button className="btn btn-soft" onClick={() => downloadFile('pdf')} disabled={saving}>PDF</button> : null}
@@ -457,7 +459,7 @@ export default function DailyWorkPlansPage() {
         </div>
       </section>
 
-      {!isArchiveTab ? (
+      {!isArchiveTab && canViewCalendar ? (
         <div ref={calendarSectionRef}>
           <DailyWorkPlanCalendar
             open={calendarOpen}
