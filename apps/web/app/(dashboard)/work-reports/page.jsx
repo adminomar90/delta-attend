@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import { api, assetUrl } from '../../../lib/api';
 import { authStorage } from '../../../lib/auth';
 import { Permission, hasAnyPermission, hasPermission } from '../../../lib/permissions';
@@ -928,8 +928,8 @@ export default function WorkReportsPage() {
     return isOwner || isGM;
   };
 
-  const canEditUnapprovedReport = (report) => {
-    if (!report || report.status === 'APPROVED') return false;
+  const canEditWorkReport = (report) => {
+    if (!report) return false;
     const isOwner = isOwnReport(report);
     const isGM = currentUser?.role === 'GENERAL_MANAGER';
     return isOwner || isGM || (canApprove && !isOwner);
@@ -952,11 +952,11 @@ export default function WorkReportsPage() {
       <button className="btn btn-soft" type="button" onClick={() => openReportPdf(report)}>
         PDF
       </button>
-      {canEditUnapprovedReport(report) ? (
+      {canEditWorkReport(report) ? (
         <button
           className="btn btn-soft"
           type="button"
-          onClick={() => openEditUnapprovedReport(report)}
+          onClick={() => openEditWorkReport(report)}
         >
           تعديل
         </button>
@@ -1035,8 +1035,8 @@ export default function WorkReportsPage() {
     scrollToDetailPanel();
   };
 
-  const openEditUnapprovedReport = (report) => {
-    if (!canEditUnapprovedReport(report)) return;
+  const openEditWorkReport = (report) => {
+    if (!canEditWorkReport(report)) return;
 
     setSelectedReportId(report._id);
     setInlineAction(null);
@@ -1142,13 +1142,13 @@ export default function WorkReportsPage() {
     return userId !== currentUserId;
   }, [selectedReport, canApprove, currentUserId]);
 
-  const canEditUnapprovedSelected = useMemo(() => {
-    return canEditUnapprovedReport(selectedReport);
+  const canEditSelectedReport = useMemo(() => {
+    return canEditWorkReport(selectedReport);
   }, [selectedReport, currentUserId, currentUser?.role, canApprove]);
 
   const submitManagerEdit = async () => {
-    if (!selectedReport || (!canManagerEditSelected && !canEditUnapprovedSelected)) return;
-    const isApprovedEdit = canManagerEditSelected;
+    if (!selectedReport || !canEditSelectedReport) return;
+    const isApprovedManagerEdit = selectedReport.status === 'APPROVED' && canManagerEditSelected;
 
     setManagerEditSaving(true);
     setError('');
@@ -1174,13 +1174,13 @@ export default function WorkReportsPage() {
         participantIds,
       };
 
-      if (isApprovedEdit) {
+      if (isApprovedManagerEdit) {
         payload.managerComment = approvalComment;
         payload.pointsByUser = buildWorkReportApprovalPayload(managerEditPointsByUser);
       }
 
       const response = await api.patch(
-        isApprovedEdit
+        isApprovedManagerEdit
           ? `/work-reports/${selectedReport._id}/manager-edit`
           : `/work-reports/${selectedReport._id}`,
         payload,
@@ -1199,12 +1199,14 @@ export default function WorkReportsPage() {
       }
 
       setDetailMode('view');
-      setInfo(isApprovedEdit
+      setInfo(isApprovedManagerEdit
         ? 'تم حفظ تعديل التقرير المعتمد وتحديث النقاط بنجاح.'
-        : 'تم حفظ تعديل التقرير وإرساله للاعتماد.'
+        : selectedReport.status === 'APPROVED'
+          ? 'تم حفظ تعديل التقرير المعتمد بنجاح.'
+          : 'تم حفظ تعديل التقرير وإرساله للاعتماد.'
       );
     } catch (err) {
-      setError(err.message || (isApprovedEdit ? 'فشل حفظ تعديل التقرير المعتمد' : 'فشل حفظ تعديل التقرير'));
+      setError(err.message || (selectedReport.status === 'APPROVED' ? 'فشل حفظ تعديل التقرير المعتمد' : 'فشل حفظ تعديل التقرير'));
     } finally {
       setManagerEditSaving(false);
     }
@@ -1828,7 +1830,6 @@ export default function WorkReportsPage() {
                     <th>الكادر</th>
                     <th>الحالة</th>
                     <th>النقاط</th>
-                    <th>إجراءات</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -1843,42 +1844,53 @@ export default function WorkReportsPage() {
                       && (maintenancePlanInfo || (report.status === 'APPROVED' && pct === 100));
 
                     return (
-                      <tr
-                        key={report._id}
-                        style={isSelected ? { background: 'rgba(77, 145, 255, 0.08)' } : undefined}
-                      >
-                        <td>{idx + 1}</td>
-                        <td>
-                          <strong>{report.employeeName || report.user?.fullName || '-'}</strong>
-                          <div style={{ fontSize: 11, color: 'var(--text-soft)' }}>
-                            {report.employeeCode || report.user?.employeeCode || ''}
-                          </div>
-                        </td>
-                        <td>{report.project?.name || report.projectName || '-'}</td>
-                        <td>{report.title || '-'}</td>
-                        <td style={{ whiteSpace: 'nowrap' }}>{formatDate(report.workDate || report.createdAt)}</td>
-                        <td>{renderReportProgress(pct)}</td>
-                        <td>{reportParticipantCount}</td>
-                        <td>
-                          <span className={`status-pill ${statusClassMap[report.status] || 'status-todo'}`}>
-                            {statusLabelMap[report.status] || report.status}
-                          </span>
-                        </td>
-                        <td>{formatWorkReportPoints(report.pointsAwarded || 0)}</td>
-                        <td>
-                          {renderReportActions({
-                            report,
-                            canDirectApprove,
-                            canWhatsapp,
-                            maintenancePlanInfo,
-                            canShowMaintenanceAction,
-                          })}
-                        </td>
-                      </tr>
+                      <Fragment key={report._id}>
+                        <tr
+                          key={`${report._id}-data`}
+                          className="work-report-table-data-row"
+                          style={isSelected ? { background: 'rgba(77, 145, 255, 0.08)' } : undefined}
+                        >
+                          <td>{idx + 1}</td>
+                          <td>
+                            <strong>{report.employeeName || report.user?.fullName || '-'}</strong>
+                            <div style={{ fontSize: 11, color: 'var(--text-soft)' }}>
+                              {report.employeeCode || report.user?.employeeCode || ''}
+                            </div>
+                          </td>
+                          <td>{report.project?.name || report.projectName || '-'}</td>
+                          <td>{report.title || '-'}</td>
+                          <td style={{ whiteSpace: 'nowrap' }}>{formatDate(report.workDate || report.createdAt)}</td>
+                          <td>{renderReportProgress(pct)}</td>
+                          <td>{reportParticipantCount}</td>
+                          <td>
+                            <span className={`status-pill ${statusClassMap[report.status] || 'status-todo'}`}>
+                              {statusLabelMap[report.status] || report.status}
+                            </span>
+                          </td>
+                          <td>{formatWorkReportPoints(report.pointsAwarded || 0)}</td>
+                        </tr>
+                        <tr
+                          key={`${report._id}-actions`}
+                          className="work-report-table-actions-row"
+                          style={isSelected ? { background: 'rgba(77, 145, 255, 0.08)' } : undefined}
+                        >
+                          <td colSpan={9}>
+                            <div className="work-report-actions-cell">
+                              {renderReportActions({
+                                report,
+                                canDirectApprove,
+                                canWhatsapp,
+                                maintenancePlanInfo,
+                                canShowMaintenanceAction,
+                              })}
+                            </div>
+                          </td>
+                        </tr>
+                      </Fragment>
                     );
                   }) : (
                     <tr>
-                      <td colSpan={10} style={{ color: 'var(--text-soft)' }}>لا توجد تقارير عمل مطابقة.</td>
+                      <td colSpan={9} style={{ color: 'var(--text-soft)' }}>لا توجد تقارير عمل مطابقة.</td>
                     </tr>
                   )}
                 </tbody>
@@ -2000,7 +2012,7 @@ export default function WorkReportsPage() {
                   {deletingId === String(selectedReport._id) ? 'جارٍ الحذف...' : 'حذف التقرير'}
                 </button>
               ) : null}
-              {canManagerEditSelected || canEditUnapprovedSelected ? (
+              {canEditSelectedReport ? (
                 <button
                   type="button"
                   className="btn btn-soft"
@@ -2316,7 +2328,7 @@ export default function WorkReportsPage() {
           ) : null}
 
           {/* ── Inline Approve / Reject ── */}
-          {(canManagerEditSelected || canEditUnapprovedSelected) && detailMode === 'edit' ? (
+          {canEditSelectedReport && detailMode === 'edit' ? (
             <div style={{ marginTop: 20, borderTop: '1px solid var(--border)', paddingTop: 16 }}>
               <h3 style={{ margin: '0 0 10px' }}>
                 {canManagerEditSelected ? 'تعديل التقرير المعتمد' : 'تعديل التقرير'}

@@ -2434,6 +2434,54 @@ textarea:disabled {
   min-width: 0;
 }
 
+.work-report-actions-cell {
+  vertical-align: middle;
+}
+
+.work-report-table-data-row > td {
+  border-bottom: 0;
+}
+
+.work-report-table-actions-row > td {
+  padding-top: 0;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--border);
+}
+
+.work-report-actions-cell .work-report-actions {
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: rgba(16, 33, 64, 0.45);
+}
+
+.work-report-actions-cell .work-report-actions .btn {
+  width: auto;
+  flex: 0 0 auto;
+}
+
+.work-report-actions {
+  align-items: center;
+  justify-content: flex-start;
+}
+
+.work-report-actions-mobile {
+  margin-top: 2px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(78, 111, 167, 0.22);
+  justify-content: flex-start;
+}
+
+.work-report-actions-mobile .btn {
+  flex: 0 1 auto;
+  min-height: 38px;
+  white-space: nowrap;
+}
+
 @media (max-width: 519px) {
   .user-chip-info {
     display: none;
@@ -2536,15 +2584,23 @@ textarea:disabled {
     flex-direction: column;
   }
 
-  .work-report-actions-mobile,
   .maintenance-modal-actions {
     flex-direction: column;
   }
 
-  .work-report-actions-mobile .btn,
   .maintenance-modal-actions .btn,
   .maintenance-visit-actions .btn {
     width: 100%;
+  }
+
+  .work-report-actions-mobile {
+    flex-direction: row;
+    flex-wrap: wrap;
+  }
+
+  .work-report-actions-mobile .btn {
+    width: auto;
+    flex: 0 1 auto;
   }
 
   .daily-plan-actions .btn {
@@ -3494,15 +3550,16 @@ textarea:disabled {
   }
 
   .work-report-actions {
-    flex-direction: column;
-    gap: 4px;
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: 6px;
   }
 
   .work-report-actions .btn {
     font-size: 12px;
     padding: 6px 10px;
     min-height: 36px;
-    width: 100%;
+    width: auto;
   }
 
   .work-report-progress {

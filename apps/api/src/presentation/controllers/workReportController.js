@@ -989,10 +989,6 @@ export const updateWorkReport = asyncHandler(async (req, res) => {
     throw new AppError('تقرير العمل غير موجود', 404);
   }
 
-  if (report.status === 'APPROVED') {
-    throw new AppError('لا يمكن تعديل تقرير معتمد من هذا المسار', 400);
-  }
-
   const ownerId = String(report.user?._id || report.user || '');
   const isOwner = ownerId === String(req.user.id);
   const isGM = req.user.role === Roles.GENERAL_MANAGER;
@@ -1002,7 +998,7 @@ export const updateWorkReport = asyncHandler(async (req, res) => {
   });
 
   if (!isOwner && !isGM && !canManage) {
-    throw new AppError('يمكن تعديل التقرير فقط من صاحب التقرير أو المدير المباشر أو المدير العام قبل الاعتماد', 403);
+    throw new AppError('يمكن تعديل التقرير فقط من صاحب التقرير أو المدير المباشر أو المدير العام', 403);
   }
 
   const { project, payload } = await resolveWorkReportPayload({
@@ -1047,7 +1043,7 @@ export const updateWorkReport = asyncHandler(async (req, res) => {
 
   await auditService.log({
     actorId: req.user.id,
-    action: 'WORK_REPORT_UPDATED_BEFORE_APPROVAL',
+    action: 'WORK_REPORT_UPDATED',
     entityType: 'WORK_REPORT',
     entityId: report._id,
     before,
