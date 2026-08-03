@@ -9,7 +9,11 @@ import {
   recalculatePlanState,
   syncOverdueDailyWorkPlans,
 } from '../src/application/services/dailyWorkPlanService.js';
-import { listDailyWorkPlanMeta } from '../src/presentation/controllers/dailyWorkPlanController.js';
+import {
+  getDailyWorkPlanById,
+  listDailyWorkPlanMeta,
+} from '../src/presentation/controllers/dailyWorkPlanController.js';
+import { DailyWorkPlanRepository } from '../src/infrastructure/db/repositories/DailyWorkPlanRepository.js';
 import { ProjectRepository } from '../src/infrastructure/db/repositories/ProjectRepository.js';
 import { UserRepository } from '../src/infrastructure/db/repositories/UserRepository.js';
 import { Permission, Roles } from '../src/shared/constants.js';
@@ -169,5 +173,39 @@ test('daily work plan employee visibility permission returns all employees in me
   } finally {
     userRepositoryPrototype.listForManagement = originalListForManagement;
     projectRepositoryPrototype.list = originalProjectList;
+  }
+});
+
+test('daily work plan calendar permission allows reading plans outside employee scope', async () => {
+  const dailyWorkPlanRepositoryPrototype = DailyWorkPlanRepository.prototype;
+  const originalFindById = dailyWorkPlanRepositoryPrototype.findById;
+  const originalListOverdueCandidates = dailyWorkPlanRepositoryPrototype.listOverdueCandidates;
+
+  dailyWorkPlanRepositoryPrototype.listOverdueCandidates = async () => [];
+  dailyWorkPlanRepositoryPrototype.findById = async () => ({
+    _id: 'plan-1',
+    title: 'Outside scope plan',
+    assignees: [{ user: { _id: 'other-employee', fullName: 'Other Employee' } }],
+    teamLeader: 'team-lead-1',
+    supervisor: 'supervisor-1',
+    createdBy: 'creator-1',
+  });
+
+  try {
+    const payload = await invokeController(getDailyWorkPlanById, {
+      params: { id: 'plan-1' },
+      user: {
+        id: 'viewer-1',
+        role: Roles.TECHNICAL_STAFF,
+        customPermissions: [Permission.VIEW_DAILY_WORK_PLAN_CALENDAR],
+      },
+      headers: {},
+      ip: '127.0.0.1',
+    });
+
+    assert.equal(payload.plan._id, 'plan-1');
+  } finally {
+    dailyWorkPlanRepositoryPrototype.findById = originalFindById;
+    dailyWorkPlanRepositoryPrototype.listOverdueCandidates = originalListOverdueCandidates;
   }
 });

@@ -40,3 +40,4 @@ Creating turbopack project {
 ✓ Compiled in 494ms
 ✓ Compiled in 247ms
  GET /employees 200 in 624ms (compile: 407ms, render: 218ms)
+ GET /employees 200 in 1008ms (compile: 560ms, render: 448ms)

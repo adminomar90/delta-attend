@@ -8,6 +8,7 @@ import {
   exportWorkReportPdf,
   saveWorkReportPdf,
   workReportWhatsappLink,
+  updateWorkReport,
   approveWorkReport,
   managerEditApprovedWorkReport,
   rejectWorkReport,
@@ -57,6 +58,7 @@ workReportsRoutes.post(
   createWorkReport,
 );
 workReportsRoutes.patch('/:id/approve', approveWorkReport);
+workReportsRoutes.patch('/:id', updateWorkReport);
 workReportsRoutes.patch('/:id/manager-edit', managerEditApprovedWorkReport);
 workReportsRoutes.patch('/:id/reject', rejectWorkReport);
 workReportsRoutes.patch(

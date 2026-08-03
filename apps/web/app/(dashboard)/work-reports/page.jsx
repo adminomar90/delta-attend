@@ -149,12 +149,14 @@ export default function WorkReportsPage() {
   const [filters, setFilters] = useState(defaultFilters);
   const [selectedReportId, setSelectedReportId] = useState('');
   const [showCreateForm, setShowCreateForm] = useState(false);
+  const [showCreateProjectPicker, setShowCreateProjectPicker] = useState(false);
   const [inlineAction, setInlineAction] = useState(null);
   const [approvalPoints, setApprovalPoints] = useState('');
   const [approvalPointsByUser, setApprovalPointsByUser] = useState({});
   const [approvalComment, setApprovalComment] = useState('');
   const [detailMode, setDetailMode] = useState('view');
   const [managerEditForm, setManagerEditForm] = useState(defaultForm);
+  const [showEditProjectPicker, setShowEditProjectPicker] = useState(false);
   const [managerEditPointsByUser, setManagerEditPointsByUser] = useState({});
   const [managerEditSaving, setManagerEditSaving] = useState(false);
   const [rejectionReason, setRejectionReason] = useState('');
@@ -202,6 +204,26 @@ export default function WorkReportsPage() {
   const projectOptions = useMemo(() => {
     return (projects || []).filter((p) => p.status !== 'REJECTED');
   }, [projects]);
+
+  const resolveProjectOptionByName = (projectName) => {
+    const normalizedName = String(projectName || '').trim().toLowerCase();
+    if (!normalizedName) return null;
+    return projectOptions.find((project) => String(project.name || '').trim().toLowerCase() === normalizedName) || null;
+  };
+
+  const applyExistingProjectToCreateForm = (projectId) => {
+    const project = projectOptions.find((item) => String(item._id) === String(projectId));
+    if (!project) return;
+    setForm((prev) => ({ ...prev, projectName: project.name || '' }));
+    setShowCreateProjectPicker(false);
+  };
+
+  const applyExistingProjectToEditForm = (projectId) => {
+    const project = projectOptions.find((item) => String(item._id) === String(projectId));
+    if (!project) return;
+    setManagerEditForm((prev) => ({ ...prev, projectName: project.name || '' }));
+    setShowEditProjectPicker(false);
+  };
 
   const employeeOptions = useMemo(() => {
     return (employees || []).filter((e) => {
@@ -396,6 +418,7 @@ export default function WorkReportsPage() {
 
   const resetForm = () => {
     setForm({ ...defaultForm, workDate: todayIso() });
+    setShowCreateProjectPicker(false);
     clearAttachments();
   };
 
@@ -519,8 +542,12 @@ export default function WorkReportsPage() {
       const BATCH_SIZE = 3;
 
       // ── Step 1: Create the report (text only, no images) ──
+      const selectedProject = resolveProjectOptionByName(form.projectName);
       const textPayload = new FormData();
       textPayload.append('projectName', form.projectName);
+      if (selectedProject?._id) {
+        textPayload.append('projectId', selectedProject._id);
+      }
       textPayload.append('activityType', form.activityType);
       textPayload.append('title', form.title);
       textPayload.append('details', form.details);
@@ -747,6 +774,7 @@ export default function WorkReportsPage() {
     setApprovalPointsByUser({});
     setApprovalComment('');
     setManagerEditForm(defaultForm);
+    setShowEditProjectPicker(false);
     setManagerEditPointsByUser({});
     setRejectionReason('');
     setRejectionComment('');
@@ -900,6 +928,13 @@ export default function WorkReportsPage() {
     return isOwner || isGM;
   };
 
+  const canEditUnapprovedReport = (report) => {
+    if (!report || report.status === 'APPROVED') return false;
+    const isOwner = isOwnReport(report);
+    const isGM = currentUser?.role === 'GENERAL_MANAGER';
+    return isOwner || isGM || (canApprove && !isOwner);
+  };
+
   const renderReportProgress = (pct) => <ProgressGauge value={pct} />;
 
   const renderReportActions = ({
@@ -917,6 +952,15 @@ export default function WorkReportsPage() {
       <button className="btn btn-soft" type="button" onClick={() => openReportPdf(report)}>
         PDF
       </button>
+      {canEditUnapprovedReport(report) ? (
+        <button
+          className="btn btn-soft"
+          type="button"
+          onClick={() => openEditUnapprovedReport(report)}
+        >
+          تعديل
+        </button>
+      ) : null}
       {canDirectApprove ? (
         <>
           <button
@@ -991,6 +1035,23 @@ export default function WorkReportsPage() {
     scrollToDetailPanel();
   };
 
+  const openEditUnapprovedReport = (report) => {
+    if (!canEditUnapprovedReport(report)) return;
+
+    setSelectedReportId(report._id);
+    setInlineAction(null);
+    setApprovalPoints('');
+    setApprovalPointsByUser({});
+    setApprovalComment(report.managerComment || '');
+    setDetailMode('edit');
+    setManagerEditForm(createWorkReportEditForm(report));
+    setShowEditProjectPicker(false);
+    setManagerEditPointsByUser({});
+    setRejectionReason('');
+    setRejectionComment('');
+    scrollToDetailPanel();
+  };
+
   const updateApprovalUserPoints = (userId, value) => {
     setApprovalPointsByUser((prev) => ({
       ...prev,
@@ -1022,6 +1083,34 @@ export default function WorkReportsPage() {
     });
   };
 
+  const addManagerEditParticipant = () => {
+    setManagerEditForm((prev) => {
+      const currentIds = Array.isArray(prev.participantIds) ? prev.participantIds : [];
+      if (currentIds.length >= managerEditEmployeeOptions.length) {
+        return prev;
+      }
+
+      const nextIds = [...currentIds, ''];
+      return {
+        ...prev,
+        participantCount: nextIds.length,
+        participantIds: nextIds,
+      };
+    });
+  };
+
+  const removeManagerEditParticipant = (index) => {
+    setManagerEditForm((prev) => {
+      const currentIds = Array.isArray(prev.participantIds) ? prev.participantIds : [];
+      const nextIds = currentIds.filter((_, currentIndex) => currentIndex !== index);
+      return {
+        ...prev,
+        participantCount: nextIds.length,
+        participantIds: nextIds,
+      };
+    });
+  };
+
   const updateManagerEditUserPoints = (userId, value) => {
     setManagerEditPointsByUser((prev) => ({
       ...prev,
@@ -1037,6 +1126,7 @@ export default function WorkReportsPage() {
 
     setDetailMode('view');
     setManagerEditForm(createWorkReportEditForm(selectedReport));
+    setShowEditProjectPicker(false);
     setManagerEditPointsByUser(buildWorkReportApprovalPointsMap(selectedReport));
   };
 
@@ -1052,14 +1142,24 @@ export default function WorkReportsPage() {
     return userId !== currentUserId;
   }, [selectedReport, canApprove, currentUserId]);
 
+  const canEditUnapprovedSelected = useMemo(() => {
+    return canEditUnapprovedReport(selectedReport);
+  }, [selectedReport, currentUserId, currentUser?.role, canApprove]);
+
   const submitManagerEdit = async () => {
-    if (!selectedReport || !canManagerEditSelected) return;
+    if (!selectedReport || (!canManagerEditSelected && !canEditUnapprovedSelected)) return;
+    const isApprovedEdit = canManagerEditSelected;
 
     setManagerEditSaving(true);
     setError('');
     setInfo('');
     try {
+      const participantIds = (managerEditForm.participantIds || [])
+        .map((item) => String(item || '').trim())
+        .filter(Boolean);
+      const selectedProject = resolveProjectOptionByName(managerEditForm.projectName);
       const payload = {
+        ...(selectedProject?._id ? { projectId: selectedProject._id } : {}),
         projectName: managerEditForm.projectName,
         activityType: managerEditForm.activityType,
         title: managerEditForm.title,
@@ -1070,16 +1170,21 @@ export default function WorkReportsPage() {
         accomplishments: managerEditForm.accomplishments,
         challenges: managerEditForm.challenges,
         nextSteps: managerEditForm.nextSteps,
-        participantCount: managerEditForm.participantCount,
-        participantIds: Array.from(
-          { length: Math.max(0, Number(managerEditForm.participantCount || 0)) },
-          (_, index) => String(managerEditForm.participantIds?.[index] || '').trim(),
-        ).filter(Boolean),
-        managerComment: approvalComment,
-        pointsByUser: buildWorkReportApprovalPayload(managerEditPointsByUser),
+        participantCount: participantIds.length,
+        participantIds,
       };
 
-      const response = await api.patch(`/work-reports/${selectedReport._id}/manager-edit`, payload);
+      if (isApprovedEdit) {
+        payload.managerComment = approvalComment;
+        payload.pointsByUser = buildWorkReportApprovalPayload(managerEditPointsByUser);
+      }
+
+      const response = await api.patch(
+        isApprovedEdit
+          ? `/work-reports/${selectedReport._id}/manager-edit`
+          : `/work-reports/${selectedReport._id}`,
+        payload,
+      );
       const updatedReport = response?.report || null;
 
       if (updatedReport?._id) {
@@ -1094,9 +1199,12 @@ export default function WorkReportsPage() {
       }
 
       setDetailMode('view');
-      setInfo('تم حفظ تعديل التقرير المعتمد وتحديث النقاط بنجاح.');
+      setInfo(isApprovedEdit
+        ? 'تم حفظ تعديل التقرير المعتمد وتحديث النقاط بنجاح.'
+        : 'تم حفظ تعديل التقرير وإرساله للاعتماد.'
+      );
     } catch (err) {
-      setError(err.message || 'فشل حفظ تعديل التقرير المعتمد');
+      setError(err.message || (isApprovedEdit ? 'فشل حفظ تعديل التقرير المعتمد' : 'فشل حفظ تعديل التقرير'));
     } finally {
       setManagerEditSaving(false);
     }
@@ -1183,6 +1291,29 @@ export default function WorkReportsPage() {
                 onChange={(e) => setForm((prev) => ({ ...prev, projectName: e.target.value }))}
                 required
               />
+              <button
+                type="button"
+                className="btn btn-soft"
+                onClick={() => setShowCreateProjectPicker((prev) => !prev)}
+                style={{ width: '100%', marginTop: 8 }}
+              >
+                إضافة مشروع موجود
+              </button>
+              {showCreateProjectPicker ? (
+                <select
+                  className="select"
+                  value=""
+                  onChange={(e) => applyExistingProjectToCreateForm(e.target.value)}
+                  style={{ marginTop: 8 }}
+                >
+                  <option value="">اختر من المشاريع الموجودة</option>
+                  {projectOptions.map((project) => (
+                    <option key={project._id} value={project._id}>
+                      {project.name}
+                    </option>
+                  ))}
+                </select>
+              ) : null}
             </label>
 
             <label>
@@ -1869,7 +2000,7 @@ export default function WorkReportsPage() {
                   {deletingId === String(selectedReport._id) ? 'جارٍ الحذف...' : 'حذف التقرير'}
                 </button>
               ) : null}
-              {canManagerEditSelected ? (
+              {canManagerEditSelected || canEditUnapprovedSelected ? (
                 <button
                   type="button"
                   className="btn btn-soft"
@@ -1881,11 +2012,16 @@ export default function WorkReportsPage() {
 
                     setDetailMode('edit');
                     setManagerEditForm(createWorkReportEditForm(selectedReport));
+                    setShowEditProjectPicker(false);
                     setManagerEditPointsByUser(buildWorkReportApprovalPointsMap(selectedReport));
                     setApprovalComment(selectedReport.managerComment || '');
                   }}
                 >
-                  {detailMode === 'edit' ? 'إلغاء التعديل' : 'تعديل بعد الاعتماد'}
+                  {detailMode === 'edit'
+                    ? 'إلغاء التعديل'
+                    : canManagerEditSelected
+                      ? 'تعديل بعد الاعتماد'
+                      : 'تعديل التقرير'}
                 </button>
               ) : null}
               <button
@@ -1905,6 +2041,8 @@ export default function WorkReportsPage() {
             </span>
           </div>
 
+          {detailMode !== 'edit' ? (
+            <>
           {/* Basic Info Grid */}
           <div className="grid-3" style={{ marginTop: 16 }}>
             <label>
@@ -2174,11 +2312,15 @@ export default function WorkReportsPage() {
               اعتمده: {selectedReport.approvedBy?.fullName || '-'}
             </div>
           ) : null}
+            </>
+          ) : null}
 
           {/* ── Inline Approve / Reject ── */}
-          {canManagerEditSelected && detailMode === 'edit' ? (
+          {(canManagerEditSelected || canEditUnapprovedSelected) && detailMode === 'edit' ? (
             <div style={{ marginTop: 20, borderTop: '1px solid var(--border)', paddingTop: 16 }}>
-              <h3 style={{ margin: '0 0 10px' }}>تعديل التقرير المعتمد</h3>
+              <h3 style={{ margin: '0 0 10px' }}>
+                {canManagerEditSelected ? 'تعديل التقرير المعتمد' : 'تعديل التقرير'}
+              </h3>
               <div className="grid-3" style={{ gap: 12 }}>
                 <label>
                   اسم المشروع
@@ -2188,6 +2330,29 @@ export default function WorkReportsPage() {
                     onChange={(e) => setManagerEditForm((prev) => ({ ...prev, projectName: e.target.value }))}
                     required
                   />
+                  <button
+                    type="button"
+                    className="btn btn-soft"
+                    onClick={() => setShowEditProjectPicker((prev) => !prev)}
+                    style={{ width: '100%', marginTop: 8 }}
+                  >
+                    إضافة مشروع موجود
+                  </button>
+                  {showEditProjectPicker ? (
+                    <select
+                      className="select"
+                      value=""
+                      onChange={(e) => applyExistingProjectToEditForm(e.target.value)}
+                      style={{ marginTop: 8 }}
+                    >
+                      <option value="">اختر من المشاريع الموجودة</option>
+                      {projectOptions.map((project) => (
+                        <option key={project._id} value={project._id}>
+                          {project.name}
+                        </option>
+                      ))}
+                    </select>
+                  ) : null}
                 </label>
                 <label>
                   نوع النشاط
@@ -2245,17 +2410,19 @@ export default function WorkReportsPage() {
                     min={0}
                     max={Math.max(0, managerEditEmployeeOptions.length)}
                     value={managerEditForm.participantCount}
-                    onChange={(e) => syncManagerEditParticipantCount(e.target.value)}
+                    readOnly
                   />
                 </label>
-                <label className="grid-span-full">
-                  تعليق المدير
-                  <input
-                    className="input"
-                    value={approvalComment}
-                    onChange={(e) => setApprovalComment(e.target.value)}
-                  />
-                </label>
+                {canManagerEditSelected ? (
+                  <label className="grid-span-full">
+                    تعليق المدير
+                    <input
+                      className="input"
+                      value={approvalComment}
+                      onChange={(e) => setApprovalComment(e.target.value)}
+                    />
+                  </label>
+                ) : null}
                 <label className="grid-span-full">
                   تفاصيل العمل
                   <textarea
@@ -2295,9 +2462,19 @@ export default function WorkReportsPage() {
                 </label>
               </div>
 
-              {managerEditParticipantSlots.length ? (
-                <div style={{ marginTop: 16 }}>
-                  <h4 style={{ margin: '0 0 10px' }}>المشاركون</h4>
+              <div style={{ marginTop: 16 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'center', flexWrap: 'wrap', marginBottom: 10 }}>
+                  <h4 style={{ margin: 0 }}>المشاركون</h4>
+                  <button
+                    type="button"
+                    className="btn btn-soft"
+                    onClick={addManagerEditParticipant}
+                    disabled={managerEditParticipantSlots.length >= managerEditEmployeeOptions.length}
+                  >
+                    إضافة مشارك
+                  </button>
+                </div>
+                {managerEditParticipantSlots.length ? (
                   <div className="grid-3" style={{ gap: 12 }}>
                     {managerEditParticipantSlots.map((slotIndex) => {
                       const otherSelections = new Set(
@@ -2309,41 +2486,54 @@ export default function WorkReportsPage() {
                       return (
                         <label key={`manager-participant-${slotIndex}`}>
                           المشارك {slotIndex + 1}
-                          <select
-                            className="select"
-                            value={managerEditForm.participantIds?.[slotIndex] || ''}
-                            onChange={(e) => updateManagerEditParticipant(slotIndex, e.target.value)}
-                            required
-                          >
-                            <option value="">اختر الموظف</option>
-                            {managerEditEmployeeOptions.map((employee) => {
-                              const employeeId = String(employee.id || employee._id || '');
-                              const employeeCode = employee.employeeCode ? ` - ${employee.employeeCode}` : '';
-                              return (
-                                <option key={employeeId} value={employeeId} disabled={otherSelections.has(employeeId)}>
-                                  {employee.fullName}{employeeCode}
-                                </option>
-                              );
-                            })}
-                          </select>
+                          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                            <select
+                              className="select"
+                              value={managerEditForm.participantIds?.[slotIndex] || ''}
+                              onChange={(e) => updateManagerEditParticipant(slotIndex, e.target.value)}
+                              required
+                            >
+                              <option value="">اختر الموظف</option>
+                              {managerEditEmployeeOptions.map((employee) => {
+                                const employeeId = String(employee.id || employee._id || '');
+                                const employeeCode = employee.employeeCode ? ` - ${employee.employeeCode}` : '';
+                                return (
+                                  <option key={employeeId} value={employeeId} disabled={otherSelections.has(employeeId)}>
+                                    {employee.fullName}{employeeCode}
+                                  </option>
+                                );
+                              })}
+                            </select>
+                            <button
+                              type="button"
+                              className="btn btn-soft"
+                              onClick={() => removeManagerEditParticipant(slotIndex)}
+                              style={{ color: 'var(--danger)', flexShrink: 0 }}
+                            >
+                              حذف
+                            </button>
+                          </div>
                         </label>
                       );
                     })}
                   </div>
-                </div>
-              ) : null}
+                ) : (
+                  <p style={{ color: 'var(--text-soft)', margin: 0 }}>لا يوجد مشاركون.</p>
+                )}
+              </div>
 
-              <div
-                style={{
-                  display: 'grid',
-                  gap: 10,
-                  marginTop: 16,
-                  padding: 12,
-                  borderRadius: 10,
-                  border: '1px solid var(--border)',
-                  background: '#0e1a34',
-                }}
-              >
+              {canManagerEditSelected ? (
+                <div
+                  style={{
+                    display: 'grid',
+                    gap: 10,
+                    marginTop: 16,
+                    padding: 12,
+                    borderRadius: 10,
+                    border: '1px solid var(--border)',
+                    background: '#0e1a34',
+                  }}
+                >
                 <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
                   <div>
                     <strong>النقاط المحدثة</strong>
@@ -2388,7 +2578,8 @@ export default function WorkReportsPage() {
                     </div>
                   ))}
                 </div>
-              </div>
+                </div>
+              ) : null}
 
               <div style={{ display: 'flex', gap: 8, marginTop: 12, flexWrap: 'wrap' }}>
                 <button

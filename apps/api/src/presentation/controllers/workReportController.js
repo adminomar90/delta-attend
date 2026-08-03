@@ -983,6 +983,96 @@ export const workReportWhatsappLink = asyncHandler(async (req, res) => {
   });
 });
 
+export const updateWorkReport = asyncHandler(async (req, res) => {
+  const report = await workReportRepository.findById(req.params.id);
+  if (!report) {
+    throw new AppError('تقرير العمل غير موجود', 404);
+  }
+
+  if (report.status === 'APPROVED') {
+    throw new AppError('لا يمكن تعديل تقرير معتمد من هذا المسار', 400);
+  }
+
+  const ownerId = String(report.user?._id || report.user || '');
+  const isOwner = ownerId === String(req.user.id);
+  const isGM = req.user.role === Roles.GENERAL_MANAGER;
+  const canManage = await canApproveOrRejectWorkReport({
+    actor: req.user,
+    report,
+  });
+
+  if (!isOwner && !isGM && !canManage) {
+    throw new AppError('يمكن تعديل التقرير فقط من صاحب التقرير أو المدير المباشر أو المدير العام قبل الاعتماد', 403);
+  }
+
+  const { project, payload } = await resolveWorkReportPayload({
+    body: req.body,
+    existingReport: report,
+    authorId: ownerId,
+  });
+
+  const before = {
+    projectId: String(report.project?._id || report.project || ''),
+    projectName: report.project?.name || report.projectName || '',
+    activityType: report.activityType || '',
+    title: report.title || '',
+    details: report.details || '',
+    accomplishments: report.accomplishments || '',
+    challenges: report.challenges || '',
+    nextSteps: report.nextSteps || '',
+    progressPercent: Number(report.progressPercent || 0),
+    hoursSpent: Number(report.hoursSpent || 0),
+    workDate: report.workDate || null,
+    participantCount: Number(report.participantCount || report.participants?.length || 0),
+    participantIds: (report.participants || []).map((item) => String(item.user?._id || item.user || '')),
+    status: report.status,
+    rejectionReason: report.rejectionReason || '',
+  };
+
+  if (report.pdfFile?.publicUrl) {
+    const oldPdfPath = resolveStoredWorkReportPdfAbsolutePath(report.pdfFile.publicUrl);
+    if (oldPdfPath) {
+      try { fs.unlinkSync(oldPdfPath); } catch { /* ignore missing */ }
+    }
+  }
+
+  const nextStatus = report.status === 'REJECTED' ? 'SUBMITTED' : report.status;
+  const updated = await workReportRepository.updateById(report._id, {
+    ...payload,
+    status: nextStatus,
+    rejectionReason: '',
+    managerComment: report.status === 'REJECTED' ? '' : report.managerComment,
+    $unset: { pdfFile: 1 },
+  });
+
+  await auditService.log({
+    actorId: req.user.id,
+    action: 'WORK_REPORT_UPDATED_BEFORE_APPROVAL',
+    entityType: 'WORK_REPORT',
+    entityId: report._id,
+    before,
+    after: {
+      projectId: project ? String(project._id) : '',
+      projectName: updated.project?.name || updated.projectName || '',
+      activityType: updated.activityType || '',
+      title: updated.title || '',
+      details: updated.details || '',
+      accomplishments: updated.accomplishments || '',
+      challenges: updated.challenges || '',
+      nextSteps: updated.nextSteps || '',
+      progressPercent: Number(updated.progressPercent || 0),
+      hoursSpent: Number(updated.hoursSpent || 0),
+      workDate: updated.workDate || null,
+      participantCount: Number(updated.participantCount || updated.participants?.length || 0),
+      participantIds: (updated.participants || []).map((item) => String(item.user?._id || item.user || '')),
+      status: updated.status,
+    },
+    req,
+  });
+
+  res.json({ report: updated });
+});
+
 export const approveWorkReport = asyncHandler(async (req, res) => {
   const report = await workReportRepository.findById(req.params.id);
   if (!report) {

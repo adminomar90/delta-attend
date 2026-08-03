@@ -174,6 +174,7 @@ export default function DailyWorkPlansPage() {
   useEffect(() => { if (!filters.planDate) return; setCalendarSelectedDate(filters.planDate); setCalendarMonth(createMonthAnchor(filters.planDate)); }, [filters.planDate]);
   useEffect(() => { if (!canViewCalendar || !calendarOpen || isArchiveTab) return undefined; const interval = window.setInterval(() => loadCalendar(true), 30000); return () => window.clearInterval(interval); }, [calendarOpen, calendarQueryString, canViewCalendar, isArchiveTab]);
   useEffect(() => { if (!calendarOpen || isArchiveTab) return undefined; const rafId = window.requestAnimationFrame(() => { const el = calendarSectionRef.current; if (!el) return; const targetTop = el.getBoundingClientRect().top + window.scrollY - 88; window.scrollTo({ top: Math.max(0, targetTop), behavior: 'smooth' }); }); return () => window.cancelAnimationFrame(rafId); }, [calendarOpen, isArchiveTab]);
+  useEffect(() => { if (canViewCalendar && !isArchiveTab) setCalendarOpen(true); }, [canViewCalendar, isArchiveTab]);
   useEffect(() => { if (isArchiveTab) setCalendarOpen(false); }, [isArchiveTab]);
   useEffect(() => {
     if (!canView || typeof window === 'undefined') return;

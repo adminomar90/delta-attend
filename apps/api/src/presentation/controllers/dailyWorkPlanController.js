@@ -225,6 +225,9 @@ const userCanApproveDailyWorkPlans = (user) =>
 const userCanViewAllDailyWorkPlanEmployees = (user) =>
   hasPermission(user, Permission.VIEW_ALL_DAILY_WORK_PLAN_EMPLOYEES);
 
+const userCanViewDailyWorkPlanCalendar = (user) =>
+  hasPermission(user, Permission.VIEW_DAILY_WORK_PLAN_CALENDAR);
+
 const isPlanReadyForArchive = (plan) =>
   Number(plan?.progressPercent || 0) >= 100
   || [DailyWorkPlanStatus.PENDING_APPROVAL, DailyWorkPlanStatus.COMPLETED].includes(plan?.status);
@@ -247,6 +250,9 @@ const ensureManagedUsers = async (req) =>
     actorRole: req.user.role,
   });
 
+const resolveReadManagedUserIds = async (req) =>
+  userCanViewDailyWorkPlanCalendar(req.user) ? null : ensureManagedUsers(req);
+
 const planHasVisibleAssignee = (plan, managedUserIds) => {
   if (!Array.isArray(managedUserIds)) return true;
   return (plan.assignees || []).some((assignee) => managedUserIds.includes(toId(assignee.user)));
@@ -266,13 +272,27 @@ const ensurePlanVisibleToActor = async (req, plan) => {
   return managedUserIds;
 };
 
+const ensurePlanReadableToActor = async (req, plan) => {
+  const managedUserIds = await resolveReadManagedUserIds(req);
+  const actorId = toId(req.user.id);
+  if (
+    !planHasVisibleAssignee(plan, managedUserIds)
+    && actorId !== toId(plan.createdBy)
+    && actorId !== toId(plan.supervisor)
+    && actorId !== toId(plan.teamLeader)
+  ) {
+    throw new AppError('You are not allowed to access this daily work plan', 403);
+  }
+  return managedUserIds;
+};
+
 const buildFilterFromQuery = async (req) => {
   const filter = {};
   const search = toCleanString(req.query.search);
   const planDate = toCleanString(req.query.planDate || req.query.date);
   const dateFrom = toCleanString(req.query.dateFrom);
   const dateTo = toCleanString(req.query.dateTo);
-  const managedUserIds = await ensureManagedUsers(req);
+  const managedUserIds = await resolveReadManagedUserIds(req);
 
   if (req.query.status) filter.status = req.query.status;
   if (req.query.priority) filter.priority = req.query.priority;
@@ -578,7 +598,7 @@ export const getDailyWorkPlanSummary = asyncHandler(async (req, res) => {
 export const getDailyWorkPlanById = asyncHandler(async (req, res) => {
   await syncOverduePlans();
   const plan = await loadPlanOrThrow(req.params.id);
-  await ensurePlanVisibleToActor(req, plan);
+  await ensurePlanReadableToActor(req, plan);
   res.json({ plan });
 });
 
@@ -1560,7 +1580,7 @@ export const exportDailyWorkPlansPdf = asyncHandler(async (req, res) => {
 });
 
 export const listDailyWorkPlanMeta = asyncHandler(async (req, res) => {
-  const managedUserIds = userCanViewAllDailyWorkPlanEmployees(req.user)
+  const managedUserIds = userCanViewAllDailyWorkPlanEmployees(req.user) || userCanViewDailyWorkPlanCalendar(req.user)
     ? undefined
     : await ensureManagedUsers(req);
   const users = await userRepository.listForManagement({
