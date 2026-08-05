@@ -18,7 +18,7 @@ export default function HeaderBar({ title, subtitle, user, onMenuToggle }) {
           <div className="header-title-row">
             <img
               className="header-logo"
-              src="/brand/delta-plus-logo.png"
+              src="/brand/delta-wordmark-transparent.png"
               alt="Delta Plus"
             />
             <h1>{title}</h1>

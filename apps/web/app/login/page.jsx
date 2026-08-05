@@ -14,6 +14,7 @@ export default function LoginPage() {
   const [otpCode, setOtpCode] = useState('');
   const [otpToken, setOtpToken] = useState('');
   const [otpRequired, setOtpRequired] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
@@ -69,59 +70,74 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="container auth-shell">
-      <section className="card auth-layout">
-        <div className="auth-hero">
-          <img
-            src="/brand/delta-plus-logo.png"
-            alt="Delta Plus"
-            className="auth-logo"
-          />
-          <span className="badge" style={{ background: 'rgba(196,215,67,0.2)', color: '#e7f28c' }}>Delta Plus Internal</span>
-          <h1 className="auth-title">إدارة عمل محفزة وعادلة</h1>
-          <p className="auth-copy">
-            منصة داخلية تجمع إدارة المهام، التقييم، النقاط، المستويات، الشارات، والتقارير التشغيلية في تجربة عربية كاملة.
-          </p>
-          <ul className="auth-list">
-            <li>توزيع مهام ذكي من المدير إلى الموظف</li>
-            <li>نقاط تُحتسب بعد الاعتماد وفق قواعد عادلة</li>
-            <li>لوحات تحكم فورية وسجل تدقيق شامل</li>
-          </ul>
-        </div>
-
+    <div className="auth-page">
+      <section className="auth-layout">
         <form onSubmit={onSubmit} className="auth-form">
-          <h2 style={{ margin: 0 }}>تسجيل الدخول</h2>
-          <p style={{ marginTop: 4, color: 'var(--text-soft)' }}>ادخل بيانات الحساب للوصول إلى لوحة Delta Plus</p>
+          <div className="auth-form-heading">
+            <span className="auth-form-kicker">Delta Plus ERP</span>
+            <h2>تسجيل الدخول</h2>
+            <p>أدخل بيانات حسابك للوصول إلى نظام Delta Plus ERP</p>
+          </div>
 
-          <label>
-            البريد الإلكتروني
-            <input className="input" type="email" value={email} onChange={(e) => setEmail(e.target.value)} required disabled={otpRequired} />
+          <label className="auth-field">
+            <span>البريد الإلكتروني</span>
+            <div className="auth-input-wrap">
+              <span className="auth-input-icon" aria-hidden="true">✉</span>
+              <input className="input" type="email" value={email} onChange={(e) => setEmail(e.target.value)} required disabled={otpRequired} autoComplete="email" />
+            </div>
           </label>
 
-          <label>
-            كلمة المرور
-            <input className="input" type="password" value={password} onChange={(e) => setPassword(e.target.value)} required disabled={otpRequired} />
+          <label className="auth-field">
+            <span>كلمة المرور</span>
+            <div className="auth-input-wrap">
+              <span className="auth-input-icon" aria-hidden="true">⌕</span>
+              <input className="input" type={showPassword ? 'text' : 'password'} value={password} onChange={(e) => setPassword(e.target.value)} required disabled={otpRequired} autoComplete="current-password" />
+              <button className="auth-password-toggle" type="button" onClick={() => setShowPassword((value) => !value)} disabled={otpRequired} aria-label={showPassword ? 'إخفاء كلمة المرور' : 'إظهار كلمة المرور'}>
+                {showPassword ? 'إخفاء' : 'إظهار'}
+              </button>
+            </div>
           </label>
 
           {otpRequired ? (
-            <label>
-              رمز التحقق (OTP)
-              <input className="input" value={otpCode} onChange={(e) => setOtpCode(e.target.value)} required />
+            <label className="auth-field">
+              <span>رمز التحقق</span>
+              <div className="auth-input-wrap">
+                <span className="auth-input-icon" aria-hidden="true">●</span>
+                <input className="input" value={otpCode} onChange={(e) => setOtpCode(e.target.value)} required inputMode="numeric" />
+              </div>
             </label>
           ) : null}
 
-          {error ? <p style={{ color: 'var(--danger)', margin: 0 }}>{error}</p> : null}
+          {error ? <p className="auth-error">{error}</p> : null}
 
-          <button className="btn btn-primary" type="submit" disabled={loading}>
-            {loading ? 'جارٍ الدخول...' : otpRequired ? 'تأكيد التحقق' : 'دخول'}
+          <button className="btn btn-primary auth-submit" type="submit" disabled={loading}>
+            <span>{loading ? 'جارٍ الدخول...' : otpRequired ? 'تأكيد التحقق' : 'تسجيل الدخول'}</span>
+            {loading ? <span className="auth-loader" aria-hidden="true" /> : null}
           </button>
-
-          <small style={{ color: 'var(--text-soft)' }}>
-            في أول تشغيل بعد التفريغ: أنشئ حساب المدير العام عبر endpoint الإعداد ثم سجّل الدخول.
-          </small>
         </form>
+
+        <div className="auth-hero">
+          <div className="auth-brand">
+            <img
+              src="/brand/delta-logo-transparent.png"
+              alt="Delta Plus for Technical Solutions"
+              className="auth-logo-wide"
+            />
+            <span>Delta Plus ERP</span>
+          </div>
+          <h1 className="auth-title">نظام متكامل لإدارة أعمال الشركة</h1>
+          <p className="auth-copy">
+            منصة مركزية تجمع إدارة المشاريع، الموارد البشرية، الحسابات، المخازن، المشتريات، المبيعات، العملاء، الصيانة، الأصول، الموافقات والتقارير التشغيلية ضمن نظام واحد.
+          </p>
+          <div className="auth-feature-grid">
+            <article><span>▣</span><strong>المشاريع والمهام</strong></article>
+            <article><span>◴</span><strong>الموظفون والحضور</strong></article>
+            <article><span>▥</span><strong>المالية والمخازن</strong></article>
+            <article><span>◎</span><strong>الموافقات والتقارير</strong></article>
+          </div>
+          <p className="auth-footer-line">بيانات مركزية — صلاحيات دقيقة — تقارير فورية — إدارة متكاملة</p>
+        </div>
       </section>
     </div>
   );
 }
-

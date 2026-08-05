@@ -298,7 +298,7 @@ export default function Sidebar({ mobileOpen, onClose }) {
 
         <div className="brand">
           <div className="logo">
-            <img className="brand-logo-img" src="/brand/delta-plus-logo.png" alt="Delta Plus" />
+            <img className="brand-logo-img" src="/brand/delta-wordmark-transparent.png" alt="Delta Plus" />
           </div>
           <div>
             <h2>Delta Plus</h2>
