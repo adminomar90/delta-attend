@@ -19,6 +19,7 @@ import {
   financialDisbursementWhatsappLink,
   getFinancialDisbursement,
   listFinancialDisbursements,
+  exportFinancialDisbursementsExcel,
   exportFinancialDisbursementPdf,
   reviewFinancialDisbursementAsFinancialManager,
   reviewFinancialDisbursementAsGeneralManager,
@@ -42,6 +43,7 @@ financialDisbursementsRoutes.use(requireAuth, canAccessFinancialDisbursementsMod
 
 financialDisbursementsRoutes.get('/summary', financialDisbursementSummary);
 financialDisbursementsRoutes.get('/reports', financialDisbursementReports);
+financialDisbursementsRoutes.get('/export/excel', exportFinancialDisbursementsExcel);
 financialDisbursementsRoutes.get('/', listFinancialDisbursements);
 financialDisbursementsRoutes.post(
   '/',

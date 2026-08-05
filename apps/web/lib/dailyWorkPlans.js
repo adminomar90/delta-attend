@@ -154,6 +154,8 @@ export const createPlanFormDefaults = (plan = null) => ({
   priority: plan?.priority || DailyWorkPlanPriority.MEDIUM,
   taskType: plan?.taskType || DailyWorkPlanTaskType.OTHER,
   project: plan?.project?._id || plan?.project?.id || '',
+  stage: plan?.stage?._id || plan?.stage?.id || plan?.stage || '',
+  task: plan?.task?._id || plan?.task?.id || plan?.task || '',
   supervisor: plan?.supervisor?._id || plan?.supervisor?.id || '',
   teamLeader: plan?.teamLeader?._id || plan?.teamLeader?.id || '',
   assigneeIds: (plan?.assignees || []).map((item) => item.user?._id || item.user?.id || item.user).filter(Boolean),
@@ -222,6 +224,8 @@ export const buildDailyWorkPlanFormData = (form) => {
   formData.append('priority', form.priority || DailyWorkPlanPriority.MEDIUM);
   formData.append('taskType', form.taskType || DailyWorkPlanTaskType.OTHER);
   formData.append('project', form.project || '');
+  formData.append('stage', form.stage || '');
+  formData.append('task', form.task || '');
   formData.append('supervisor', form.supervisor || '');
   formData.append('teamLeader', form.teamLeader || '');
   formData.append('adminNotes', form.adminNotes || '');

@@ -1,4 +1,5 @@
 import path from 'path';
+import mongoose from 'mongoose';
 import { sequenceService } from '../../application/services/sequenceService.js';
 import { auditService } from '../../application/services/auditService.js';
 import { notificationService } from '../../application/services/notificationService.js';
@@ -19,6 +20,7 @@ import {
 import { financialDisbursementPointsService } from '../../application/services/financialDisbursementPointsService.js';
 import { FinancialDisbursementRepository } from '../../infrastructure/db/repositories/FinancialDisbursementRepository.js';
 import { buildFinancialDisbursementPdfBuffer } from '../../infrastructure/reports/financialDisbursementPdfBuilder.js';
+import { buildFinancialDisbursementsExcelBuffer } from '../../infrastructure/reports/financialDisbursementsExcelBuilder.js';
 import { UserRepository } from '../../infrastructure/db/repositories/UserRepository.js';
 import { Permission, Roles } from '../../shared/constants.js';
 import { hasPermission } from '../../shared/permissions.js';
@@ -68,6 +70,16 @@ const normalizeType = (value) => {
 };
 
 const toBoolean = (value) => ['1', 'true', 'yes', 'on'].includes(String(value || '').toLowerCase());
+
+const normalizeOptionalObjectId = (value, fieldName) => {
+  const rawValue = value?._id || value?.id || value;
+  const text = toCleanString(rawValue);
+  if (!text) return null;
+  if (!mongoose.Types.ObjectId.isValid(text)) {
+    throw new AppError(`Invalid ${fieldName}`, 400);
+  }
+  return text;
+};
 
 const parseApprovedAmount = (value, originalAmount) => {
   if (value == null || value === '') {
@@ -255,6 +267,7 @@ const serializeRequest = (request, currentUser = null) => {
     currency: request.currency || 'IQD',
     description: request.description || '',
     notes: request.notes || '',
+    isProjectAdvance: !!request.isProjectAdvance,
     status,
     statusLabel: getFinancialStatusLabel(status),
     currentReviewerRole: request.currentReviewerRole || null,
@@ -287,6 +300,40 @@ const serializeRequest = (request, currentUser = null) => {
       pointsTotal: Number(request.employee.pointsTotal || 0),
       avatarUrl: request.employee.avatarUrl || '',
       employeeCode: request.employee.employeeCode || '',
+    } : null,
+    advanceRecipient: request.advanceRecipient ? {
+      id: String(request.advanceRecipient._id || request.advanceRecipient),
+      _id: String(request.advanceRecipient._id || request.advanceRecipient),
+      fullName: request.advanceRecipient.fullName || '',
+      role: request.advanceRecipient.role || '',
+      avatarUrl: request.advanceRecipient.avatarUrl || '',
+      employeeCode: request.advanceRecipient.employeeCode || '',
+    } : null,
+    project: request.project ? {
+      id: String(request.project._id || request.project),
+      _id: String(request.project._id || request.project),
+      name: request.project.name || '',
+      code: request.project.code || '',
+      status: request.project.status || '',
+      budget: Number(request.project.budget || 0),
+      clientName: request.project.clientName || request.project.customer?.name || '',
+      location: request.project.location || '',
+    } : null,
+    stage: request.stage ? {
+      id: String(request.stage._id || request.stage),
+      _id: String(request.stage._id || request.stage),
+      name: request.stage.name || '',
+      order: request.stage.order || '',
+      status: request.stage.status || '',
+      progressPercent: Number(request.stage.progressPercent || 0),
+    } : null,
+    task: request.task ? {
+      id: String(request.task._id || request.task),
+      _id: String(request.task._id || request.task),
+      title: request.task.title || '',
+      status: request.task.status || '',
+      priority: request.task.priority || '',
+      progressPercent: Number(request.task.progressPercent || 0),
     } : null,
     projectManagerReviewer: request.projectManagerReviewer ? {
       id: projectManagerId,
@@ -408,6 +455,73 @@ const resolveCurrentReviewers = async (employeeId, employeeRole) => {
   return chain;
 };
 
+const findActiveUserByRole = (users = [], role, excludeUserId = '') =>
+  users.find((user) =>
+    user?.active !== false
+    && user.role === role
+    && String(user._id || user.id || '') !== String(excludeUserId || ''));
+
+const resolveProjectAdvanceReviewers = async (user = {}) => {
+  const users = await userRepository.listForManagement({ includeManager: true, includeInactive: false });
+  const financialManager = findActiveUserByRole(users, Roles.FINANCIAL_MANAGER, user.id || user._id);
+  const generalManager = findActiveUserByRole(users, Roles.GENERAL_MANAGER, user.id || user._id);
+
+  if (!generalManager && user.role !== Roles.GENERAL_MANAGER) {
+    throw new AppError('No active general manager found for this request', 409);
+  }
+
+  if (user.role === Roles.PROJECT_MANAGER) {
+    if (!financialManager) {
+      throw new AppError('No active financial manager found for this request', 409);
+    }
+
+    return {
+      projectManagerId: null,
+      financialManagerId: financialManager._id,
+      generalManagerId: generalManager?._id || null,
+      skipProjectManager: true,
+      skipFinancialManager: false,
+      initialStatus: FinancialDisbursementStatus.PENDING_FINANCIAL_MANAGER_APPROVAL,
+      initialReviewerRole: Roles.FINANCIAL_MANAGER,
+    };
+  }
+
+  if (user.role === Roles.FINANCIAL_MANAGER) {
+    return {
+      projectManagerId: null,
+      financialManagerId: user.id || user._id,
+      generalManagerId: generalManager?._id || null,
+      skipProjectManager: true,
+      skipFinancialManager: true,
+      initialStatus: FinancialDisbursementStatus.PENDING_GENERAL_MANAGER_APPROVAL,
+      initialReviewerRole: Roles.GENERAL_MANAGER,
+    };
+  }
+
+  if (user.role === Roles.GENERAL_MANAGER) {
+    return {
+      projectManagerId: null,
+      financialManagerId: financialManager?._id || null,
+      generalManagerId: user.id || user._id,
+      skipProjectManager: true,
+      skipFinancialManager: true,
+      initialStatus: FinancialDisbursementStatus.PENDING_GENERAL_MANAGER_APPROVAL,
+      initialReviewerRole: Roles.GENERAL_MANAGER,
+    };
+  }
+
+  const chain = resolveApprovalChain({
+    employeeId: user.id || user._id,
+    employeeRole: user.role,
+    users,
+  });
+
+  return {
+    ...chain,
+    generalManagerId: chain.generalManagerId || generalManager?._id || null,
+  };
+};
+
 const applyPointEvents = async ({
   request,
   events = [],
@@ -504,6 +618,14 @@ const buildRequestPayload = ({
   const currency = toCleanString(body.currency || existingRequest?.currency || 'IQD').toUpperCase() || 'IQD';
   const description = toCleanString(body.description || existingRequest?.description);
   const notes = toCleanString(body.notes || existingRequest?.notes);
+  const project = normalizeOptionalObjectId(body.project || body.projectId || existingRequest?.project, 'project');
+  const stage = normalizeOptionalObjectId(body.stage || body.stageId || existingRequest?.stage, 'stage');
+  const task = normalizeOptionalObjectId(body.task || body.taskId || existingRequest?.task, 'task');
+  const isProjectAdvance = toBoolean(body.isProjectAdvance ?? existingRequest?.isProjectAdvance);
+  const advanceRecipient = normalizeOptionalObjectId(
+    body.advanceRecipient || body.advanceRecipientId || existingRequest?.advanceRecipient,
+    'advanceRecipient',
+  );
   const transactionDate = body.transactionDate
     ? new Date(body.transactionDate)
     : (existingRequest?.transactionDate || null);
@@ -512,23 +634,32 @@ const buildRequestPayload = ({
     throw new AppError('description is required', 400);
   }
 
+  if (isProjectAdvance && (!project || !advanceRecipient)) {
+    throw new AppError('Project and advance recipient are required for project advance requests', 400);
+  }
+
   const mergedAttachments = [
     ...(existingRequest?.attachments || []).map((item) => (item.toObject ? item.toObject() : item)),
     ...attachments,
   ];
 
   return {
-    requestType,
+    requestType: isProjectAdvance ? FinancialDisbursementType.WORK_ADVANCE : requestType,
     amount,
     currency,
     description,
     notes,
+    project,
+    stage,
+    task,
+    isProjectAdvance,
+    advanceRecipient,
     attachments: mergedAttachments,
     transactionDate,
   };
 };
 
-export const listFinancialDisbursements = asyncHandler(async (req, res) => {
+const buildFinancialDisbursementsQueryFilter = (req) => {
   const filter = buildAccessibleFilter(req);
 
   if (req.query.status) {
@@ -549,16 +680,48 @@ export const listFinancialDisbursements = asyncHandler(async (req, res) => {
     filter.requestType = String(req.query.requestType).toUpperCase();
   }
 
+  if (req.query.project || req.query.projectId) {
+    filter.project = normalizeOptionalObjectId(req.query.project || req.query.projectId, 'project');
+  }
+
+  if (req.query.stage || req.query.stageId) {
+    filter.stage = normalizeOptionalObjectId(req.query.stage || req.query.stageId, 'stage');
+  }
+
+  if (req.query.task || req.query.taskId) {
+    filter.task = normalizeOptionalObjectId(req.query.task || req.query.taskId, 'task');
+  }
+
   if (req.query.dateFrom || req.query.dateTo) {
     filter.createdAt = {};
     if (req.query.dateFrom) filter.createdAt.$gte = new Date(req.query.dateFrom);
     if (req.query.dateTo) filter.createdAt.$lte = new Date(req.query.dateTo);
   }
 
+  return filter;
+};
+
+export const listFinancialDisbursements = asyncHandler(async (req, res) => {
+  const filter = buildFinancialDisbursementsQueryFilter(req);
+
   const requests = await financialDisbursementRepository.list(filter);
   res.json({
     requests: requests.map((request) => serializeRequest(request, req.user)),
   });
+});
+
+export const exportFinancialDisbursementsExcel = asyncHandler(async (req, res) => {
+  const filter = buildFinancialDisbursementsQueryFilter(req);
+  const requests = await financialDisbursementRepository.list(filter, { limit: 5000 });
+  const serialized = requests.map((request) => serializeRequest(request, req.user));
+  const title = req.query.project || req.query.projectId
+    ? 'Project Financial Disbursements'
+    : 'Financial Disbursements';
+  const buffer = await buildFinancialDisbursementsExcelBuffer(serialized, { title });
+
+  res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+  res.setHeader('Content-Disposition', `attachment; filename="financial-disbursements-${Date.now()}.xlsx"`);
+  res.send(Buffer.from(buffer));
 });
 
 export const financialDisbursementSummary = asyncHandler(async (req, res) => {
@@ -585,11 +748,16 @@ export const createFinancialDisbursement = asyncHandler(async (req, res) => {
   }
 
   const submitNow = toBoolean(req.body.submitNow);
+  const projectAdvanceRequest = toBoolean(req.body.isProjectAdvance);
   const uploadedAttachments = (Array.isArray(req.files) ? req.files : []).map((file) =>
     serializeAttachment(file, req.user.id),
   );
   const batchItems = parseBatchRequests(req.body.requests);
   const isBatchCreate = batchItems.length > 0;
+
+  if (projectAdvanceRequest && isBatchCreate) {
+    throw new AppError('Project advance requests cannot be created as batch transactions', 400);
+  }
 
   if (isBatchCreate && batchItems.length > 25) {
     throw new AppError('Too many requests in one transaction', 400);
@@ -612,7 +780,9 @@ export const createFinancialDisbursement = asyncHandler(async (req, res) => {
       ];
 
   const reviewers = submitNow
-    ? await resolveCurrentReviewers(req.user.id, req.user.role)
+    ? (projectAdvanceRequest
+        ? await resolveProjectAdvanceReviewers(req.user)
+        : await resolveCurrentReviewers(req.user.id, req.user.role))
     : {
         projectManagerId: null,
         financialManagerId: null,
@@ -622,7 +792,7 @@ export const createFinancialDisbursement = asyncHandler(async (req, res) => {
         initialStatus: null,
         initialReviewerRole: null,
       };
-  const transactionNo = payloads.length > 1
+  const transactionNo = payloads.length > 1 || projectAdvanceRequest
     ? await sequenceService.next('FINANCIAL_DISBURSEMENT_TRANSACTION', { prefix: 'FDT', digits: 5 })
     : null;
   const transactionDate = payloads[0]?.transactionDate || new Date();
@@ -639,7 +809,7 @@ export const createFinancialDisbursement = asyncHandler(async (req, res) => {
       amount: payload.amount,
       requestType: payload.requestType,
       employeeRole: req.user.role,
-      forceGeneralManagerApproval: submitNow && reviewers.initialReviewerRole === Roles.GENERAL_MANAGER,
+      forceGeneralManagerApproval: !!payload.isProjectAdvance || (submitNow && reviewers.initialReviewerRole === Roles.GENERAL_MANAGER),
     });
 
     let request = await financialDisbursementRepository.create({
@@ -766,6 +936,7 @@ export const updateFinancialDisbursement = asyncHandler(async (req, res) => {
     amount: payload.amount,
     requestType: payload.requestType,
     employeeRole: req.user.role,
+    forceGeneralManagerApproval: !!payload.isProjectAdvance,
   });
 
   const updatedRequest = await financialDisbursementRepository.updateById(request._id, {
@@ -1695,6 +1866,9 @@ export const financialDisbursementReports = asyncHandler(async (req, res) => {
   if (req.query.status) filter.status = String(req.query.status).toUpperCase();
   if (req.query.requestType) filter.requestType = String(req.query.requestType).toUpperCase();
   if (req.query.employee) filter.employee = req.query.employee;
+  if (req.query.project || req.query.projectId) {
+    filter.project = normalizeOptionalObjectId(req.query.project || req.query.projectId, 'project');
+  }
   if (req.query.archived === 'true') filter.archived = true;
   else filter.archived = { $ne: true };
 

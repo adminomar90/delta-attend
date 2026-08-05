@@ -7,6 +7,8 @@ export const Permission = {
   MANAGE_PERMISSIONS: 'MANAGE_PERMISSIONS',
   MANAGE_PROJECTS: 'MANAGE_PROJECTS',
   APPROVE_PROJECTS: 'APPROVE_PROJECTS',
+  VIEW_PROJECT_DASHBOARD: 'VIEW_PROJECT_DASHBOARD',
+  MANAGE_PROJECT_STAGES: 'MANAGE_PROJECT_STAGES',
   MANAGE_TASKS: 'MANAGE_TASKS',
   APPROVE_TASKS: 'APPROVE_TASKS',
   VIEW_FINANCIAL_REPORTS: 'VIEW_FINANCIAL_REPORTS',
@@ -153,6 +155,8 @@ const RolePermissions = {
   PROJECT_MANAGER: [
     Permission.MANAGE_PROJECTS,
     Permission.APPROVE_PROJECTS,
+    Permission.VIEW_PROJECT_DASHBOARD,
+    Permission.MANAGE_PROJECT_STAGES,
     Permission.CREATE_FINANCIAL_DISBURSEMENTS,
     Permission.REVIEW_FINANCIAL_DISBURSEMENTS,
     Permission.CREATE_MAINTENANCE_REPORT_REQUESTS,
@@ -221,6 +225,8 @@ const RolePermissions = {
   ASSISTANT_PROJECT_MANAGER: [
     Permission.MANAGE_PROJECTS,
     Permission.APPROVE_PROJECTS,
+    Permission.VIEW_PROJECT_DASHBOARD,
+    Permission.MANAGE_PROJECT_STAGES,
     Permission.CREATE_FINANCIAL_DISBURSEMENTS,
     Permission.REVIEW_FINANCIAL_DISBURSEMENTS,
     Permission.REVIEW_MAINTENANCE_REPORTS,
@@ -281,6 +287,7 @@ const RolePermissions = {
   ],
   TEAM_LEAD: [
     Permission.CREATE_FINANCIAL_DISBURSEMENTS,
+    Permission.VIEW_PROJECT_DASHBOARD,
     Permission.HANDLE_MAINTENANCE_REPORTS,
     Permission.REVIEW_MAINTENANCE_REPORTS,
     Permission.VIEW_MAINTENANCE_REPORTS,
@@ -382,6 +389,8 @@ export const permissionLabelMap = {
   [Permission.MANAGE_PERMISSIONS]: 'إدارة الصلاحيات',
   [Permission.MANAGE_PROJECTS]: 'إدارة المشاريع',
   [Permission.APPROVE_PROJECTS]: 'اعتماد المشاريع',
+  [Permission.VIEW_PROJECT_DASHBOARD]: 'مشاهدة لوحة تحكم المشروع',
+  [Permission.MANAGE_PROJECT_STAGES]: 'إضافة وتعديل مراحل المشروع',
   [Permission.MANAGE_TASKS]: 'إدارة المهام',
   [Permission.APPROVE_TASKS]: 'اعتماد المهام',
   [Permission.VIEW_FINANCIAL_REPORTS]: 'عرض التقارير المالية',

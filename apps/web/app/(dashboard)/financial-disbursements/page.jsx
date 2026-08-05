@@ -16,6 +16,7 @@ const createEmptyForm = () => ({
   id: '',
   currency: 'IQD',
   transactionDate: '',
+  project: '',
   items: [
     {
       requestType: 'TRANSPORT_EXPENSE',
@@ -26,6 +27,29 @@ const createEmptyForm = () => ({
   ],
   files: [],
   existingAttachments: [],
+});
+
+const createEmptyProjectAdvanceForm = () => ({
+  project: '',
+  advanceRecipient: '',
+  amount: '',
+  currency: 'IQD',
+  transactionDate: '',
+  description: '',
+  notes: '',
+  files: [],
+});
+
+const createEmptyCustomerReceiptForm = () => ({
+  customer: '',
+  customerName: '',
+  receivedBy: '',
+  amount: '',
+  currency: 'IQD',
+  receiptDate: '',
+  project: '',
+  details: '',
+  notes: '',
 });
 
 const makeAttachmentId = () => `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -171,11 +195,20 @@ export default function FinancialDisbursementsPage() {
   const canDisburse = hasPermission(currentUser, Permission.DISBURSE_FINANCIAL_FUNDS);
   const canViewFinancial = hasPermission(currentUser, Permission.VIEW_FINANCIAL_REPORTS);
   const canViewAllFinancialDisbursements = hasPermission(currentUser, Permission.VIEW_ALL_FINANCIAL_DISBURSEMENTS);
+  const canAddCustomerReceipt = currentUser?.role === 'FINANCIAL_MANAGER' || currentUser?.role === 'GENERAL_MANAGER';
 
   const [requests, setRequests] = useState([]);
   const [archivedRequests, setArchivedRequests] = useState([]);
+  const [projects, setProjects] = useState([]);
+  const [customers, setCustomers] = useState([]);
+  const [employees, setEmployees] = useState([]);
+  const [customerReceipts, setCustomerReceipts] = useState([]);
   const [summary, setSummary] = useState(null);
   const [form, setForm] = useState(createEmptyForm);
+  const [projectAdvanceForm, setProjectAdvanceForm] = useState(createEmptyProjectAdvanceForm);
+  const [isProjectAdvanceFormOpen, setIsProjectAdvanceFormOpen] = useState(false);
+  const [customerReceiptForm, setCustomerReceiptForm] = useState(createEmptyCustomerReceiptForm);
+  const [isCustomerReceiptFormOpen, setIsCustomerReceiptFormOpen] = useState(false);
   const [rowNotes, setRowNotes] = useState({});
   const [rowApprovedAmounts, setRowApprovedAmounts] = useState({});
   const [selectedRequest, setSelectedRequest] = useState(null);
@@ -281,14 +314,22 @@ export default function FinancialDisbursementsPage() {
     setError('');
 
     try {
-      const [requestsRes, archivedRes, summaryRes] = await Promise.all([
+      const [requestsRes, archivedRes, summaryRes, projectsRes, employeesRes, customersRes, receiptsRes] = await Promise.all([
         api.get('/financial-disbursements'),
         api.get('/financial-disbursements?archived=true').catch(() => ({ requests: [] })),
         api.get('/financial-disbursements/summary').catch(() => ({ summary: null })),
+        api.get('/projects').catch(() => ({ projects: [] })),
+        api.get('/auth/users').catch(() => ({ users: [] })),
+        api.get('/customers').catch(() => ({ customers: [] })),
+        api.get('/customer-receipts').catch(() => ({ receipts: [] })),
       ]);
       setRequests(requestsRes.requests || []);
       setArchivedRequests(archivedRes.requests || []);
       setSummary(summaryRes.summary || null);
+      setProjects(projectsRes.projects || []);
+      setEmployees((employeesRes.users || []).filter((employee) => employee.active !== false));
+      setCustomers(customersRes.customers || []);
+      setCustomerReceipts(receiptsRes.receipts || []);
     } catch (err) {
       setError(err.message || 'تعذر تحميل بيانات الصرف المالي');
     } finally {
@@ -335,7 +376,45 @@ export default function FinancialDisbursementsPage() {
     setStatusFilter(null);
     setActiveTab('active');
     setIsFormOpen(true);
+    setIsProjectAdvanceFormOpen(false);
     setTimeout(() => formRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 0);
+  };
+
+  const openProjectAdvanceForm = () => {
+    setProjectAdvanceForm(createEmptyProjectAdvanceForm());
+    setSelectedRequest(null);
+    setActiveAttachmentPreview(null);
+    setError('');
+    setInfo('');
+    setStatusFilter(null);
+    setActiveTab('active');
+    setIsFormOpen(false);
+    setIsCustomerReceiptFormOpen(false);
+    setIsProjectAdvanceFormOpen(true);
+    setTimeout(() => formRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 0);
+  };
+
+  const openCustomerReceiptForm = () => {
+    setCustomerReceiptForm(createEmptyCustomerReceiptForm());
+    setSelectedRequest(null);
+    setActiveAttachmentPreview(null);
+    setError('');
+    setInfo('');
+    setActiveTab('active');
+    setIsFormOpen(false);
+    setIsProjectAdvanceFormOpen(false);
+    setIsCustomerReceiptFormOpen(true);
+    setTimeout(() => formRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 0);
+  };
+
+  const resetProjectAdvanceForm = () => {
+    setProjectAdvanceForm(createEmptyProjectAdvanceForm());
+    setIsProjectAdvanceFormOpen(false);
+  };
+
+  const resetCustomerReceiptForm = () => {
+    setCustomerReceiptForm(createEmptyCustomerReceiptForm());
+    setIsCustomerReceiptFormOpen(false);
   };
 
   const updateFormItem = (index, key, value) => {
@@ -383,6 +462,10 @@ export default function FinancialDisbursementsPage() {
 
     if (form.transactionDate) {
       formData.append('transactionDate', form.transactionDate);
+    }
+
+    if (form.project) {
+      formData.append('project', form.project);
     }
 
     const normalizedItems = (form.items || []).map((item) => ({
@@ -612,6 +695,98 @@ export default function FinancialDisbursementsPage() {
     }
   };
 
+  const submitProjectAdvanceForm = async () => {
+    if (!projectAdvanceForm.project || !projectAdvanceForm.advanceRecipient || !projectAdvanceForm.amount) {
+      setError('اختر المشروع والموظف المستلف وأدخل مبلغ السلفة.');
+      return;
+    }
+
+    setSaving(true);
+    setError('');
+    setInfo('');
+
+    try {
+      const formData = new FormData();
+      formData.append('isProjectAdvance', 'true');
+      formData.append('submitNow', 'true');
+      formData.append('project', projectAdvanceForm.project);
+      formData.append('advanceRecipient', projectAdvanceForm.advanceRecipient);
+      formData.append('requestType', 'WORK_ADVANCE');
+      formData.append('amount', String(projectAdvanceForm.amount || ''));
+      formData.append('currency', projectAdvanceForm.currency || 'IQD');
+      formData.append(
+        'description',
+        projectAdvanceForm.description || `سلفة عمل على مشروع ${projects.find((project) => String(project._id || project.id) === String(projectAdvanceForm.project))?.name || ''}`,
+      );
+      formData.append('notes', projectAdvanceForm.notes || '');
+      if (projectAdvanceForm.transactionDate) {
+        formData.append('transactionDate', projectAdvanceForm.transactionDate);
+      }
+      (projectAdvanceForm.files || []).forEach((file) => {
+        formData.append('attachments', file);
+      });
+
+      await api.postWithProgress('/financial-disbursements', formData, { timeoutMs: FINANCIAL_UPLOAD_TIMEOUT_MS });
+      resetProjectAdvanceForm();
+      setInfo('تم إرسال طلب سلفة المشروع حسب مسار الموافقات.');
+      await load();
+    } catch (err) {
+      setError(err.message || 'فشل إرسال طلب سلفة المشروع');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const downloadCustomerReceiptPdf = async (receipt) => {
+    try {
+      const blob = await api.downloadBlob(`/customer-receipts/${receipt.id}/pdf`);
+      const link = document.createElement('a');
+      link.href = URL.createObjectURL(blob);
+      link.download = `customer-receipt-${receipt.receiptNo || receipt.id}.pdf`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(link.href);
+    } catch (err) {
+      setError(err.message || 'فشل تصدير سند الاستلام PDF');
+    }
+  };
+
+  const submitCustomerReceiptForm = async () => {
+    if (!customerReceiptForm.customerName && !customerReceiptForm.customer) {
+      setError('اختر الزبون أو اكتب اسم الزبون يدوياً.');
+      return;
+    }
+    if (!customerReceiptForm.receivedBy || !customerReceiptForm.amount || !customerReceiptForm.project) {
+      setError('اختر المستلم والمشروع وأدخل المبلغ.');
+      return;
+    }
+
+    setSaving(true);
+    setError('');
+    setInfo('');
+
+    try {
+      const selectedCustomer = customers.find((customer) => String(customer._id || customer.id) === String(customerReceiptForm.customer));
+      const payload = {
+        ...customerReceiptForm,
+        customerName: customerReceiptForm.customerName || selectedCustomer?.name || '',
+        amount: Number(customerReceiptForm.amount || 0),
+      };
+      const response = await api.post('/customer-receipts', payload);
+      resetCustomerReceiptForm();
+      setInfo('تم حفظ مبلغ الاستلام من الزبون.');
+      await load();
+      if (response.receipt) {
+        await downloadCustomerReceiptPdf(response.receipt);
+      }
+    } catch (err) {
+      setError(err.message || 'فشل حفظ مبلغ الاستلام');
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const beginEdit = (request) => {
     setForm({
       id: request.id,
@@ -619,6 +794,7 @@ export default function FinancialDisbursementsPage() {
       transactionDate: request.transactionDate
         ? new Date(request.transactionDate).toISOString().split('T')[0]
         : '',
+      project: request.project?._id || request.project?.id || request.project || '',
       items: [
         {
           requestType: request.requestType || 'TRANSPORT_EXPENSE',
@@ -633,6 +809,7 @@ export default function FinancialDisbursementsPage() {
     setSelectedRequest(null);
     setActiveAttachmentPreview(null);
     setActiveTab('active');
+    setIsProjectAdvanceFormOpen(false);
     setIsFormOpen(true);
     setTimeout(() => formRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 0);
   };
@@ -849,6 +1026,31 @@ export default function FinancialDisbursementsPage() {
     }
   };
 
+  const exportTransactionsExcel = async () => {
+    try {
+      const params = new URLSearchParams();
+      if (activeTab === 'archive') {
+        params.set('archived', 'true');
+      }
+      if (Array.isArray(statusFilter) && statusFilter.length === 1) {
+        params.set('status', statusFilter[0]);
+      }
+      const query = params.toString();
+      const blob = await api.downloadBlob(`/financial-disbursements/export/excel${query ? `?${query}` : ''}`);
+      const link = document.createElement('a');
+      link.href = URL.createObjectURL(blob);
+      link.download = activeTab === 'archive'
+        ? 'financial-disbursements-archive.xlsx'
+        : 'financial-disbursements.xlsx';
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(link.href);
+    } catch (err) {
+      setError(err.message || 'فشل تصدير المعاملات المالية Excel');
+    }
+  };
+
   const sendWhatsapp = (request) => {
     const lines = [
       '[ طلب صرف مالي - Delta Plus ]',
@@ -991,6 +1193,23 @@ export default function FinancialDisbursementsPage() {
     }
     return result;
   }, [searchText, statusFilter, visibleRequests]);
+
+  const projectAdvanceBalance = useMemo(() => {
+    const projectRequests = requests.filter((request) => request.project);
+    const advances = projectRequests
+      .filter((request) => request.isProjectAdvance)
+      .filter((request) => [...approvedNotDeliveredStatuses, ...deliveredAmountStatuses].includes(request.status))
+      .reduce((sum, request) => sum + getRequestApprovedAmount(request), 0);
+    const projectExpenses = projectRequests
+      .filter((request) => !request.isProjectAdvance)
+      .filter((request) => deliveredAmountStatuses.includes(request.status))
+      .reduce((sum, request) => sum + getRequestApprovedAmount(request), 0);
+    return Math.max(0, advances - projectExpenses);
+  }, [requests]);
+  const totalCustomerReceiptsAmount = useMemo(
+    () => customerReceipts.reduce((sum, receipt) => sum + Number(receipt.amount || 0), 0),
+    [customerReceipts],
+  );
 
   const transactionItemCounts = useMemo(() => {
     const counts = new Map();
@@ -1239,6 +1458,19 @@ export default function FinancialDisbursementsPage() {
                 طلب صرف مالي
               </button>
             ) : null}
+            {canCreate ? (
+              <button className="btn btn-primary" type="button" onClick={openProjectAdvanceForm}>
+                طلب سلفة لمشروع
+              </button>
+            ) : null}
+            {canAddCustomerReceipt ? (
+              <button className="btn btn-primary" type="button" onClick={openCustomerReceiptForm}>
+                إضافة مبلغ مستلم
+              </button>
+            ) : null}
+            <button className="btn btn-soft" type="button" onClick={exportTransactionsExcel}>
+              تصدير Excel
+            </button>
             <button
               className="btn btn-soft"
               type="button"
@@ -1274,13 +1506,17 @@ export default function FinancialDisbursementsPage() {
             { key: ['PENDING_PROJECT_MANAGER_APPROVAL'], label: 'بانتظار مدير المشاريع', count: summary.pendingProjectManager || 0 },
             { key: ['PENDING_FINANCIAL_MANAGER_APPROVAL', 'PENDING_GENERAL_MANAGER_APPROVAL'], label: 'بانتظار المدير المالي', count: summary.pendingFinancialManager || 0 },
             { key: ['READY_FOR_DISBURSEMENT'], label: 'جاهزة للتسليم', count: summary.readyForDisbursement || 0 },
+            { key: 'project-advance-balance', label: 'مبلغ السلف', count: formatMoney(projectAdvanceBalance, 'IQD') },
+            { key: 'customer-receipts-total', label: 'مجموع المبالغ المستلمة', count: formatMoney(totalCustomerReceiptsAmount, 'IQD') },
           ].map((item) => {
-            const isActive = statusFilter === item.key || (statusFilter === null && item.key === null);
+            const isFilterCard = Array.isArray(item.key) || item.key === null;
+            const isActive = isFilterCard && (statusFilter === item.key || (statusFilter === null && item.key === null));
             return (
               <article
                 key={item.label}
                 className="card section"
                 onClick={() => {
+                  if (!isFilterCard) return;
                   const next = isActive && item.key !== null ? null : item.key;
                   setStatusFilter(next);
                   setTimeout(() => tableRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 0);
@@ -1296,6 +1532,207 @@ export default function FinancialDisbursementsPage() {
               </article>
             );
           })}
+        </section>
+      ) : null}
+
+      {canCreate && activeTab === 'active' && isProjectAdvanceFormOpen ? (
+        <section ref={formRef} className="card section" style={{ marginBottom: 16 }}>
+          <div className="section-header">
+            <div>
+              <h2 style={{ margin: 0 }}>طلب سلفة لمشروع</h2>
+              <p style={{ margin: '6px 0 0', color: 'var(--text-soft)' }}>رقم المعاملة يولد تلقائياً عند الإرسال، وتنتقل السلفة حسب مسار الاعتماد المالي.</p>
+            </div>
+          </div>
+          <form className="grid-3" onSubmit={(event) => event.preventDefault()}>
+            <label>
+              رقم المعاملة
+              <input className="input" value="تلقائي بعد الإرسال" disabled />
+            </label>
+            <label>
+              اسم المشروع
+              <select className="select" value={projectAdvanceForm.project} onChange={(e) => setProjectAdvanceForm((current) => ({ ...current, project: e.target.value }))} required>
+                <option value="">اختر مشروعاً</option>
+                {projects.map((project) => (
+                  <option key={project._id || project.id} value={project._id || project.id}>{project.name || project.code || 'مشروع بدون اسم'}</option>
+                ))}
+              </select>
+            </label>
+            <label>
+              الموظف المستلف
+              <select className="select" value={projectAdvanceForm.advanceRecipient} onChange={(e) => setProjectAdvanceForm((current) => ({ ...current, advanceRecipient: e.target.value }))} required>
+                <option value="">اختر الموظف</option>
+                {employees.map((employee) => (
+                  <option key={employee._id || employee.id} value={employee._id || employee.id}>{employee.fullName || employee.name || '-'}</option>
+                ))}
+              </select>
+            </label>
+            <label>
+              مبلغ السلفة
+              <input className="input" type="number" min={1} value={projectAdvanceForm.amount} onChange={(e) => setProjectAdvanceForm((current) => ({ ...current, amount: e.target.value }))} required />
+            </label>
+            <label>
+              العملة
+              <select className="select" value={projectAdvanceForm.currency} onChange={(e) => setProjectAdvanceForm((current) => ({ ...current, currency: e.target.value }))}>
+                <option value="IQD">دينار عراقي</option>
+                <option value="USD">دولار أمريكي</option>
+              </select>
+            </label>
+            <label>
+              تاريخ السلفة
+              <input className="input" type="date" value={projectAdvanceForm.transactionDate} onChange={(e) => setProjectAdvanceForm((current) => ({ ...current, transactionDate: e.target.value }))} />
+            </label>
+            <label style={{ gridColumn: '1 / -1' }}>
+              تفاصيل السلفة
+              <textarea className="input" rows={2} value={projectAdvanceForm.description} onChange={(e) => setProjectAdvanceForm((current) => ({ ...current, description: e.target.value }))} placeholder="الغرض من السلفة أو تفاصيل الصرف المتوقع" />
+            </label>
+            <label style={{ gridColumn: '1 / -1' }}>
+              ملاحظات
+              <textarea className="input" rows={2} value={projectAdvanceForm.notes} onChange={(e) => setProjectAdvanceForm((current) => ({ ...current, notes: e.target.value }))} />
+            </label>
+            <label style={{ gridColumn: '1 / -1' }}>
+              المرفقات
+              <input
+                className="input"
+                type="file"
+                multiple
+                onChange={(e) => {
+                  const files = Array.from(e.target.files || []);
+                  e.target.value = '';
+                  setProjectAdvanceForm((current) => ({ ...current, files }));
+                }}
+              />
+            </label>
+            <div className="form-actions" style={{ gridColumn: '1 / -1' }}>
+              <button className="btn btn-primary" type="button" disabled={saving} onClick={submitProjectAdvanceForm}>{saving ? 'جارٍ الإرسال...' : 'إرسال طلب السلفة'}</button>
+              <button className="btn btn-soft" type="button" disabled={saving} onClick={resetProjectAdvanceForm}>إغلاق</button>
+            </div>
+          </form>
+        </section>
+      ) : null}
+
+      {canAddCustomerReceipt && activeTab === 'active' && isCustomerReceiptFormOpen ? (
+        <section ref={formRef} className="card section" style={{ marginBottom: 16 }}>
+          <div className="section-header">
+            <div>
+              <h2 style={{ margin: 0 }}>إضافة مبلغ مستلم</h2>
+              <p style={{ margin: '6px 0 0', color: 'var(--text-soft)' }}>يتم حفظ سند استلام باسم الزبون والمشروع، ثم يمكن طباعته أو تصديره PDF.</p>
+            </div>
+          </div>
+          <form className="grid-3" onSubmit={(event) => event.preventDefault()}>
+            <label>
+              الزبون من القائمة
+              <select
+                className="select"
+                value={customerReceiptForm.customer}
+                onChange={(e) => {
+                  const customerId = e.target.value;
+                  const selectedCustomer = customers.find((customer) => String(customer._id || customer.id) === String(customerId));
+                  setCustomerReceiptForm((current) => ({
+                    ...current,
+                    customer: customerId,
+                    customerName: selectedCustomer?.name || current.customerName,
+                  }));
+                }}
+              >
+                <option value="">اختيار اختياري</option>
+                {customers.map((customer) => (
+                  <option key={customer._id || customer.id} value={customer._id || customer.id}>{customer.name || '-'}</option>
+                ))}
+              </select>
+            </label>
+            <label>
+              اسم الزبون يدوياً
+              <input className="input" value={customerReceiptForm.customerName} onChange={(e) => setCustomerReceiptForm((current) => ({ ...current, customerName: e.target.value }))} />
+            </label>
+            <label>
+              اسم المشروع
+              <select className="select" value={customerReceiptForm.project} onChange={(e) => setCustomerReceiptForm((current) => ({ ...current, project: e.target.value }))} required>
+                <option value="">اختر المشروع</option>
+                {projects.map((project) => (
+                  <option key={project._id || project.id} value={project._id || project.id}>{project.name || project.code || '-'}</option>
+                ))}
+              </select>
+            </label>
+            <label>
+              المستلم
+              <select className="select" value={customerReceiptForm.receivedBy} onChange={(e) => setCustomerReceiptForm((current) => ({ ...current, receivedBy: e.target.value }))} required>
+                <option value="">اختر الموظف</option>
+                {employees.map((employee) => (
+                  <option key={employee._id || employee.id} value={employee._id || employee.id}>{employee.fullName || employee.name || '-'}</option>
+                ))}
+              </select>
+            </label>
+            <label>
+              مجموع المبلغ
+              <input className="input" type="number" min={1} value={customerReceiptForm.amount} onChange={(e) => setCustomerReceiptForm((current) => ({ ...current, amount: e.target.value }))} required />
+            </label>
+            <label>
+              العملة
+              <select className="select" value={customerReceiptForm.currency} onChange={(e) => setCustomerReceiptForm((current) => ({ ...current, currency: e.target.value }))}>
+                <option value="IQD">دينار عراقي</option>
+                <option value="USD">دولار أمريكي</option>
+              </select>
+            </label>
+            <label>
+              تاريخ الاستلام
+              <input className="input" type="date" value={customerReceiptForm.receiptDate} onChange={(e) => setCustomerReceiptForm((current) => ({ ...current, receiptDate: e.target.value }))} />
+            </label>
+            <label style={{ gridColumn: '1 / -1' }}>
+              تفاصيل المبلغ
+              <textarea className="input" rows={2} value={customerReceiptForm.details} onChange={(e) => setCustomerReceiptForm((current) => ({ ...current, details: e.target.value }))} />
+            </label>
+            <label style={{ gridColumn: '1 / -1' }}>
+              ملاحظات
+              <textarea className="input" rows={2} value={customerReceiptForm.notes} onChange={(e) => setCustomerReceiptForm((current) => ({ ...current, notes: e.target.value }))} />
+            </label>
+            <div className="form-actions" style={{ gridColumn: '1 / -1' }}>
+              <button className="btn btn-primary" type="button" disabled={saving} onClick={submitCustomerReceiptForm}>{saving ? 'جارٍ الحفظ...' : 'حفظ وطباعة PDF'}</button>
+              <button className="btn btn-soft" type="button" disabled={saving} onClick={resetCustomerReceiptForm}>إغلاق</button>
+            </div>
+          </form>
+        </section>
+      ) : null}
+
+      {activeTab === 'active' && customerReceipts.length ? (
+        <section className="card section" style={{ marginBottom: 16 }}>
+          <div className="section-header">
+            <div>
+              <h2 style={{ margin: 0 }}>سجل المبالغ المستلمة من الزبائن</h2>
+              <p style={{ margin: '6px 0 0', color: 'var(--text-soft)' }}>سندات الاستلام المسجلة من المدير المالي والمرتبطة بالمشاريع.</p>
+            </div>
+          </div>
+          <div style={{ overflowX: 'auto' }}>
+            <table className="table">
+              <thead>
+                <tr>
+                  <th>رقم السند</th>
+                  <th>الزبون</th>
+                  <th>المشروع</th>
+                  <th>المستلم</th>
+                  <th>المبلغ</th>
+                  <th>التاريخ</th>
+                  <th>إجراءات</th>
+                </tr>
+              </thead>
+              <tbody>
+                {customerReceipts.map((receipt) => (
+                  <tr key={receipt.id}>
+                    <td><strong>{receipt.receiptNo || '-'}</strong></td>
+                    <td>{receipt.customerName || receipt.customer?.name || '-'}</td>
+                    <td>{receipt.project?.name || '-'}</td>
+                    <td>{receipt.receivedBy?.fullName || '-'}</td>
+                    <td dir="ltr">{formatMoney(receipt.amount, receipt.currency)}</td>
+                    <td dir="ltr">{formatDateTime(receipt.receiptDate || receipt.createdAt)}</td>
+                    <td>
+                      <button className="btn btn-soft btn-sm" type="button" onClick={() => downloadCustomerReceiptPdf(receipt)}>
+                        PDF
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </section>
       ) : null}
 
@@ -1316,6 +1753,22 @@ export default function FinancialDisbursementsPage() {
                 value={form.transactionDate}
                 onChange={(e) => setForm((current) => ({ ...current, transactionDate: e.target.value }))}
               />
+            </label>
+
+            <label>
+              على مشروع
+              <select
+                className="select"
+                value={form.project}
+                onChange={(e) => setForm((current) => ({ ...current, project: e.target.value }))}
+              >
+                <option value="">غير مرتبط بمشروع</option>
+                {projects.map((project) => (
+                  <option key={project._id || project.id} value={project._id || project.id}>
+                    {project.name || project.code || 'مشروع بدون اسم'}
+                  </option>
+                ))}
+              </select>
             </label>
 
             <div style={{ gridColumn: '1 / -1', display: 'flex', flexDirection: 'column', gap: 10 }}>

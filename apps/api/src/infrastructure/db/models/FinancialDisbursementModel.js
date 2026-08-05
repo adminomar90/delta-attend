@@ -151,6 +151,35 @@ const financialDisbursementSchema = new mongoose.Schema(
       required: true,
       index: true,
     },
+    project: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Project',
+      default: null,
+      index: true,
+    },
+    stage: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'ProjectStage',
+      default: null,
+      index: true,
+    },
+    task: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'ProjectTask',
+      default: null,
+      index: true,
+    },
+    isProjectAdvance: {
+      type: Boolean,
+      default: false,
+      index: true,
+    },
+    advanceRecipient: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+      default: null,
+      index: true,
+    },
     requestType: {
       type: String,
       enum: Object.values(FinancialDisbursementType),

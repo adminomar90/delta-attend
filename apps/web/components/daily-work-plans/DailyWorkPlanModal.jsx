@@ -6,6 +6,7 @@ import {
   dailyWorkPlanPriorityOptions,
   dailyWorkPlanTaskTypeOptions,
 } from '../../lib/dailyWorkPlans';
+import { api } from '../../lib/api';
 import ContactActionBar from '../ContactActionBar';
 import CustomerSearchModal from '../customers/CustomerSearchModal';
 import DailyWorkPlanAssigneePicker from './DailyWorkPlanAssigneePicker';
@@ -24,6 +25,9 @@ export default function DailyWorkPlanModal({
   const [form, setForm] = useState(createPlanFormDefaults());
   const [customerSearchOpen, setCustomerSearchOpen] = useState(false);
   const [linkExistingCustomer, setLinkExistingCustomer] = useState(false);
+  const [projectPickerOpen, setProjectPickerOpen] = useState(false);
+  const [projectStages, setProjectStages] = useState([]);
+  const [projectTasks, setProjectTasks] = useState([]);
   const [whatsappMessage, setWhatsappMessage] = useState('السلام عليكم، معكم شركة دلتا بلس بخصوص طلبكم.');
 
   useEffect(() => {
@@ -33,6 +37,43 @@ export default function DailyWorkPlanModal({
       setLinkExistingCustomer(!!defaults.customer);
     }
   }, [open, initialForm]);
+
+  useEffect(() => {
+    if (!open || !form.project) {
+      setProjectStages([]);
+      setProjectTasks([]);
+      return;
+    }
+    let cancelled = false;
+    Promise.all([
+      api.get(`/projects/${form.project}/stages`).catch(() => ({ stages: [] })),
+      api.get(`/projects/${form.project}/tasks`).catch(() => ({ tasks: [] })),
+    ]).then(([stagesResponse, tasksResponse]) => {
+      if (cancelled) return;
+      setProjectStages(stagesResponse.stages || []);
+      setProjectTasks(tasksResponse.tasks || []);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [open, form.project]);
+
+  const selectProject = (projectId) => {
+    const project = (projects || []).find((item) => String(item._id || item.id || '') === String(projectId || ''));
+    setForm((prev) => ({
+      ...prev,
+      project: projectId || '',
+      stage: '',
+      task: '',
+      customerName: project?.name || prev.customerName,
+      location: project?.location || prev.location,
+    }));
+    setProjectPickerOpen(false);
+  };
+
+  const filteredProjectTasks = projectTasks.filter((task) => (
+    !form.stage || String(task.stage?._id || task.stage || '') === String(form.stage)
+  ));
 
   if (!open) return null;
 
@@ -75,6 +116,28 @@ export default function DailyWorkPlanModal({
                   onChange={(e) => setForm((prev) => ({ ...prev, customerName: e.target.value }))}
                 />
               </label>
+
+              <div className="grid-span-full customer-link-panel">
+                <div className="action-row">
+                  <button type="button" className="btn btn-soft" onClick={() => setProjectPickerOpen((value) => !value)}>
+                    اختيار مشروع
+                  </button>
+                  {form.project ? <span className="status-pill status-approved">مرتبط بمشروع</span> : null}
+                </div>
+                {projectPickerOpen ? (
+                  <label>
+                    المشروع من قسم المشاريع
+                    <select className="select" value={form.project} onChange={(e) => selectProject(e.target.value)}>
+                      <option value="">اختر المشروع</option>
+                      {(projects || []).map((project) => (
+                        <option key={project._id || project.id} value={project._id || project.id}>
+                          {project.name}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                ) : null}
+              </div>
 
               <div className="grid-span-full customer-link-panel">
                 <label className="customer-check-inline">
@@ -124,7 +187,7 @@ export default function DailyWorkPlanModal({
                 <select
                   className="select"
                   value={form.project}
-                  onChange={(e) => setForm((prev) => ({ ...prev, project: e.target.value }))}
+                  onChange={(e) => selectProject(e.target.value)}
                 >
                   <option value="">بدون ربط</option>
                   {(projects || []).map((project) => (
@@ -134,6 +197,38 @@ export default function DailyWorkPlanModal({
                   ))}
                 </select>
               </label>
+
+              {form.project ? (
+                <>
+                  <label>
+                    مرحلة المشروع
+                    <select
+                      className="select"
+                      value={form.stage}
+                      onChange={(e) => setForm((prev) => ({ ...prev, stage: e.target.value, task: '' }))}
+                    >
+                      <option value="">بدون مرحلة</option>
+                      {projectStages.map((stage) => (
+                        <option key={stage._id} value={stage._id}>{stage.order ? `${stage.order} - ` : ''}{stage.name}</option>
+                      ))}
+                    </select>
+                  </label>
+
+                  <label>
+                    مهمة المشروع
+                    <select
+                      className="select"
+                      value={form.task}
+                      onChange={(e) => setForm((prev) => ({ ...prev, task: e.target.value }))}
+                    >
+                      <option value="">بدون مهمة</option>
+                      {filteredProjectTasks.map((task) => (
+                        <option key={task._id} value={task._id}>{task.title}</option>
+                      ))}
+                    </select>
+                  </label>
+                </>
+              ) : null}
 
               <label>
                 المشرف المسؤول

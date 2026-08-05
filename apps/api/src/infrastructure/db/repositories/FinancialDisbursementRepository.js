@@ -2,6 +2,10 @@ import { FinancialDisbursementModel } from '../models/FinancialDisbursementModel
 
 const populatePipeline = [
   { path: 'employee', select: 'fullName role level pointsTotal employeeCode avatarUrl manager active' },
+  { path: 'advanceRecipient', select: 'fullName role employeeCode avatarUrl active' },
+  { path: 'project', select: 'name code status budget customer clientName location' },
+  { path: 'stage', select: 'name order status progressPercent' },
+  { path: 'task', select: 'title status progressPercent priority' },
   { path: 'projectManagerReviewer', select: 'fullName role employeeCode avatarUrl active' },
   { path: 'financialManagerReviewer', select: 'fullName role employeeCode avatarUrl active' },
   { path: 'generalManagerReviewer', select: 'fullName role employeeCode avatarUrl active' },

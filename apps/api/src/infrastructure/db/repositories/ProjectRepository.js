@@ -14,6 +14,13 @@ export class ProjectRepository {
       .populate('owner', 'fullName role phone email')
       .populate('projectManager', 'fullName role phone email')
       .populate('teamMembers', 'fullName role level department jobTitle')
+      .populate('dailyLaborers.addedBy', 'fullName role')
+      .populate('projectDepartments.manager', 'fullName role jobTitle department')
+      .populate('projectDepartments.members', 'fullName role jobTitle department')
+      .populate('projectDepartments.addedBy', 'fullName role')
+      .populate('documents.uploadedBy', 'fullName role')
+      .populate('projectSupervisors.employee', 'fullName role jobTitle department phone email')
+      .populate('projectSupervisors.addedBy', 'fullName role')
       .populate('approvalTrail.approver', 'fullName role')
       .populate('rejectedBy', 'fullName role')
       .sort({ createdAt: -1 });
@@ -25,6 +32,13 @@ export class ProjectRepository {
       .populate('owner', 'fullName role phone email')
       .populate('projectManager', 'fullName role phone email')
       .populate('teamMembers', 'fullName role level department jobTitle')
+      .populate('dailyLaborers.addedBy', 'fullName role')
+      .populate('projectDepartments.manager', 'fullName role jobTitle department')
+      .populate('projectDepartments.members', 'fullName role jobTitle department')
+      .populate('projectDepartments.addedBy', 'fullName role')
+      .populate('documents.uploadedBy', 'fullName role')
+      .populate('projectSupervisors.employee', 'fullName role jobTitle department phone email')
+      .populate('projectSupervisors.addedBy', 'fullName role')
       .populate('approvalTrail.approver', 'fullName role')
       .populate('rejectedBy', 'fullName role');
   }
@@ -35,6 +49,13 @@ export class ProjectRepository {
       .populate('owner', 'fullName role phone email')
       .populate('projectManager', 'fullName role phone email')
       .populate('teamMembers', 'fullName role level department jobTitle')
+      .populate('dailyLaborers.addedBy', 'fullName role')
+      .populate('projectDepartments.manager', 'fullName role jobTitle department')
+      .populate('projectDepartments.members', 'fullName role jobTitle department')
+      .populate('projectDepartments.addedBy', 'fullName role')
+      .populate('documents.uploadedBy', 'fullName role')
+      .populate('projectSupervisors.employee', 'fullName role jobTitle department phone email')
+      .populate('projectSupervisors.addedBy', 'fullName role')
       .populate('approvalTrail.approver', 'fullName role')
       .populate('rejectedBy', 'fullName role');
   }

@@ -20,6 +20,8 @@ export default function DailyWorkPlanAssigneePicker({
   users = [],
   selectedIds = [],
   onChange,
+  title = 'الموظفون المكلفون',
+  hint = 'يمكنك اختيار أكثر من موظف لنفس البلان مع عرض واضح للمختارين.',
 }) {
   const [query, setQuery] = useState('');
   const selectedSet = useMemo(() => new Set((selectedIds || []).map(String)), [selectedIds]);
@@ -76,9 +78,9 @@ export default function DailyWorkPlanAssigneePicker({
     <div className="daily-plan-picker">
       <div className="daily-plan-picker-toolbar">
         <div>
-          <strong>الموظفون المكلفون</strong>
+          <strong>{title}</strong>
           <div className="daily-plan-picker-hint">
-            يمكنك اختيار أكثر من موظف لنفس البلان مع عرض واضح للمختارين.
+            {hint}
           </div>
         </div>
         <div className="daily-plan-picker-actions">

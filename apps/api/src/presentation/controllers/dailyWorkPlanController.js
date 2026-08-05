@@ -298,6 +298,8 @@ const buildFilterFromQuery = async (req) => {
   if (req.query.priority) filter.priority = req.query.priority;
   if (req.query.taskType) filter.taskType = req.query.taskType;
   if (req.query.project) filter.project = req.query.project;
+  if (req.query.stage || req.query.stageId) filter.stage = req.query.stage || req.query.stageId;
+  if (req.query.task || req.query.taskId) filter.task = req.query.task || req.query.taskId;
   if (req.query.supervisor) filter.supervisor = req.query.supervisor;
 
   const archivedQuery = toCleanString(req.query.archived).toLowerCase();
@@ -431,6 +433,8 @@ const buildPlanPayload = async ({ req, existingPlan = null } = {}) => {
   const supervisor = toCleanString(req.body.supervisor || req.body.supervisorId || toId(existingPlan?.supervisor));
   const teamLeader = toCleanString(req.body.teamLeader || req.body.teamLeaderId || toId(existingPlan?.teamLeader));
   const projectId = toCleanString(req.body.project || req.body.projectId || toId(existingPlan?.project));
+  const stageId = toCleanString(req.body.stage || req.body.stageId || toId(existingPlan?.stage));
+  const taskId = toCleanString(req.body.task || req.body.taskId || toId(existingPlan?.task));
   const attachments = normalizeRequestFiles(req).map((file) => createStoredAttachment(file, req.user));
 
   if (!title) throw new AppError('Title is required', 400);
@@ -502,6 +506,8 @@ const buildPlanPayload = async ({ req, existingPlan = null } = {}) => {
     supervisor: supervisor || null,
     teamLeader: teamLeader || null,
     project,
+    stage: stageId || null,
+    task: taskId || null,
     projectNameSnapshot,
     adminNotes,
     attachments,

@@ -134,6 +134,18 @@ const dailyWorkPlanSchema = new mongoose.Schema(
       ref: 'Project',
       default: null,
     },
+    stage: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'ProjectStage',
+      default: null,
+      index: true,
+    },
+    task: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'ProjectTask',
+      default: null,
+      index: true,
+    },
     customerName: {
       type: String,
       default: '',
@@ -327,6 +339,7 @@ const dailyWorkPlanSchema = new mongoose.Schema(
 
 dailyWorkPlanSchema.index({ planDate: -1, status: 1 });
 dailyWorkPlanSchema.index({ archived: 1, archivedAt: -1 });
+dailyWorkPlanSchema.index({ project: 1, stage: 1, task: 1, planDate: -1 });
 dailyWorkPlanSchema.index({ 'assignees.user': 1, planDate: -1 });
 dailyWorkPlanSchema.index({ createdBy: 1, planDate: -1 });
 dailyWorkPlanSchema.index({ supervisor: 1, planDate: -1 });
