@@ -255,10 +255,15 @@ const projectWorkCategories = [
 ];
 
 const toDateInput = (value) => (value ? new Date(value).toISOString().slice(0, 10) : '');
+const normalizeProjectCurrency = (value = 'IQD') => {
+  const text = String(value || '').trim().toUpperCase();
+  if (text.includes('USD') || text.includes('دولار')) return 'USD';
+  return 'IQD';
+};
 const formatProjectMoney = (value, currency = 'IQD') => {
   const amount = Number(value || 0);
   const safeAmount = Number.isFinite(amount) ? amount : 0;
-  return `${safeAmount.toLocaleString('en-US')} ${currency || 'IQD'}`;
+  return `${safeAmount.toLocaleString('en-US')} ${normalizeProjectCurrency(currency)}`;
 };
 const monthAnchor = (value = new Date()) => {
   const date = value instanceof Date ? value : new Date(value);
@@ -649,7 +654,7 @@ export default function ProjectsPage() {
   }, [projectStages]);
 
   const projectFinanceSummary = useMemo(() => {
-    const currency = projectFinancialRequests[0]?.currency || projectFinanceForm.currency || 'IQD';
+    const currency = normalizeProjectCurrency(projectFinancialRequests[0]?.currency || projectFinanceForm.currency || 'IQD');
     const amountOf = (request) => Number(request.approvedAmount != null ? request.approvedAmount : request.amount || 0);
     const invoiceTotal = projectInvoices.reduce((sum, invoice) => sum + Number(invoice.totalAmount || 0), 0);
     const supplierDebtTotal = projectInvoices
@@ -2582,7 +2587,10 @@ export default function ProjectsPage() {
                   <form className="project-team-panel project-finance-form" onSubmit={(event) => submitProjectFinance(event, 'draft')}>
                     <label>
                       العملة
-                      <input className="input" value={projectFinanceForm.currency} onChange={(e) => setProjectFinanceForm((p) => ({ ...p, currency: e.target.value.toUpperCase() }))} />
+                      <select className="select" value={normalizeProjectCurrency(projectFinanceForm.currency)} onChange={(e) => setProjectFinanceForm((p) => ({ ...p, currency: e.target.value }))}>
+                        <option value="IQD">دينار عراقي IQD</option>
+                        <option value="USD">دولار أمريكي USD</option>
+                      </select>
                     </label>
                     <label>
                       تاريخ المعاملة
@@ -3111,7 +3119,7 @@ export default function ProjectsPage() {
         .project-work-report-summary{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin:0 0 14px}.project-work-report-summary article{padding:14px;border:1px solid var(--border);border-radius:13px;background:var(--surface)}.project-work-report-summary span{display:block;color:var(--text-soft);font-size:12px;margin-bottom:7px}.project-work-report-summary strong{display:block;font-size:22px}.project-work-report-list{display:grid;gap:12px}.project-work-report-list>p{margin:0;padding:14px;border:1px dashed var(--border);border-radius:13px;background:color-mix(in srgb,var(--surface) 70%,transparent);color:var(--text-soft)}.project-work-report-card{padding:14px;border:1px solid var(--border);border-radius:14px;background:var(--surface)}.project-work-report-card header{display:flex;justify-content:space-between;gap:12px;align-items:flex-start}.project-work-report-card h4{margin:2px 0 5px;font-size:17px}.project-work-report-card p{margin:0;color:var(--text-soft);line-height:1.7;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}.project-work-report-card small{color:var(--text-soft);font-weight:800}.project-work-report-actions{padding-top:12px;border-top:1px solid var(--border);margin-top:12px}
         .project-department-form{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-bottom:14px}.project-department-form label{min-width:0}.project-department-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:12px}.project-department-card{padding:14px;border:1px solid var(--border);border-radius:14px;background:color-mix(in srgb,var(--surface) 78%,transparent)}.project-department-card header{display:flex;justify-content:space-between;gap:12px;align-items:flex-start}.project-department-card h4{margin:0 0 5px}.project-department-card p{margin:0;color:var(--text-soft)}
         .project-supervisor-form{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin-bottom:14px}.project-supervisor-form label{min-width:0}.project-department-card small{display:block;margin-bottom:5px;color:var(--primary);font-weight:800}
-        .project-finance-summary{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin:0 0 14px}.project-finance-summary article{padding:16px;border:1px solid var(--border);border-radius:14px;background:var(--surface)}.project-finance-summary span{display:block;color:var(--text-soft);font-size:12px;margin-bottom:8px}.project-finance-summary strong{display:block;font-size:22px;overflow-wrap:anywhere}.project-finance-form{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin-bottom:14px}.project-finance-form label{min-width:0}.project-finance-list{display:grid;gap:12px}.project-finance-card{padding:14px;border:1px solid var(--border);border-radius:14px;background:var(--surface)}.project-finance-card header{display:flex;justify-content:space-between;gap:12px;align-items:flex-start}.project-finance-card h4{margin:2px 0 4px}.project-finance-card p{margin:0;color:var(--text-soft)}
+        .project-finance-summary{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin:0 0 14px}.project-finance-summary article{min-width:0;padding:16px;border:1px solid var(--border);border-radius:14px;background:var(--surface)}.project-finance-summary span{display:block;color:var(--text-soft);font-size:12px;margin-bottom:8px}.project-finance-summary strong{display:block;font-size:22px;line-height:1.35;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.project-finance-form{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin-bottom:14px}.project-finance-form label{min-width:0}.project-finance-list{display:grid;gap:12px}.project-finance-card{padding:14px;border:1px solid var(--border);border-radius:14px;background:var(--surface)}.project-finance-card header{display:flex;justify-content:space-between;gap:12px;align-items:flex-start}.project-finance-card h4{margin:2px 0 4px}.project-finance-card p{margin:0;color:var(--text-soft)}
         .project-table-wrap{overflow:auto;border:1px solid var(--border);border-radius:14px;background:var(--surface)}.project-table-wrap p{margin:0;padding:16px;color:var(--text-soft)}.project-warehouse-table{min-width:980px;margin:0}.project-warehouse-table th,.project-warehouse-table td{vertical-align:middle}.project-warehouse-table td strong{display:block}.project-warehouse-table td small{display:block;margin-top:3px;color:var(--text-soft);font-size:11px}
         .project-invoice-form{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin-bottom:14px}.project-invoice-form label{min-width:0}
         .project-document-form{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-bottom:14px}.project-document-form label{min-width:0}.project-document-selected{display:flex;flex-wrap:wrap;gap:6px}.project-document-selected span{padding:6px 9px;border:1px solid var(--border);border-radius:999px;background:var(--surface);color:var(--text-soft);font-size:12px}
