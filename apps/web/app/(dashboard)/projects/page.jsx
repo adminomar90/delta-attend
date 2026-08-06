@@ -4,6 +4,10 @@ import { useEffect, useMemo, useState } from 'react';
 import { api, assetUrl } from '../../../lib/api';
 import { authStorage } from '../../../lib/auth';
 import { Permission, hasAnyPermission } from '../../../lib/permissions';
+import {
+  buildWorkReportApprovalPayload,
+  buildWorkReportApprovalPointsMap,
+} from '../../../lib/workReportPoints';
 import { buildDailyWorkPlanFormData } from '../../../lib/dailyWorkPlans';
 import DailyWorkPlanCalendar from '../../../components/daily-work-plans/DailyWorkPlanCalendar';
 import DailyWorkPlanModal from '../../../components/daily-work-plans/DailyWorkPlanModal';
@@ -43,10 +47,23 @@ const stageStatusClass = {
   CANCELLED: 'status-rejected',
 };
 
+const workReportStatusLabel = {
+  SUBMITTED: 'بانتظار الاعتماد',
+  APPROVED: 'معتمد',
+  REJECTED: 'مرفوض',
+};
+
+const workReportStatusClass = {
+  SUBMITTED: 'status-submitted',
+  APPROVED: 'status-approved',
+  REJECTED: 'status-rejected',
+};
+
 const projectDashboardTabs = [
   { id: 'overview', label: 'نظرة عامة', icon: '▦' },
   { id: 'stages', label: 'المراحل', icon: '◇' },
   { id: 'tasks', label: 'المهام', icon: '☑' },
+  { id: 'workReports', label: 'تقارير العمل', icon: '▧' },
   { id: 'timeline', label: 'الجدول الزمني', icon: '▣' },
   { id: 'team', label: 'الكادر', icon: '♙' },
   { id: 'departments', label: 'الأقسام', icon: '▤' },
@@ -262,9 +279,12 @@ export default function ProjectsPage() {
   const [projectPlans, setProjectPlans] = useState([]);
   const [projectStages, setProjectStages] = useState([]);
   const [projectTasks, setProjectTasks] = useState([]);
+  const [projectWorkReports, setProjectWorkReports] = useState([]);
   const [plansLoading, setPlansLoading] = useState(false);
   const [stagesLoading, setStagesLoading] = useState(false);
   const [tasksLoading, setTasksLoading] = useState(false);
+  const [workReportsLoading, setWorkReportsLoading] = useState(false);
+  const [workReportActionId, setWorkReportActionId] = useState('');
   const [calendarMonth, setCalendarMonth] = useState(() => monthAnchor(new Date()));
   const [calendarDate, setCalendarDate] = useState('');
   const [stageEmployees, setStageEmployees] = useState([]);
@@ -318,6 +338,7 @@ export default function ProjectsPage() {
   const [form, setForm] = useState(emptyProjectForm);
 
   const user = authStorage.getUser();
+  const currentUserId = String(user?.id || user?._id || '');
   const canManage = useMemo(() => {
     return hasAnyPermission(user, [
       Permission.MANAGE_PROJECTS,
@@ -346,6 +367,17 @@ export default function ProjectsPage() {
   const canManageProjectTasks = useMemo(() => hasAnyPermission(user, [
     Permission.MANAGE_PROJECTS,
     Permission.MANAGE_TASKS,
+  ]), [user]);
+  const canViewProjectWorkReports = useMemo(() => hasAnyPermission(user, [
+    Permission.VIEW_OWN_WORK_REPORTS,
+    Permission.VIEW_TEAM_WORK_REPORTS,
+    Permission.VIEW_COMPLETED_WORK_REPORTS,
+    Permission.VIEW_PROJECT_DASHBOARD,
+    Permission.MANAGE_PROJECTS,
+  ]), [user]);
+  const canApproveProjectWorkReports = useMemo(() => hasAnyPermission(user, [
+    Permission.APPROVE_TASKS,
+    Permission.VIEW_TEAM_WORK_REPORTS,
   ]), [user]);
   const canCreateProjectFinance = useMemo(() => hasAnyPermission(user, [
     Permission.CREATE_FINANCIAL_DISBURSEMENTS,
@@ -453,6 +485,37 @@ export default function ProjectsPage() {
     if (!selectedProject || !canViewProjectDashboard) return;
     loadProjectTasks(selectedProject._id, taskStageFilter);
   }, [selectedProject?._id, taskStageFilter, canViewProjectDashboard]);
+
+  const reportProjectMatches = (report, project) => {
+    if (!report || !project) return false;
+    const projectId = String(project._id || project.id || '');
+    const reportProjectId = String(report.project?._id || report.project?.id || report.project || report.projectId || '');
+    if (projectId && reportProjectId && projectId === reportProjectId) return true;
+
+    const projectName = String(project.name || '').trim().toLowerCase();
+    const reportProjectName = String(report.project?.name || report.projectName || '').trim().toLowerCase();
+    return Boolean(projectName && reportProjectName && projectName === reportProjectName);
+  };
+
+  const loadProjectWorkReports = async (project = selectedProject) => {
+    if (!project || !canViewProjectWorkReports) return;
+    setWorkReportsLoading(true);
+    try {
+      const response = await api.get('/work-reports');
+      const reports = (response.reports || []).filter((report) => reportProjectMatches(report, project));
+      setProjectWorkReports(reports);
+    } catch (err) {
+      setError(err.message || 'تعذر تحميل تقارير العمل المرتبطة بالمشروع');
+      setProjectWorkReports([]);
+    } finally {
+      setWorkReportsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!selectedProject || !canViewProjectWorkReports) return;
+    loadProjectWorkReports(selectedProject);
+  }, [selectedProject?._id, canViewProjectWorkReports]);
 
   const loadProjectWarehouse = async (projectId = selectedProject?._id) => {
     if (!projectId || !canViewProjectDashboard) return;
@@ -631,6 +694,13 @@ export default function ProjectsPage() {
     contracts: projectDocuments.filter((item) => item.documentType === 'CONTRACT').length,
     requirements: projectDocuments.filter((item) => item.documentType === 'REQUIREMENT').length,
   }), [projectDocuments]);
+
+  const projectWorkReportSummary = useMemo(() => ({
+    total: projectWorkReports.length,
+    submitted: projectWorkReports.filter((report) => report.status === 'SUBMITTED').length,
+    approved: projectWorkReports.filter((report) => report.status === 'APPROVED').length,
+    rejected: projectWorkReports.filter((report) => report.status === 'REJECTED').length,
+  }), [projectWorkReports]);
 
   const projectSupervisorSummary = useMemo(() => {
     const supervisors = selectedProject?.projectSupervisors || [];
@@ -1284,6 +1354,96 @@ export default function ProjectsPage() {
     }
   };
 
+  const resolveWorkReportOwnerId = (report) => String(report?.user?._id || report?.user?.id || report?.user || '');
+  const isOwnWorkReport = (report) => resolveWorkReportOwnerId(report) === currentUserId;
+  const canEditProjectWorkReport = (report) => {
+    if (!report) return false;
+    return isOwnWorkReport(report) || user?.role === 'GENERAL_MANAGER' || (canApproveProjectWorkReports && !isOwnWorkReport(report));
+  };
+  const canDeleteProjectWorkReport = (report) => {
+    if (!report) return false;
+    if (report.status === 'APPROVED') return user?.role === 'GENERAL_MANAGER';
+    return isOwnWorkReport(report) || user?.role === 'GENERAL_MANAGER';
+  };
+  const canDirectApproveProjectWorkReport = (report) => {
+    return Boolean(report && report.status === 'SUBMITTED' && canApproveProjectWorkReports && !isOwnWorkReport(report));
+  };
+
+  const openProjectWorkReport = (report, mode = 'view') => {
+    const reportId = encodeURIComponent(String(report?._id || ''));
+    if (!reportId) return;
+    window.location.href = mode === 'edit'
+      ? `/work-reports?reportId=${reportId}&mode=edit`
+      : `/work-reports?reportId=${reportId}`;
+  };
+
+  const openProjectWorkReportPdf = async (report) => {
+    if (!report?._id) return;
+    setError('');
+    try {
+      const blob = await api.get(`/work-reports/${report._id}/pdf?regenerate=1`);
+      const url = window.URL.createObjectURL(blob);
+      window.open(url, '_blank', 'noopener,noreferrer');
+      setTimeout(() => window.URL.revokeObjectURL(url), 30000);
+    } catch (err) {
+      setError(err.message || 'تعذر فتح PDF لتقرير العمل');
+    }
+  };
+
+  const approveProjectWorkReport = async (report) => {
+    if (!canDirectApproveProjectWorkReport(report)) return;
+    setWorkReportActionId(String(report._id));
+    setError('');
+    setInfo('');
+    try {
+      await api.patch(`/work-reports/${report._id}/approve`, {
+        pointsByUser: buildWorkReportApprovalPayload(buildWorkReportApprovalPointsMap(report)),
+      });
+      setInfo('تم اعتماد تقرير العمل المرتبط بالمشروع بنجاح.');
+      await loadProjectWorkReports(selectedProject);
+    } catch (err) {
+      setError(err.message || 'فشل اعتماد تقرير العمل');
+    } finally {
+      setWorkReportActionId('');
+    }
+  };
+
+  const rejectProjectWorkReport = async (report) => {
+    if (!canDirectApproveProjectWorkReport(report)) return;
+    const reason = window.prompt('اكتب سبب رفض تقرير العمل:');
+    if (reason === null) return;
+    setWorkReportActionId(String(report._id));
+    setError('');
+    setInfo('');
+    try {
+      await api.patch(`/work-reports/${report._id}/reject`, { reason, managerComment: reason });
+      setInfo('تم رفض تقرير العمل وإرسال الملاحظة للموظف.');
+      await loadProjectWorkReports(selectedProject);
+    } catch (err) {
+      setError(err.message || 'فشل رفض تقرير العمل');
+    } finally {
+      setWorkReportActionId('');
+    }
+  };
+
+  const deleteProjectWorkReport = async (report) => {
+    if (!canDeleteProjectWorkReport(report)) return;
+    const title = report.title || report.projectName || 'تقرير عمل';
+    if (!window.confirm(`هل تريد حذف «${title}»؟ لا يمكن التراجع عن هذا الإجراء.`)) return;
+    setWorkReportActionId(String(report._id));
+    setError('');
+    setInfo('');
+    try {
+      await api.delete(`/work-reports/${report._id}`);
+      setInfo('تم حذف تقرير العمل من سجل المشروع.');
+      await loadProjectWorkReports(selectedProject);
+    } catch (err) {
+      setError(err.message || 'فشل حذف تقرير العمل');
+    } finally {
+      setWorkReportActionId('');
+    }
+  };
+
   const submit = async (event) => {
     event.preventDefault();
     if (!form.workCategories.length) {
@@ -1360,6 +1520,7 @@ export default function ProjectsPage() {
     setProjectPlans([]);
     setProjectStages([]);
     setProjectTasks([]);
+    setProjectWorkReports([]);
     resetStageForm();
     resetTaskForm();
     syncProjectTeamForm(project);
@@ -1924,6 +2085,87 @@ export default function ProjectsPage() {
                       </footer>
                     </article>
                   ))}
+                </div>
+              </section>
+            ) : null}
+
+            {activeProjectTab === 'workReports' ? (
+              <section className="project-dashboard-section">
+                <div className="section-header project-dashboard-header">
+                  <div>
+                    <h3>تقارير عمل المشروع</h3>
+                    <p>تظهر هنا تقارير العمل المرتبطة بهذا المشروع عند اختيار اسم المشروع أثناء إنشاء التقرير.</p>
+                  </div>
+                  <div className="project-task-header-actions">
+                    <button type="button" className="btn btn-soft" onClick={() => loadProjectWorkReports(selectedProject)} disabled={workReportsLoading}>
+                      {workReportsLoading ? 'جارٍ التحديث...' : 'تحديث التقارير'}
+                    </button>
+                    <button type="button" className="btn btn-primary" onClick={() => { window.location.href = `/work-reports?project=${selectedProject._id}`; }}>
+                      فتح تقارير العمل
+                    </button>
+                  </div>
+                </div>
+
+                <div className="project-work-report-summary">
+                  <article><span>إجمالي التقارير</span><strong>{projectWorkReportSummary.total}</strong></article>
+                  <article><span>بانتظار الاعتماد</span><strong>{projectWorkReportSummary.submitted}</strong></article>
+                  <article><span>معتمدة</span><strong>{projectWorkReportSummary.approved}</strong></article>
+                  <article><span>مرفوضة</span><strong>{projectWorkReportSummary.rejected}</strong></article>
+                </div>
+
+                <div className="project-work-report-list">
+                  {workReportsLoading ? <p>جارٍ تحميل تقارير العمل...</p> : null}
+                  {!workReportsLoading && !projectWorkReports.length ? (
+                    <p>لا توجد تقارير عمل مرتبطة بهذا المشروع حتى الآن.</p>
+                  ) : null}
+                  {!workReportsLoading && projectWorkReports.map((report) => {
+                    const ownerName = report.employeeName || report.user?.fullName || '-';
+                    const percent = Number(report.progressPercent || 0);
+                    const actionBusy = workReportActionId === String(report._id);
+                    return (
+                      <article className="project-work-report-card" key={report._id}>
+                        <header>
+                          <div>
+                            <small>{toDateInput(report.workDate || report.createdAt) || '-'}</small>
+                            <h4>{report.title || report.projectName || 'تقرير عمل'}</h4>
+                            <p>{report.details || report.accomplishments || 'بدون تفاصيل مختصرة'}</p>
+                          </div>
+                          <span className={`status-pill ${workReportStatusClass[report.status] || 'status-todo'}`}>
+                            {workReportStatusLabel[report.status] || report.status}
+                          </span>
+                        </header>
+                        <div className="project-stage-metrics">
+                          <div><span>الموظف</span><strong>{ownerName}</strong></div>
+                          <div><span>نوع العمل</span><strong>{report.activityType || '-'}</strong></div>
+                          <div><span>نسبة الإنجاز</span><strong dir="ltr">{percent}%</strong></div>
+                          <div><span>المشاركون</span><strong>{report.participantCount || (report.participants || []).length || 0}</strong></div>
+                        </div>
+                        <div className="project-stage-progress compact">
+                          <span style={{ width: `${Math.min(Math.max(percent, 0), 100)}%` }} />
+                        </div>
+                        <footer className="form-actions project-work-report-actions">
+                          <button type="button" className="btn btn-soft btn-sm" onClick={() => openProjectWorkReport(report)}>تفاصيل</button>
+                          <button type="button" className="btn btn-soft btn-sm" onClick={() => openProjectWorkReportPdf(report)}>PDF</button>
+                          {canEditProjectWorkReport(report) ? (
+                            <button type="button" className="btn btn-primary btn-sm" onClick={() => openProjectWorkReport(report, 'edit')}>تعديل</button>
+                          ) : null}
+                          {canDirectApproveProjectWorkReport(report) ? (
+                            <>
+                              <button type="button" className="btn btn-primary btn-sm" onClick={() => approveProjectWorkReport(report)} disabled={actionBusy}>
+                                {actionBusy ? 'جارٍ الاعتماد...' : 'اعتماد'}
+                              </button>
+                              <button type="button" className="btn btn-soft btn-sm" style={{ color: 'var(--danger)' }} onClick={() => rejectProjectWorkReport(report)} disabled={actionBusy}>
+                                رفض
+                              </button>
+                            </>
+                          ) : null}
+                          {canDeleteProjectWorkReport(report) ? (
+                            <button type="button" className="btn btn-danger btn-sm" onClick={() => deleteProjectWorkReport(report)} disabled={actionBusy}>حذف</button>
+                          ) : null}
+                        </footer>
+                      </article>
+                    );
+                  })}
                 </div>
               </section>
             ) : null}
@@ -2866,6 +3108,7 @@ export default function ProjectsPage() {
         .project-team-actions-bar{display:flex;gap:10px;flex-wrap:wrap;margin:0 0 14px;padding:12px;border:1px solid var(--border);border-radius:14px;background:color-mix(in srgb,var(--surface) 78%,transparent)}
         .project-team-form-wrap{margin-bottom:14px}.project-team-empty-form{margin:0 0 14px;padding:12px;border:1px dashed var(--border);border-radius:14px;background:color-mix(in srgb,var(--surface) 70%,transparent);color:var(--text-soft)}.project-team-panel{min-width:0;padding:14px;border:1px solid var(--border);border-radius:14px;background:color-mix(in srgb,var(--surface) 78%,transparent)}.project-team-panel h4{margin:0 0 12px}.project-daily-labor-form{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;align-content:start}.project-daily-labor-form label{min-width:0}.project-labor-title,.project-labor-full{grid-column:1/-1}.project-labor-actions{justify-content:flex-start;margin-top:2px}
         .project-team-lists{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}.project-team-card-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:10px;margin-top:12px}.project-team-member-card{display:grid;grid-template-columns:auto minmax(0,1fr);gap:10px;align-items:center;padding:12px;border:1px solid var(--border);border-radius:14px;background:color-mix(in srgb,var(--surface-soft) 72%,transparent)}.project-team-member-card strong,.project-team-member-card span,.project-team-member-card small{display:block;overflow-wrap:anywhere}.project-team-member-card span,.project-team-member-card small,.project-team-member-card em{color:var(--text-soft);font-style:normal}.project-team-avatar{display:grid;place-items:center;width:42px;height:42px;border-radius:12px;background:color-mix(in srgb,var(--primary) 16%,transparent);color:var(--primary);font-weight:900}.project-team-avatar-external{background:color-mix(in srgb,var(--success) 16%,transparent);color:var(--success)}.project-team-external-card{grid-template-columns:auto minmax(0,1fr) auto}
+        .project-work-report-summary{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin:0 0 14px}.project-work-report-summary article{padding:14px;border:1px solid var(--border);border-radius:13px;background:var(--surface)}.project-work-report-summary span{display:block;color:var(--text-soft);font-size:12px;margin-bottom:7px}.project-work-report-summary strong{display:block;font-size:22px}.project-work-report-list{display:grid;gap:12px}.project-work-report-list>p{margin:0;padding:14px;border:1px dashed var(--border);border-radius:13px;background:color-mix(in srgb,var(--surface) 70%,transparent);color:var(--text-soft)}.project-work-report-card{padding:14px;border:1px solid var(--border);border-radius:14px;background:var(--surface)}.project-work-report-card header{display:flex;justify-content:space-between;gap:12px;align-items:flex-start}.project-work-report-card h4{margin:2px 0 5px;font-size:17px}.project-work-report-card p{margin:0;color:var(--text-soft);line-height:1.7;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}.project-work-report-card small{color:var(--text-soft);font-weight:800}.project-work-report-actions{padding-top:12px;border-top:1px solid var(--border);margin-top:12px}
         .project-department-form{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-bottom:14px}.project-department-form label{min-width:0}.project-department-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:12px}.project-department-card{padding:14px;border:1px solid var(--border);border-radius:14px;background:color-mix(in srgb,var(--surface) 78%,transparent)}.project-department-card header{display:flex;justify-content:space-between;gap:12px;align-items:flex-start}.project-department-card h4{margin:0 0 5px}.project-department-card p{margin:0;color:var(--text-soft)}
         .project-supervisor-form{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin-bottom:14px}.project-supervisor-form label{min-width:0}.project-department-card small{display:block;margin-bottom:5px;color:var(--primary);font-weight:800}
         .project-finance-summary{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin:0 0 14px}.project-finance-summary article{padding:16px;border:1px solid var(--border);border-radius:14px;background:var(--surface)}.project-finance-summary span{display:block;color:var(--text-soft);font-size:12px;margin-bottom:8px}.project-finance-summary strong{display:block;font-size:22px;overflow-wrap:anywhere}.project-finance-form{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin-bottom:14px}.project-finance-form label{min-width:0}.project-finance-list{display:grid;gap:12px}.project-finance-card{padding:14px;border:1px solid var(--border);border-radius:14px;background:var(--surface)}.project-finance-card header{display:flex;justify-content:space-between;gap:12px;align-items:flex-start}.project-finance-card h4{margin:2px 0 4px}.project-finance-card p{margin:0;color:var(--text-soft)}
@@ -2883,8 +3126,8 @@ export default function ProjectsPage() {
         .project-stage-metrics{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:9px;margin-top:12px}.project-stage-metrics>div{padding:9px;border:1px solid var(--border);border-radius:10px;background:color-mix(in srgb,var(--surface-soft) 68%,transparent)}.project-stage-metrics span{display:block;color:var(--text-soft);font-size:12px;margin-bottom:4px}.project-stage-metrics strong{display:block;overflow-wrap:anywhere}
         .project-stage-dates{display:flex;gap:10px;flex-wrap:wrap;color:var(--text-soft);font-size:12px;margin-bottom:12px}
         .project-detail-backdrop{position:fixed;inset:0;z-index:1200;padding:18px;background:rgba(2,6,14,.82);overflow:auto}.project-detail-panel{width:min(1400px,100%);margin:auto;padding:18px;border:1px solid var(--border);border-radius:20px;background:var(--surface)}
-        @media(max-width:1000px){.project-stage-form{grid-template-columns:repeat(2,minmax(0,1fr))}.project-stage-wide{grid-column:span 2}.project-stage-metrics{grid-template-columns:repeat(2,minmax(0,1fr))}.project-overview-grid,.project-team-lists,.project-finance-summary{grid-template-columns:repeat(2,minmax(0,1fr))}.project-daily-labor-form,.project-finance-form,.project-invoice-form,.project-document-form,.project-supervisor-form{grid-template-columns:repeat(2,minmax(0,1fr))}}
-        @media(max-width:700px){.project-card-grid{grid-template-columns:1fr;gap:12px}.project-card{padding:16px;border-radius:17px}.project-card-info,.project-detail-summary{grid-template-columns:1fr}.project-card .project-plan-card-actions{grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.project-detail-backdrop{padding:0}.project-detail-panel{min-height:100dvh;border-radius:0}.project-stage-form,.project-daily-labor-form,.project-department-form,.project-finance-form,.project-invoice-form,.project-document-form,.project-supervisor-form{grid-template-columns:1fr}.project-stage-wide{grid-column:auto}.project-stage-item header,.project-department-card header,.project-finance-card header{flex-direction:column}.project-stage-metrics,.project-overview-grid,.project-team-lists,.project-finance-summary{grid-template-columns:1fr}.project-dashboard-header{gap:10px}.project-stage-weight,.project-task-header-actions{width:100%}.project-team-actions-bar .btn{width:100%}.project-task-header-actions{justify-content:stretch}.project-task-header-actions .btn{width:100%}.project-plan-task-row,.project-team-external-card{align-items:flex-start;display:flex;flex-direction:column}.project-dashboard-tabs{border-radius:0;margin-inline:-18px;padding-inline:18px}.project-dashboard-tab{min-width:104px}.project-tab-placeholder{align-items:flex-start;flex-direction:column}}
+        @media(max-width:1000px){.project-stage-form{grid-template-columns:repeat(2,minmax(0,1fr))}.project-stage-wide{grid-column:span 2}.project-stage-metrics{grid-template-columns:repeat(2,minmax(0,1fr))}.project-overview-grid,.project-team-lists,.project-finance-summary,.project-work-report-summary{grid-template-columns:repeat(2,minmax(0,1fr))}.project-daily-labor-form,.project-finance-form,.project-invoice-form,.project-document-form,.project-supervisor-form{grid-template-columns:repeat(2,minmax(0,1fr))}}
+        @media(max-width:700px){.project-card-grid{grid-template-columns:1fr;gap:12px}.project-card{padding:16px;border-radius:17px}.project-card-info,.project-detail-summary{grid-template-columns:1fr}.project-card .project-plan-card-actions{grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.project-detail-backdrop{padding:0}.project-detail-panel{min-height:100dvh;border-radius:0}.project-stage-form,.project-daily-labor-form,.project-department-form,.project-finance-form,.project-invoice-form,.project-document-form,.project-supervisor-form{grid-template-columns:1fr}.project-stage-wide{grid-column:auto}.project-stage-item header,.project-department-card header,.project-finance-card header,.project-work-report-card header{flex-direction:column}.project-stage-metrics,.project-overview-grid,.project-team-lists,.project-finance-summary,.project-work-report-summary{grid-template-columns:1fr}.project-dashboard-header{gap:10px}.project-stage-weight,.project-task-header-actions{width:100%}.project-team-actions-bar .btn{width:100%}.project-task-header-actions{justify-content:stretch}.project-task-header-actions .btn{width:100%}.project-plan-task-row,.project-team-external-card{align-items:flex-start;display:flex;flex-direction:column}.project-dashboard-tabs{border-radius:0;margin-inline:-18px;padding-inline:18px}.project-dashboard-tab{min-width:104px}.project-tab-placeholder{align-items:flex-start;flex-direction:column}}
         @media(max-width:420px){.project-card .project-plan-card-actions{grid-template-columns:1fr}}
       `}</style>
 

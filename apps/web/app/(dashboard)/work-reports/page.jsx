@@ -393,16 +393,30 @@ export default function WorkReportsPage() {
       return;
     }
 
-    const reportId = new URLSearchParams(window.location.search).get('reportId');
+    const query = new URLSearchParams(window.location.search);
+    const reportId = query.get('reportId');
+    const mode = query.get('mode');
     if (!reportId) {
       return;
     }
 
-    const exists = reports.some((report) => String(report._id) === String(reportId));
-    if (exists) {
+    const report = reports.find((item) => String(item._id) === String(reportId));
+    if (report) {
       setSelectedReportId(String(reportId));
+      if (mode === 'edit' && canEditWorkReport(report)) {
+        setInlineAction(null);
+        setApprovalPoints('');
+        setApprovalPointsByUser({});
+        setApprovalComment(report.managerComment || '');
+        setDetailMode('edit');
+        setManagerEditForm(createWorkReportEditForm(report));
+        setShowEditProjectPicker(false);
+        setManagerEditPointsByUser({});
+        setRejectionReason('');
+        setRejectionComment('');
+      }
     }
-  }, [reports]);
+  }, [reports, canApprove, currentUserId, currentUser?.role]);
 
   const scrollToDetailPanel = () => {};
 
