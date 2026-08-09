@@ -17,6 +17,8 @@ const createEmptyForm = () => ({
   currency: 'IQD',
   transactionDate: '',
   project: '',
+  isProjectAdvance: false,
+  advanceRecipient: '',
   items: [
     {
       requestType: 'TRANSPORT_EXPENSE',
@@ -459,6 +461,7 @@ export default function FinancialDisbursementsPage() {
   const buildFormData = ({ forUpdate = false } = {}) => {
     const formData = new FormData();
     formData.append('currency', form.currency || 'IQD');
+    formData.append('isProjectAdvance', form.isProjectAdvance ? 'true' : 'false');
 
     if (form.transactionDate) {
       formData.append('transactionDate', form.transactionDate);
@@ -468,8 +471,12 @@ export default function FinancialDisbursementsPage() {
       formData.append('project', form.project);
     }
 
+    if (form.advanceRecipient) {
+      formData.append('advanceRecipient', form.advanceRecipient);
+    }
+
     const normalizedItems = (form.items || []).map((item) => ({
-      requestType: item.requestType,
+      requestType: form.isProjectAdvance ? 'WORK_ADVANCE' : item.requestType,
       amount: String(item.amount || ''),
       description: item.description || '',
       notes: item.notes || '',
@@ -497,6 +504,11 @@ export default function FinancialDisbursementsPage() {
   };
 
   const validateFormItems = () => {
+    if (form.isProjectAdvance && (!form.project || !form.advanceRecipient)) {
+      setError('عند تحويل المعاملة إلى سلفة عمل يجب اختيار المشروع والموظف المستلف.');
+      return false;
+    }
+
     const normalizedItems = form.items || [];
     if (!normalizedItems.length) {
       setError('أضف طلب صرف واحد على الأقل.');
@@ -795,6 +807,8 @@ export default function FinancialDisbursementsPage() {
         ? new Date(request.transactionDate).toISOString().split('T')[0]
         : '',
       project: request.project?._id || request.project?.id || request.project || '',
+      isProjectAdvance: !!request.isProjectAdvance,
+      advanceRecipient: request.advanceRecipient?._id || request.advanceRecipient?.id || request.advanceRecipient || '',
       items: [
         {
           requestType: request.requestType || 'TRANSPORT_EXPENSE',
@@ -813,6 +827,18 @@ export default function FinancialDisbursementsPage() {
     setIsFormOpen(true);
     setTimeout(() => formRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 0);
   };
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const query = new URLSearchParams(window.location.search);
+    const requestId = query.get('requestId');
+    const mode = query.get('mode');
+    if (!requestId || mode !== 'edit' || isFormOpen) return;
+    const request = allRequests.find((item) => String(item.id) === String(requestId));
+    if (request?.canEdit) {
+      beginEdit(request);
+    }
+  }, [allRequests, isFormOpen]);
 
   const setRowNote = (requestId, value) => {
     setRowNotes((current) => ({
@@ -1771,6 +1797,46 @@ export default function FinancialDisbursementsPage() {
               </select>
             </label>
 
+            <label>
+              نوع المعاملة
+              <select
+                className="select"
+                value={form.isProjectAdvance ? 'advance' : 'expense'}
+                onChange={(e) => {
+                  const isAdvance = e.target.value === 'advance';
+                  setForm((current) => ({
+                    ...current,
+                    isProjectAdvance: isAdvance,
+                    advanceRecipient: isAdvance ? current.advanceRecipient : '',
+                    items: (current.items || []).slice(0, 1).map((item) => ({
+                      ...item,
+                      requestType: isAdvance ? 'WORK_ADVANCE' : (item.requestType === 'WORK_ADVANCE' ? 'BUSINESS_EXPENSE' : item.requestType),
+                    })),
+                  }));
+                }}
+              >
+                <option value="expense">صرف مالي</option>
+                <option value="advance">سلفة عمل على مشروع</option>
+              </select>
+            </label>
+
+            {form.isProjectAdvance ? (
+              <label>
+                الموظف المستلف
+                <select
+                  className="select"
+                  value={form.advanceRecipient}
+                  onChange={(e) => setForm((current) => ({ ...current, advanceRecipient: e.target.value }))}
+                  required
+                >
+                  <option value="">اختر الموظف</option>
+                  {employees.map((employee) => (
+                    <option key={employee._id || employee.id} value={employee._id || employee.id}>{employee.fullName || employee.name || '-'}</option>
+                  ))}
+                </select>
+              </label>
+            ) : null}
+
             <div style={{ gridColumn: '1 / -1', display: 'flex', flexDirection: 'column', gap: 10 }}>
               {form.items.map((item, index) => (
                 <div key={`financial-item-${index}`} className="card section" style={{ padding: 12 }}>
@@ -1784,7 +1850,7 @@ export default function FinancialDisbursementsPage() {
                   <div className="grid-3">
                     <label>
                       نوع الصرف
-                      <select className="select" value={item.requestType} onChange={(e) => updateFormItem(index, 'requestType', e.target.value)}>
+                      <select className="select" value={form.isProjectAdvance ? 'WORK_ADVANCE' : item.requestType} onChange={(e) => updateFormItem(index, 'requestType', e.target.value)} disabled={form.isProjectAdvance}>
                         {typeOptions.map(([value, label]) => (
                           <option key={value} value={value}>{label}</option>
                         ))}
@@ -1809,7 +1875,7 @@ export default function FinancialDisbursementsPage() {
                 </div>
               ))}
 
-              {!form.id ? (
+              {!form.id && !form.isProjectAdvance ? (
                 <div>
                   <button className="btn btn-soft" type="button" onClick={addFormItem}>+ إضافة طلب جديد بنفس المعاملة</button>
                 </div>

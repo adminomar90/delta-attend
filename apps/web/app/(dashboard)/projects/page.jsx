@@ -1190,6 +1190,28 @@ export default function ProjectsPage() {
     }
   };
 
+  const editProjectFinancialRequest = (request) => {
+    if (!request?.id) return;
+    window.location.href = `/financial-disbursements?requestId=${encodeURIComponent(request.id)}&mode=edit`;
+  };
+
+  const deleteProjectFinancialRequest = async (request) => {
+    if (!selectedProject || !request?.id) return;
+    if (!window.confirm(`هل تريد حذف المعاملة المالية ${request.requestNo || ''} نهائياً؟ سيتم تحديث مبالغ السلف والصرف للمشروع مباشرة.`)) return;
+    setProjectFinanceLoading(true);
+    setError('');
+    setInfo('');
+    try {
+      await api.delete(`/financial-disbursements/${request.id}`);
+      setInfo('تم حذف المعاملة المالية وتحديث مالية المشروع.');
+      await loadProjectFinance(selectedProject._id);
+    } catch (err) {
+      setError(err.message || 'فشل حذف المعاملة المالية');
+    } finally {
+      setProjectFinanceLoading(false);
+    }
+  };
+
   const exportProjectWarehouseExcel = async () => {
     if (!selectedProject) return;
     try {
@@ -2661,6 +2683,20 @@ export default function ProjectsPage() {
                         <div><span>المستلف</span><strong>{request.advanceRecipient?.fullName || '-'}</strong></div>
                         <div><span>التاريخ</span><strong dir="ltr">{toDateInput(request.transactionDate || request.createdAt) || '-'}</strong></div>
                       </div>
+                      {(request.canEdit || request.canDelete) ? (
+                        <footer className="form-actions project-work-report-actions">
+                          {request.canEdit ? (
+                            <button type="button" className="btn btn-primary btn-sm" onClick={() => editProjectFinancialRequest(request)}>
+                              تعديل
+                            </button>
+                          ) : null}
+                          {request.canDelete ? (
+                            <button type="button" className="btn btn-danger btn-sm" onClick={() => deleteProjectFinancialRequest(request)} disabled={projectFinanceLoading}>
+                              حذف نهائي
+                            </button>
+                          ) : null}
+                        </footer>
+                      ) : null}
                     </article>
                   ))}
                   {projectCustomerReceipts.map((receipt) => (

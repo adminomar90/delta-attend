@@ -226,6 +226,32 @@ const canEditRequest = (req, request) =>
   && !request.financiallyApprovedAt
   && !request.generalManagerApprovedAt;
 
+const canManageApprovedFinancialRequest = (req, request) => {
+  if (request.archived) return false;
+  const status = request.status || '';
+  const hasApproval = Boolean(
+    request.projectManagerApprovedAt
+    || request.financiallyApprovedAt
+    || request.generalManagerApprovedAt
+    || [
+      FinancialDisbursementStatus.READY_FOR_DISBURSEMENT,
+      FinancialDisbursementStatus.DISBURSED,
+      FinancialDisbursementStatus.PENDING_RECEIPT_CONFIRMATION,
+      FinancialDisbursementStatus.RECEIVED,
+      FinancialDisbursementStatus.CLOSED,
+    ].includes(status),
+  );
+  return hasApproval
+    && (
+      req.user?.role === Roles.GENERAL_MANAGER
+      || canReviewFinancialRequest(req.user)
+      || canDisburseFinancialFunds(req.user)
+    );
+};
+
+const canMutateFinancialRequest = (req, request) =>
+  canEditRequest(req, request) || canManageApprovedFinancialRequest(req, request);
+
 const buildReturnedForReviewPayload = () => ({
   status: FinancialDisbursementStatus.RETURNED_FOR_REVIEW,
   currentReviewerRole: 'EMPLOYEE',
@@ -389,12 +415,8 @@ const serializeRequest = (request, currentUser = null) => {
     })),
     pointsImpact: sumPointEvents(request),
     awaitingReceiptConfirmation: status === FinancialDisbursementStatus.DISBURSED,
-    canEdit:
-      currentUserId === employeeId
-      && [FinancialDisbursementStatus.DRAFT, FinancialDisbursementStatus.RETURNED_FOR_REVIEW].includes(status)
-      && !request.projectManagerApprovedAt
-      && !request.financiallyApprovedAt
-      && !request.generalManagerApprovedAt,
+    canEdit: canEditRequest({ user: currentUser }, request)
+      || canManageApprovedFinancialRequest({ user: currentUser }, request),
     canSubmit:
       currentUserId === employeeId
       && [FinancialDisbursementStatus.DRAFT, FinancialDisbursementStatus.RETURNED_FOR_REVIEW].includes(status)
@@ -421,12 +443,8 @@ const serializeRequest = (request, currentUser = null) => {
     canConfirmReceipt:
       currentUserId === employeeId
       && status === FinancialDisbursementStatus.DISBURSED,
-    canDelete:
-      currentUserId === employeeId
-      && [FinancialDisbursementStatus.DRAFT, FinancialDisbursementStatus.RETURNED_FOR_REVIEW].includes(status)
-      && !request.projectManagerApprovedAt
-      && !request.financiallyApprovedAt
-      && !request.generalManagerApprovedAt,
+    canDelete: canEditRequest({ user: currentUser }, request)
+      || canManageApprovedFinancialRequest({ user: currentUser }, request),
     canArchive: canArchiveStatus && !request.archived,
     canUnarchive: !!request.archived,
   };
@@ -622,10 +640,12 @@ const buildRequestPayload = ({
   const stage = normalizeOptionalObjectId(body.stage || body.stageId || existingRequest?.stage, 'stage');
   const task = normalizeOptionalObjectId(body.task || body.taskId || existingRequest?.task, 'task');
   const isProjectAdvance = toBoolean(body.isProjectAdvance ?? existingRequest?.isProjectAdvance);
-  const advanceRecipient = normalizeOptionalObjectId(
-    body.advanceRecipient || body.advanceRecipientId || existingRequest?.advanceRecipient,
-    'advanceRecipient',
-  );
+  const advanceRecipient = isProjectAdvance
+    ? normalizeOptionalObjectId(
+        body.advanceRecipient || body.advanceRecipientId || existingRequest?.advanceRecipient,
+        'advanceRecipient',
+      )
+    : null;
   const transactionDate = body.transactionDate
     ? new Date(body.transactionDate)
     : (existingRequest?.transactionDate || null);
@@ -907,7 +927,7 @@ export const updateFinancialDisbursement = asyncHandler(async (req, res) => {
   }
 
   ensureReadableRequest(req, request);
-  if (!canEditRequest(req, request)) {
+  if (!canMutateFinancialRequest(req, request)) {
     throw new AppError('This request cannot be edited', 409);
   }
 
@@ -924,12 +944,15 @@ export const updateFinancialDisbursement = asyncHandler(async (req, res) => {
     financialManagerId: request.financialManagerReviewer?._id || request.financialManagerReviewer || null,
     generalManagerId: request.generalManagerReviewer?._id || request.generalManagerReviewer || null,
   };
+  const isApprovedManagementEdit = canManageApprovedFinancialRequest(req, request);
 
-  try {
-    reviewers = await resolveCurrentReviewers(req.user.id, req.user.role);
-  } catch (error) {
-    if (request.status !== FinancialDisbursementStatus.DRAFT) {
-      throw error;
+  if (!isApprovedManagementEdit) {
+    try {
+      reviewers = await resolveCurrentReviewers(req.user.id, req.user.role);
+    } catch (error) {
+      if (request.status !== FinancialDisbursementStatus.DRAFT) {
+        throw error;
+      }
     }
   }
   const requiresGeneralManagerApproval = shouldRequireGeneralManagerApproval({
@@ -941,6 +964,8 @@ export const updateFinancialDisbursement = asyncHandler(async (req, res) => {
 
   const updatedRequest = await financialDisbursementRepository.updateById(request._id, {
     ...payload,
+    transactionTotalAmount: payload.amount,
+    ...(request.approvedAmount != null ? { approvedAmount: payload.amount } : {}),
     projectManagerReviewer: reviewers.projectManagerId || null,
     financialManagerReviewer: reviewers.financialManagerId || null,
     generalManagerReviewer: reviewers.generalManagerId || null,
@@ -1673,11 +1698,7 @@ export const deleteFinancialDisbursement = asyncHandler(async (req, res) => {
 
   ensureReadableRequest(req, request);
 
-  if (String(request.employee?._id || request.employee) !== String(req.user.id)) {
-    throw new AppError('Only request owner can delete this request', 403);
-  }
-
-  if (!canEditRequest(req, request)) {
+  if (!canMutateFinancialRequest(req, request)) {
     throw new AppError('Cannot delete a request that has been approved or is in review', 409);
   }
 

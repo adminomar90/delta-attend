@@ -39,6 +39,12 @@ const canAccessFinancialDisbursementsModule = requireAnyPermission(
   Permission.VIEW_FINANCIAL_REPORTS,
 );
 
+const canMutateFinancialDisbursements = requireAnyPermission(
+  Permission.CREATE_FINANCIAL_DISBURSEMENTS,
+  Permission.REVIEW_FINANCIAL_DISBURSEMENTS,
+  Permission.DISBURSE_FINANCIAL_FUNDS,
+);
+
 financialDisbursementsRoutes.use(requireAuth, canAccessFinancialDisbursementsModule);
 
 financialDisbursementsRoutes.get('/summary', financialDisbursementSummary);
@@ -54,10 +60,10 @@ financialDisbursementsRoutes.post(
 financialDisbursementsRoutes.get('/:id/pdf', exportFinancialDisbursementPdf);
 financialDisbursementsRoutes.post('/:id/whatsapp-link', financialDisbursementWhatsappLink);
 financialDisbursementsRoutes.get('/:id', getFinancialDisbursement);
-financialDisbursementsRoutes.delete('/:id', canCreateFinancialDisbursements, deleteFinancialDisbursement);
+financialDisbursementsRoutes.delete('/:id', canMutateFinancialDisbursements, deleteFinancialDisbursement);
 financialDisbursementsRoutes.patch(
   '/:id',
-  canCreateFinancialDisbursements,
+  canMutateFinancialDisbursements,
   uploadFinancialDisbursementAttachmentsMiddleware.array('attachments', 20),
   updateFinancialDisbursement,
 );
