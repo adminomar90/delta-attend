@@ -1236,6 +1236,12 @@ export default function FinancialDisbursementsPage() {
     () => customerReceipts.reduce((sum, receipt) => sum + Number(receipt.amount || 0), 0),
     [customerReceipts],
   );
+  const projectAdvanceRecords = useMemo(
+    () => requests
+      .filter((request) => request.project && request.isProjectAdvance)
+      .filter((request) => [...approvedNotDeliveredStatuses, ...deliveredAmountStatuses].includes(request.status)),
+    [requests],
+  );
 
   const transactionItemCounts = useMemo(() => {
     const counts = new Map();
@@ -1530,13 +1536,22 @@ export default function FinancialDisbursementsPage() {
           {[
             { key: null, label: 'إجمالي الطلبات', count: summary.total || 0 },
             { key: ['PENDING_PROJECT_MANAGER_APPROVAL'], label: 'بانتظار مدير المشاريع', count: summary.pendingProjectManager || 0 },
-            { key: ['PENDING_FINANCIAL_MANAGER_APPROVAL', 'PENDING_GENERAL_MANAGER_APPROVAL'], label: 'بانتظار المدير المالي', count: summary.pendingFinancialManager || 0 },
+            { key: ['PENDING_FINANCIAL_MANAGER_APPROVAL'], label: 'بانتظار المدير المالي', count: summary.pendingFinancialManager || 0 },
+            { key: ['PENDING_GENERAL_MANAGER_APPROVAL'], label: 'بانتظار المدير العام', count: summary.pendingGeneralManager || 0 },
             { key: ['READY_FOR_DISBURSEMENT'], label: 'جاهزة للتسليم', count: summary.readyForDisbursement || 0 },
             { key: 'project-advance-balance', label: 'مبلغ السلف', count: formatMoney(projectAdvanceBalance, 'IQD') },
             { key: 'customer-receipts-total', label: 'مجموع المبالغ المستلمة', count: formatMoney(totalCustomerReceiptsAmount, 'IQD') },
           ].map((item) => {
             const isFilterCard = Array.isArray(item.key) || item.key === null;
-            const isActive = isFilterCard && (statusFilter === item.key || (statusFilter === null && item.key === null));
+            const isActive = isFilterCard && (
+              (statusFilter === null && item.key === null)
+              || (
+                Array.isArray(statusFilter)
+                && Array.isArray(item.key)
+                && statusFilter.length === item.key.length
+                && statusFilter.every((status) => item.key.includes(status))
+              )
+            );
             return (
               <article
                 key={item.label}
@@ -1753,6 +1768,59 @@ export default function FinancialDisbursementsPage() {
                       <button className="btn btn-soft btn-sm" type="button" onClick={() => downloadCustomerReceiptPdf(receipt)}>
                         PDF
                       </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      ) : null}
+
+      {activeTab === 'active' && projectAdvanceRecords.length ? (
+        <section className="card section" style={{ marginBottom: 16 }}>
+          <div className="section-header">
+            <div>
+              <h2 style={{ margin: 0 }}>سجل السلف المصروفة على المشاريع</h2>
+              <p style={{ margin: '6px 0 0', color: 'var(--text-soft)' }}>سلف المشاريع المعتمدة والجاهزة للتسليم أو التي تم تسليمها فعليًا للموظفين.</p>
+            </div>
+          </div>
+          <div style={{ overflowX: 'auto' }}>
+            <table className="table">
+              <thead>
+                <tr>
+                  <th>رقم المعاملة</th>
+                  <th>المشروع</th>
+                  <th>الموظف المستلف</th>
+                  <th>طالب السلفة</th>
+                  <th>المبلغ</th>
+                  <th>الحالة</th>
+                  <th>التاريخ</th>
+                  <th>إجراءات</th>
+                </tr>
+              </thead>
+              <tbody>
+                {projectAdvanceRecords.map((request) => (
+                  <tr key={`project-advance-${request.id}`}>
+                    <td>
+                      <strong>{request.requestNo || '-'}</strong>
+                      {request.transactionNo ? <div style={{ color: 'var(--text-soft)', fontSize: 12 }}>{request.transactionNo}</div> : null}
+                    </td>
+                    <td>{request.project?.name || '-'}</td>
+                    <td>{request.advanceRecipient?.fullName || '-'}</td>
+                    <td>{request.employee?.fullName || '-'}</td>
+                    <td dir="ltr">{formatMoney(request.approvedAmount != null ? request.approvedAmount : request.amount, request.currency)}</td>
+                    <td><span className={`status-pill ${statusClassMap[request.status] || 'status-inprogress'}`}>{request.statusLabel || request.status}</span></td>
+                    <td dir="ltr">{formatDateTime(request.transactionDate || request.createdAt)}</td>
+                    <td>
+                      <div className="form-actions" style={{ gap: 6 }}>
+                        <button className="btn btn-soft btn-sm" type="button" onClick={() => showTransactionDetails(request)}>
+                          تفاصيل
+                        </button>
+                        <button className="btn btn-soft btn-sm" type="button" onClick={() => downloadTransactionPdf(request)}>
+                          PDF
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))}

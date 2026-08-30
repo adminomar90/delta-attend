@@ -183,9 +183,11 @@ const projectSupervisorRoleLabel = {
 };
 
 const emptyProjectFinanceForm = {
+  formType: 'expense',
   currency: 'IQD',
   transactionDate: '',
   requestType: 'MATERIALS_EXPENSE',
+  advanceRecipient: '',
   amount: '',
   description: '',
   notes: '',
@@ -747,6 +749,16 @@ export default function ProjectsPage() {
     setProjectFinanceFormOpen(false);
   };
 
+  const openProjectFinanceForm = (formType = 'expense') => {
+    setProjectFinanceForm({
+      ...emptyProjectFinanceForm,
+      formType,
+      requestType: formType === 'advance' ? 'WORK_ADVANCE' : 'MATERIALS_EXPENSE',
+      description: formType === 'advance' ? 'سلفة عمل على مشروع' : '',
+    });
+    setProjectFinanceFormOpen(true);
+  };
+
   const resetProjectInvoiceForm = () => {
     setProjectInvoiceForm(emptyProjectInvoiceForm);
     setEditingProjectInvoiceId('');
@@ -1135,7 +1147,11 @@ export default function ProjectsPage() {
     event?.preventDefault?.();
     if (!selectedProject) return;
     if (!projectFinanceForm.amount || !projectFinanceForm.description.trim()) {
-      setError('يرجى إدخال المبلغ ووصف طلب الصرف.');
+      setError(projectFinanceForm.formType === 'advance' ? 'يرجى إدخال مبلغ السلفة وتفاصيلها.' : 'يرجى إدخال المبلغ ووصف طلب الصرف.');
+      return;
+    }
+    if (projectFinanceForm.formType === 'advance' && !projectFinanceForm.advanceRecipient) {
+      setError('اختر الموظف المستلف قبل إرسال طلب السلفة.');
       return;
     }
 
@@ -1147,10 +1163,14 @@ export default function ProjectsPage() {
       const formData = new FormData();
       formData.append('project', selectedProject._id);
       formData.append('currency', projectFinanceForm.currency || 'IQD');
-      formData.append('requestType', projectFinanceForm.requestType || 'MATERIALS_EXPENSE');
+      formData.append('requestType', projectFinanceForm.formType === 'advance' ? 'WORK_ADVANCE' : (projectFinanceForm.requestType || 'MATERIALS_EXPENSE'));
       formData.append('amount', String(projectFinanceForm.amount || ''));
       formData.append('description', projectFinanceForm.description || '');
       formData.append('notes', projectFinanceForm.notes || '');
+      if (projectFinanceForm.formType === 'advance') {
+        formData.append('isProjectAdvance', 'true');
+        formData.append('advanceRecipient', projectFinanceForm.advanceRecipient);
+      }
       if (projectFinanceForm.transactionDate) {
         formData.append('transactionDate', projectFinanceForm.transactionDate);
       }
@@ -1162,9 +1182,11 @@ export default function ProjectsPage() {
       });
 
       await api.postWithProgress('/financial-disbursements', formData, { timeoutMs: 8 * 60 * 1000 });
-      setInfo(mode === 'submit'
-        ? 'تم إرسال طلب الصرف وربطه بمالية المشروع.'
-        : 'تم حفظ طلب الصرف وربطه بمالية المشروع.');
+      setInfo(projectFinanceForm.formType === 'advance'
+        ? 'تم إرسال طلب سلفة المشروع حسب مسار الموافقات.'
+        : mode === 'submit'
+          ? 'تم إرسال طلب الصرف وربطه بمالية المشروع.'
+          : 'تم حفظ طلب الصرف وربطه بمالية المشروع.');
       resetProjectFinanceForm();
       await loadProjectFinance(selectedProject._id);
     } catch (err) {
@@ -2548,19 +2570,28 @@ export default function ProjectsPage() {
                     <h3>مالية المشروع</h3>
                     <p>طلبات الصرف المرتبطة بهذا المشروع مع إجمالي المصروف والطلبات الجاهزة للصرف.</p>
                   </div>
-                  <div className="project-task-header-actions">
+                  <div className="project-finance-actions">
                     <div className="project-stage-weight">
                       <span>المستندات</span>
                       <strong>{projectFinanceSummary.totalRequests}</strong>
                     </div>
                     {canCreateProjectFinance ? (
-                      <button
-                        type="button"
-                        className={`btn ${projectFinanceFormOpen ? 'btn-primary' : 'btn-soft'}`}
-                        onClick={() => setProjectFinanceFormOpen((value) => !value)}
-                      >
-                        صرف مالي
-                      </button>
+                      <>
+                        <button
+                          type="button"
+                          className={`btn ${projectFinanceFormOpen && projectFinanceForm.formType === 'expense' ? 'btn-primary' : 'btn-soft'}`}
+                          onClick={() => openProjectFinanceForm('expense')}
+                        >
+                          صرف مالي
+                        </button>
+                        <button
+                          type="button"
+                          className={`btn ${projectFinanceFormOpen && projectFinanceForm.formType === 'advance' ? 'btn-primary' : 'btn-soft'}`}
+                          onClick={() => openProjectFinanceForm('advance')}
+                        >
+                          طلب سلفة للمشروع
+                        </button>
+                      </>
                     ) : null}
                     {canViewProjectFinance ? (
                       <button type="button" className="btn btn-soft" onClick={exportProjectFinanceExcel}>
@@ -2606,7 +2637,15 @@ export default function ProjectsPage() {
                 </div>
 
                 {canCreateProjectFinance && projectFinanceFormOpen ? (
-                  <form className="project-team-panel project-finance-form" onSubmit={(event) => submitProjectFinance(event, 'draft')}>
+                  <div
+                    className="project-finance-modal-backdrop"
+                    onMouseDown={(event) => event.target === event.currentTarget && !projectFinanceSaving && resetProjectFinanceForm()}
+                  >
+                  <form className="project-team-panel project-finance-form project-finance-modal-panel" onSubmit={(event) => submitProjectFinance(event, 'draft')}>
+                    <div className="project-finance-form-title project-labor-full">
+                      <strong>{projectFinanceForm.formType === 'advance' ? 'طلب سلفة للمشروع' : 'صرف مالي على مشروع'}</strong>
+                      <span>{projectFinanceForm.formType === 'advance' ? 'نفس نموذج السلفة في القسم المالي مع تثبيت اسم المشروع الحالي.' : 'طلب صرف مالي مرتبط مباشرة بهذا المشروع.'}</span>
+                    </div>
                     <label>
                       العملة
                       <select className="select" value={normalizeProjectCurrency(projectFinanceForm.currency)} onChange={(e) => setProjectFinanceForm((p) => ({ ...p, currency: e.target.value }))}>
@@ -2620,7 +2659,7 @@ export default function ProjectsPage() {
                     </label>
                     <label>
                       نوع الصرف
-                      <select className="select" value={projectFinanceForm.requestType} onChange={(e) => setProjectFinanceForm((p) => ({ ...p, requestType: e.target.value }))}>
+                      <select className="select" value={projectFinanceForm.formType === 'advance' ? 'WORK_ADVANCE' : projectFinanceForm.requestType} onChange={(e) => setProjectFinanceForm((p) => ({ ...p, requestType: e.target.value }))} disabled={projectFinanceForm.formType === 'advance'}>
                         {financialTypeOptions.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
                       </select>
                     </label>
@@ -2632,8 +2671,19 @@ export default function ProjectsPage() {
                       على مشروع
                       <input className="input" value={selectedProject.name} disabled />
                     </label>
+                    {projectFinanceForm.formType === 'advance' ? (
+                      <label className="project-labor-full">
+                        الموظف المستلف
+                        <select className="select" value={projectFinanceForm.advanceRecipient} onChange={(e) => setProjectFinanceForm((p) => ({ ...p, advanceRecipient: e.target.value }))} required>
+                          <option value="">اختر الموظف المستلف</option>
+                          {stageEmployeeOptions.map((person) => (
+                            <option key={person.id || person._id} value={person.id || person._id}>{person.fullName || person.name || '-'}</option>
+                          ))}
+                        </select>
+                      </label>
+                    ) : null}
                     <label className="project-labor-full">
-                      وصف طلب الصرف
+                      {projectFinanceForm.formType === 'advance' ? 'تفاصيل السلفة' : 'وصف طلب الصرف'}
                       <textarea className="textarea" rows={2} value={projectFinanceForm.description} onChange={(e) => setProjectFinanceForm((p) => ({ ...p, description: e.target.value }))} required />
                     </label>
                     <label className="project-labor-full">
@@ -2654,13 +2704,16 @@ export default function ProjectsPage() {
                       />
                     </label>
                     <div className="form-actions project-labor-full">
-                      <button className="btn btn-soft" type="button" disabled={projectFinanceSaving} onClick={(event) => submitProjectFinance(event, 'draft')}>{projectFinanceSaving ? 'جارٍ الحفظ...' : 'حفظ كمسودة'}</button>
-                      <button className="btn btn-primary" type="button" disabled={projectFinanceSaving} onClick={(event) => submitProjectFinance(event, 'submit')}>{projectFinanceSaving ? 'جارٍ الإرسال...' : 'إرسال الطلب'}</button>
+                      {projectFinanceForm.formType === 'expense' ? (
+                        <button className="btn btn-soft" type="button" disabled={projectFinanceSaving} onClick={(event) => submitProjectFinance(event, 'draft')}>{projectFinanceSaving ? 'جارٍ الحفظ...' : 'حفظ كمسودة'}</button>
+                      ) : null}
+                      <button className="btn btn-primary" type="button" disabled={projectFinanceSaving} onClick={(event) => submitProjectFinance(event, 'submit')}>{projectFinanceSaving ? 'جارٍ الإرسال...' : projectFinanceForm.formType === 'advance' ? 'إرسال طلب السلفة' : 'إرسال الطلب'}</button>
                       <button type="button" className="btn btn-soft" disabled={projectFinanceSaving} onClick={resetProjectFinanceForm}>إغلاق</button>
                     </div>
                   </form>
+                  </div>
                 ) : canCreateProjectFinance ? (
-                  <div className="project-team-empty-form">اضغط على زر صرف مالي لإظهار استمارة الصرف المرتبطة بهذا المشروع.</div>
+                  <div className="project-team-empty-form">اختر صرف مالي أو طلب سلفة للمشروع لإظهار الاستمارة المناسبة.</div>
                 ) : null}
 
                 <div className="project-finance-list">
@@ -3137,16 +3190,18 @@ export default function ProjectsPage() {
         .project-card footer{margin-top:auto;padding-top:16px;border-top:1px solid var(--border);margin-block-start:16px}.project-plan-card-actions{align-items:stretch;gap:10px}.project-card .project-plan-card-actions{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}.project-plan-card-actions :global(.btn){min-height:42px;box-shadow:inset 0 1px 0 rgba(255,255,255,.1),0 3px 8px rgba(0,0,0,.12)}.project-card .project-plan-card-actions :global(.btn){width:100%;padding-inline:8px}
         .project-plan-actions{display:flex;gap:10px;flex-wrap:wrap;margin:0 0 14px}
         .project-dashboard-tabs{display:flex;gap:6px;align-items:stretch;margin:16px 0 12px;padding:8px;border:1px solid var(--border);border-radius:14px;background:color-mix(in srgb,var(--surface-soft) 82%,var(--surface));box-shadow:0 10px 28px rgba(0,0,0,.12);overflow-x:auto;scrollbar-width:thin}
-        .project-dashboard-tab{display:flex;align-items:center;justify-content:center;gap:7px;min-width:112px;padding:10px 12px;border:0;border-bottom:2px solid transparent;border-radius:10px;background:transparent;color:var(--text-soft);font:inherit;font-size:13px;cursor:pointer;white-space:nowrap;transition:background .18s ease,color .18s ease,border-color .18s ease}
+        .project-dashboard-tab{display:flex;align-items:center;justify-content:center;gap:7px;min-width:112px;padding:10px 12px;border:0;border-bottom:2px solid transparent;border-radius:10px;background:transparent;color:var(--text-soft);font:inherit;font-size:13px;cursor:pointer;white-space:nowrap;transition:background .18s ease,color .18s ease,border-color .18s ease,box-shadow .18s ease}
         .project-dashboard-tab span{display:inline-grid;place-items:center;width:22px;height:22px;border-radius:8px;background:color-mix(in srgb,var(--surface) 70%,transparent);color:var(--text-soft);font-weight:900}
         .project-dashboard-tab strong{font-weight:800}
-        .project-dashboard-tab:hover{background:color-mix(in srgb,var(--primary) 8%,transparent);color:var(--text)}
-        .project-dashboard-tab-active{background:color-mix(in srgb,var(--primary) 12%,var(--surface));color:var(--primary);border-bottom-color:var(--primary)}
-        .project-dashboard-tab-active span{background:color-mix(in srgb,var(--primary) 17%,transparent);color:var(--primary)}
+        .project-dashboard-tab:hover{background:color-mix(in srgb,var(--accent) 13%,transparent);color:var(--accent);border-bottom-color:var(--accent);box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--accent) 24%,transparent)}
+        .project-dashboard-tab:hover span{background:color-mix(in srgb,var(--accent) 18%,transparent);color:var(--accent)}
+        .project-dashboard-tab-active{background:color-mix(in srgb,var(--primary) 12%,var(--surface));color:var(--accent);border-bottom-color:var(--accent)}
+        .project-dashboard-tab-active span{background:color-mix(in srgb,var(--accent) 17%,transparent);color:var(--accent)}
         .project-dashboard-section{margin:16px 0 18px;padding:16px;border:1px solid var(--border);border-radius:16px;background:color-mix(in srgb,var(--surface-soft) 72%,transparent)}
         .project-dashboard-header{align-items:flex-start;margin-bottom:12px}.project-dashboard-header h3{margin:0 0 4px}.project-dashboard-header p{margin:0;color:var(--text-soft)}
         .project-stage-weight{min-width:130px;padding:10px 12px;border:1px solid var(--border);border-radius:12px;background:var(--surface)}.project-stage-weight span{display:block;color:var(--text-soft);font-size:12px}.project-stage-weight strong{display:block;font-size:20px;margin-top:3px}
         .project-task-header-actions{display:flex;align-items:center;gap:10px;flex-wrap:wrap;justify-content:flex-end}
+        .project-finance-actions{display:flex;align-items:stretch;justify-content:flex-end;gap:10px;flex-wrap:wrap}.project-finance-actions :global(.btn){min-height:48px;padding-inline:18px}.project-finance-actions .project-stage-weight{min-height:58px}
         .project-plan-task-picker{margin:0 0 14px;padding:14px;border:1px dashed color-mix(in srgb,var(--primary) 36%,var(--border));border-radius:14px;background:color-mix(in srgb,var(--surface) 74%,transparent)}
         .project-plan-task-list{display:grid;gap:8px}.project-plan-task-row{display:flex;align-items:center;justify-content:space-between;gap:12px;width:100%;padding:12px;border:1px solid var(--border);border-radius:12px;background:var(--surface);color:var(--text);font:inherit;text-align:start;cursor:pointer}.project-plan-task-row:hover{border-color:var(--primary);background:color-mix(in srgb,var(--primary) 8%,var(--surface))}.project-plan-task-row span{display:grid;gap:4px}.project-plan-task-row small,.project-plan-task-row em{color:var(--text-soft);font-style:normal}
         .project-team-actions-bar{display:flex;gap:10px;flex-wrap:wrap;margin:0 0 14px;padding:12px;border:1px solid var(--border);border-radius:14px;background:color-mix(in srgb,var(--surface) 78%,transparent)}
@@ -3155,7 +3210,7 @@ export default function ProjectsPage() {
         .project-work-report-summary{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin:0 0 14px}.project-work-report-summary article{padding:14px;border:1px solid var(--border);border-radius:13px;background:var(--surface)}.project-work-report-summary span{display:block;color:var(--text-soft);font-size:12px;margin-bottom:7px}.project-work-report-summary strong{display:block;font-size:22px}.project-work-report-list{display:grid;gap:12px}.project-work-report-list>p{margin:0;padding:14px;border:1px dashed var(--border);border-radius:13px;background:color-mix(in srgb,var(--surface) 70%,transparent);color:var(--text-soft)}.project-work-report-card{padding:14px;border:1px solid var(--border);border-radius:14px;background:var(--surface)}.project-work-report-card header{display:flex;justify-content:space-between;gap:12px;align-items:flex-start}.project-work-report-card h4{margin:2px 0 5px;font-size:17px}.project-work-report-card p{margin:0;color:var(--text-soft);line-height:1.7;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}.project-work-report-card small{color:var(--text-soft);font-weight:800}.project-work-report-actions{padding-top:12px;border-top:1px solid var(--border);margin-top:12px}
         .project-department-form{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-bottom:14px}.project-department-form label{min-width:0}.project-department-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:12px}.project-department-card{padding:14px;border:1px solid var(--border);border-radius:14px;background:color-mix(in srgb,var(--surface) 78%,transparent)}.project-department-card header{display:flex;justify-content:space-between;gap:12px;align-items:flex-start}.project-department-card h4{margin:0 0 5px}.project-department-card p{margin:0;color:var(--text-soft)}
         .project-supervisor-form{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin-bottom:14px}.project-supervisor-form label{min-width:0}.project-department-card small{display:block;margin-bottom:5px;color:var(--primary);font-weight:800}
-        .project-finance-summary{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin:0 0 14px}.project-finance-summary article{min-width:0;padding:16px;border:1px solid var(--border);border-radius:14px;background:var(--surface)}.project-finance-summary span{display:block;color:var(--text-soft);font-size:12px;margin-bottom:8px}.project-finance-summary strong{display:block;font-size:22px;line-height:1.35;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.project-finance-form{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin-bottom:14px}.project-finance-form label{min-width:0}.project-finance-list{display:grid;gap:12px}.project-finance-card{padding:14px;border:1px solid var(--border);border-radius:14px;background:var(--surface)}.project-finance-card header{display:flex;justify-content:space-between;gap:12px;align-items:flex-start}.project-finance-card h4{margin:2px 0 4px}.project-finance-card p{margin:0;color:var(--text-soft)}
+        .project-finance-summary{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin:0 0 14px}.project-finance-summary article{min-width:0;padding:16px;border:1px solid var(--border);border-radius:14px;background:var(--surface)}.project-finance-summary span{display:block;color:var(--text-soft);font-size:12px;margin-bottom:8px}.project-finance-summary strong{display:block;font-size:22px;line-height:1.35;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.project-finance-form{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin-bottom:14px}.project-finance-form label{min-width:0}.project-finance-modal-backdrop{position:fixed;inset:0;z-index:1400;display:grid;place-items:center;padding:18px;background:rgba(2,6,14,.78);backdrop-filter:blur(3px);overflow:auto}.project-finance-modal-panel{width:min(920px,100%);max-height:min(88dvh,760px);overflow:auto;margin:0;padding:18px;border-radius:18px;box-shadow:0 24px 70px rgba(0,0,0,.42)}.project-finance-form-title{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 14px;border:1px solid color-mix(in srgb,var(--primary) 30%,var(--border));border-radius:14px;background:color-mix(in srgb,var(--surface) 78%,transparent)}.project-finance-form-title strong{font-size:16px}.project-finance-form-title span{color:var(--text-soft);font-size:13px}.project-finance-list{display:grid;gap:12px}.project-finance-card{padding:14px;border:1px solid var(--border);border-radius:14px;background:var(--surface)}.project-finance-card header{display:flex;justify-content:space-between;gap:12px;align-items:flex-start}.project-finance-card h4{margin:2px 0 4px}.project-finance-card p{margin:0;color:var(--text-soft)}
         .project-table-wrap{overflow:auto;border:1px solid var(--border);border-radius:14px;background:var(--surface)}.project-table-wrap p{margin:0;padding:16px;color:var(--text-soft)}.project-warehouse-table{min-width:980px;margin:0}.project-warehouse-table th,.project-warehouse-table td{vertical-align:middle}.project-warehouse-table td strong{display:block}.project-warehouse-table td small{display:block;margin-top:3px;color:var(--text-soft);font-size:11px}
         .project-invoice-form{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin-bottom:14px}.project-invoice-form label{min-width:0}
         .project-document-form{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-bottom:14px}.project-document-form label{min-width:0}.project-document-selected{display:flex;flex-wrap:wrap;gap:6px}.project-document-selected span{padding:6px 9px;border:1px solid var(--border);border-radius:999px;background:var(--surface);color:var(--text-soft);font-size:12px}
@@ -3171,7 +3226,7 @@ export default function ProjectsPage() {
         .project-stage-dates{display:flex;gap:10px;flex-wrap:wrap;color:var(--text-soft);font-size:12px;margin-bottom:12px}
         .project-detail-backdrop{position:fixed;inset:0;z-index:1200;padding:18px;background:rgba(2,6,14,.82);overflow:auto}.project-detail-panel{width:min(1400px,100%);margin:auto;padding:18px;border:1px solid var(--border);border-radius:20px;background:var(--surface)}
         @media(max-width:1000px){.project-stage-form{grid-template-columns:repeat(2,minmax(0,1fr))}.project-stage-wide{grid-column:span 2}.project-stage-metrics{grid-template-columns:repeat(2,minmax(0,1fr))}.project-overview-grid,.project-team-lists,.project-finance-summary,.project-work-report-summary{grid-template-columns:repeat(2,minmax(0,1fr))}.project-daily-labor-form,.project-finance-form,.project-invoice-form,.project-document-form,.project-supervisor-form{grid-template-columns:repeat(2,minmax(0,1fr))}}
-        @media(max-width:700px){.project-card-grid{grid-template-columns:1fr;gap:12px}.project-card{padding:16px;border-radius:17px}.project-card-info,.project-detail-summary{grid-template-columns:1fr}.project-card .project-plan-card-actions{grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.project-detail-backdrop{padding:0}.project-detail-panel{min-height:100dvh;border-radius:0}.project-stage-form,.project-daily-labor-form,.project-department-form,.project-finance-form,.project-invoice-form,.project-document-form,.project-supervisor-form{grid-template-columns:1fr}.project-stage-wide{grid-column:auto}.project-stage-item header,.project-department-card header,.project-finance-card header,.project-work-report-card header{flex-direction:column}.project-stage-metrics,.project-overview-grid,.project-team-lists,.project-finance-summary,.project-work-report-summary{grid-template-columns:1fr}.project-dashboard-header{gap:10px}.project-stage-weight,.project-task-header-actions{width:100%}.project-team-actions-bar .btn{width:100%}.project-task-header-actions{justify-content:stretch}.project-task-header-actions .btn{width:100%}.project-plan-task-row,.project-team-external-card{align-items:flex-start;display:flex;flex-direction:column}.project-dashboard-tabs{border-radius:0;margin-inline:-18px;padding-inline:18px}.project-dashboard-tab{min-width:104px}.project-tab-placeholder{align-items:flex-start;flex-direction:column}}
+        @media(max-width:700px){.project-card-grid{grid-template-columns:1fr;gap:12px}.project-card{padding:16px;border-radius:17px}.project-card-info,.project-detail-summary{grid-template-columns:1fr}.project-card .project-plan-card-actions{grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.project-detail-backdrop{padding:0}.project-detail-panel{min-height:100dvh;border-radius:0}.project-stage-form,.project-daily-labor-form,.project-department-form,.project-finance-form,.project-invoice-form,.project-document-form,.project-supervisor-form{grid-template-columns:1fr}.project-stage-wide{grid-column:auto}.project-stage-item header,.project-department-card header,.project-finance-card header,.project-work-report-card header{flex-direction:column}.project-stage-metrics,.project-overview-grid,.project-team-lists,.project-finance-summary,.project-work-report-summary{grid-template-columns:1fr}.project-dashboard-header{gap:10px}.project-stage-weight,.project-task-header-actions,.project-finance-actions{width:100%}.project-team-actions-bar .btn{width:100%}.project-task-header-actions,.project-finance-actions{justify-content:stretch}.project-task-header-actions .btn,.project-finance-actions :global(.btn){width:100%}.project-finance-form-title{align-items:flex-start;flex-direction:column}.project-plan-task-row,.project-team-external-card{align-items:flex-start;display:flex;flex-direction:column}.project-dashboard-tabs{border-radius:0;margin-inline:-18px;padding-inline:18px}.project-dashboard-tab{min-width:104px}.project-tab-placeholder{align-items:flex-start;flex-direction:column}}
         @media(max-width:420px){.project-card .project-plan-card-actions{grid-template-columns:1fr}}
       `}</style>
 

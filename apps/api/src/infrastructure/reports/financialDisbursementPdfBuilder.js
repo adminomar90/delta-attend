@@ -57,6 +57,124 @@ const toMoney = (value, currency = 'IQD') => {
   return `${rendered} ${currency || 'IQD'}`;
 };
 
+const LRM = '\u200e';
+
+const formatDateTimeLtr = (value) => {
+  if (!value) return '-';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '-';
+  return `${date.toLocaleDateString('en-GB')} ${date.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}`;
+};
+
+const moneyLtr = (value, currency = 'IQD') => {
+  const amount = Number(value || 0);
+  const rendered = Number.isFinite(amount) ? amount.toLocaleString('en-US') : '0';
+  return `${LRM}${rendered} ${currency || 'IQD'}${LRM}`;
+};
+
+const stabilizeMixedDirection = (value) =>
+  safe(value)
+    .replace(/([0-9][0-9,.:/_-]*)/g, `${LRM}$1${LRM}`)
+    .replace(/([A-Za-z][A-Za-z0-9,.:/_-]*)/g, `${LRM}$1${LRM}`);
+
+const ones = ['', 'واحد', 'اثنان', 'ثلاثة', 'أربعة', 'خمسة', 'ستة', 'سبعة', 'ثمانية', 'تسعة'];
+const tens = ['', 'عشرة', 'عشرون', 'ثلاثون', 'أربعون', 'خمسون', 'ستون', 'سبعون', 'ثمانون', 'تسعون'];
+const teens = ['عشرة', 'أحد عشر', 'اثنا عشر', 'ثلاثة عشر', 'أربعة عشر', 'خمسة عشر', 'ستة عشر', 'سبعة عشر', 'ثمانية عشر', 'تسعة عشر'];
+const hundreds = ['', 'مائة', 'مائتان', 'ثلاثمائة', 'أربعمائة', 'خمسمائة', 'ستمائة', 'سبعمائة', 'ثمانمائة', 'تسعمائة'];
+
+const underThousandToWords = (value) => {
+  const number = Number(value || 0);
+  const parts = [];
+  const hundred = Math.floor(number / 100);
+  const remainder = number % 100;
+
+  if (hundred) parts.push(hundreds[hundred]);
+  if (remainder) {
+    if (remainder < 10) {
+      parts.push(ones[remainder]);
+    } else if (remainder < 20) {
+      parts.push(teens[remainder - 10]);
+    } else {
+      const one = remainder % 10;
+      const ten = Math.floor(remainder / 10);
+      parts.push(one ? `${ones[one]} و${tens[ten]}` : tens[ten]);
+    }
+  }
+
+  return parts.join(' و');
+};
+
+const scaleToWords = (value, singular, dual, plural) => {
+  if (!value) return '';
+  if (value === 1) return singular;
+  if (value === 2) return dual;
+  if (value >= 3 && value <= 10) return `${underThousandToWords(value)} ${plural}`;
+  return `${underThousandToWords(value)} ${singular}`;
+};
+
+const numberToArabicWords = (value) => {
+  const number = Math.floor(Math.abs(Number(value || 0)));
+  if (!number) return 'صفر';
+
+  const billions = Math.floor(number / 1000000000);
+  const millions = Math.floor((number % 1000000000) / 1000000);
+  const thousands = Math.floor((number % 1000000) / 1000);
+  const rest = number % 1000;
+
+  return [
+    scaleToWords(billions, 'مليار', 'ملياران', 'مليارات'),
+    scaleToWords(millions, 'مليون', 'مليونان', 'ملايين'),
+    scaleToWords(thousands, 'ألف', 'ألفان', 'آلاف'),
+    underThousandToWords(rest),
+  ].filter(Boolean).join(' و');
+};
+
+const currencyName = (currency = 'IQD') => (currency === 'USD' ? 'دولار أمريكي' : 'دينار عراقي');
+const amountInWords = (amount, currency) => `فقط ${numberToArabicWords(amount)} ${currencyName(currency)} لا غير`;
+
+const drawReceiptLikeRow = (ctx, rightLabel, rightValue, leftLabel, leftValue, { rightLtr = false, leftLtr = false } = {}) => {
+  const { doc, F, FB, ML, CW } = ctx;
+  const y = doc.y;
+  const gap = 10;
+  const boxW = (CW - gap) / 2;
+  const boxH = 42;
+
+  const drawBox = (x, label, value, ltr = false) => {
+    doc.roundedRect(x, y, boxW, boxH, 4).fillAndStroke(COLORS.paleBlue, COLORS.border);
+    doc.font(FB).fontSize(8).fillColor(COLORS.soft);
+    doc.text(label, x + 10, y + 6, { width: boxW - 20, align: 'right', features: ['arab'] });
+    doc.font(F).fontSize(10).fillColor(COLORS.text);
+    doc.text(ltr ? `${LRM}${safe(value)}${LRM}` : stabilizeMixedDirection(value), x + 10, y + 22, {
+      width: boxW - 20,
+      align: ltr ? 'left' : 'right',
+      features: ltr ? [] : ['arab'],
+      lineBreak: false,
+    });
+  };
+
+  drawBox(ML + boxW + gap, rightLabel, rightValue, rightLtr);
+  drawBox(ML, leftLabel, leftValue, leftLtr);
+  doc.y = y + boxH + 8;
+};
+
+const drawReceiptLikeFullBox = (ctx, label, value, { ltr = false } = {}) => {
+  if (!value) return;
+  const { doc, F, FB, ML, CW } = ctx;
+  const y = doc.y;
+  const boxH = 48;
+
+  doc.roundedRect(ML, y, CW, boxH, 4).fillAndStroke(COLORS.paleBlue, COLORS.border);
+  doc.font(FB).fontSize(8).fillColor(COLORS.soft);
+  doc.text(label, ML + 10, y + 7, { width: CW - 20, align: 'right', features: ['arab'] });
+  doc.font(F).fontSize(10).fillColor(COLORS.text);
+  doc.text(ltr ? `${LRM}${safe(value)}${LRM}` : stabilizeMixedDirection(value), ML + 10, y + 24, {
+    width: CW - 20,
+    align: ltr ? 'left' : 'right',
+    features: ltr ? [] : ['arab'],
+  });
+  doc.y = y + boxH + 8;
+};
+
 const isImageAttachment = (attachment = {}) => {
   const mimeType = String(attachment.mimeType || '').toLowerCase();
   const target = `${String(attachment.originalName || '').toLowerCase()} ${String(attachment.url || '').toLowerCase()}`;
@@ -120,6 +238,65 @@ const drawTransactionItemCard = (ctx, item, index) => {
   drawTextBlock(ctx, 'الملاحظات', safe(item.notes));
 };
 
+const buildProjectAdvanceReceiptPdfBuffer = async ({
+  request,
+  generatedAt = new Date(),
+} = {}) => {
+  const amount = request?.approvedAmount != null ? Number(request.approvedAmount) : Number(request?.amount || 0);
+  const currency = request?.currency || 'IQD';
+  const status = STATUS_MAP[request?.status] || {
+    ar: safe(request?.statusLabel || request?.status),
+    bg: COLORS.warning,
+  };
+
+  const ctx = createDoc({ margin: 42, size: 'A4', title: `سند سلفة مشروع - ${safe(request?.requestNo)}` });
+
+  drawHeader(ctx, {
+    title: 'سند سلفة مصروفة على مشروع',
+    subtitle: request?.requestNo || '',
+    dateText: `${LRM}${formatDateTimeLtr(generatedAt)}${LRM}`,
+  });
+
+  drawStatusBadge(ctx, { label: safe(request?.statusLabel || status.ar), color: status.bg });
+
+  drawSectionTitle(ctx, 'تفاصيل السند');
+  drawReceiptLikeRow(ctx, 'رقم المعاملة', request?.requestNo || '-', 'تاريخ السلفة', formatDateTimeLtr(request?.transactionDate || request?.createdAt), {
+    rightLtr: true,
+    leftLtr: true,
+  });
+  drawReceiptLikeRow(ctx, 'اسم المشروع', request?.project?.name || '-', 'رمز المشروع', request?.project?.code || '-', {
+    leftLtr: true,
+  });
+  drawReceiptLikeRow(ctx, 'الموظف المستلف', request?.advanceRecipient?.fullName || '-', 'طالب السلفة', request?.employee?.fullName || '-');
+  drawReceiptLikeRow(ctx, 'المبلغ رقماً', moneyLtr(amount, currency), 'الحالة', request?.statusLabel || status.ar, {
+    rightLtr: true,
+  });
+  drawReceiptLikeFullBox(ctx, 'المبلغ كتابةً', amountInWords(amount, currency));
+  drawReceiptLikeRow(ctx, 'العملة', currencyName(currency), 'نوع المعاملة', TYPE_LABEL_MAP.WORK_ADVANCE);
+
+  if (request?.description) {
+    drawSectionTitle(ctx, 'تفاصيل السلفة');
+    drawReceiptLikeFullBox(ctx, 'التفاصيل', request.description);
+  }
+
+  if (request?.notes) {
+    drawSectionTitle(ctx, 'ملاحظات');
+    drawReceiptLikeFullBox(ctx, 'الملاحظات', request.notes);
+  }
+
+  drawSectionTitle(ctx, 'التواقيع');
+  drawReceiptLikeRow(ctx, 'توقيع الموظف المستلف', '________________', 'توقيع المدير المالي', '________________', {
+    rightLtr: true,
+    leftLtr: true,
+  });
+  drawReceiptLikeRow(ctx, 'توقيع مدير المشروع', '________________', 'توقيع المدير العام', '________________', {
+    rightLtr: true,
+    leftLtr: true,
+  });
+
+  return finalize(ctx, { footerLabel: 'سند سلفة مشروع رسمي — Delta Plus' });
+};
+
 export const buildFinancialDisbursementPdfBuffer = async ({
   request,
   transactionRequests = [],
@@ -129,6 +306,10 @@ export const buildFinancialDisbursementPdfBuffer = async ({
 } = {}) => {
   const items = sortTransactionItems(transactionRequests?.length ? transactionRequests : [request].filter(Boolean));
   const primary = request || items[0] || {};
+  if (primary.isProjectAdvance && items.length <= 1) {
+    return buildProjectAdvanceReceiptPdfBuffer({ request: primary, generatedAt });
+  }
+
   const currency = primary.currency || items[0]?.currency || 'IQD';
   const transactionNo = primary.transactionNo || primary.requestNo || '-';
   const employeeName = primary.employee?.fullName || items[0]?.employee?.fullName || '-';

@@ -1,6 +1,14 @@
+
+> delta-plus-gamification@1.0.0 dev:web
+> npm --workspace apps/web run dev
+
+
+> delta-plus-web@1.0.0 dev
+> next dev
+
 ▲ Next.js 16.1.6 (Turbopack)
 - Local:         http://localhost:3000
-- Network:       http://26.149.121.217:3000
+- Network:       http://192.168.232.1:3000
 - Environments: .env.local
 
 ✓ Starting...
@@ -8,36 +16,13 @@ Creating turbopack project {
   dir: 'C:\\Users\\IT-ENG-HAKAM\\Desktop\\test\\apps\\web',
   testMode: true
 }
-✓ Ready in 2.7s
- GET / 307 in 2.3s (compile: 1945ms, render: 351ms)
- GET /login 200 in 286ms (compile: 205ms, render: 81ms)
- GET / 307 in 270ms (compile: 18ms, render: 252ms)
- GET /login 200 in 120ms (compile: 14ms, render: 105ms)
+✓ Ready in 15.4s
+○ Compiling / ...
+ GET / 307 in 9.4s (compile: 8.9s, render: 462ms)
+ GET / 307 in 85ms (compile: 17ms, render: 68ms)
+ GET /login 200 in 53ms (compile: 5ms, render: 48ms)
 ○ Compiling /dashboard ...
- GET /dashboard 200 in 6.1s (compile: 5.8s, render: 312ms)
- GET /employees 200 in 745ms (compile: 479ms, render: 265ms)
- GET /notifications 200 in 1173ms (compile: 1057ms, render: 116ms)
- GET /notifications 200 in 163ms (compile: 36ms, render: 127ms)
- GET /notifications 200 in 436ms (compile: 204ms, render: 232ms)
- GET /employees 200 in 95ms (compile: 36ms, render: 59ms)
-✓ Compiled in 1330ms
-✓ Compiled in 259ms
-✓ Compiled in 187ms
- GET /employees 200 in 346ms (compile: 187ms, render: 158ms)
-✓ Compiled in 247ms
- GET /employees 200 in 269ms (compile: 138ms, render: 131ms)
- GET /employees 200 in 76ms (compile: 8ms, render: 67ms)
- GET /login 200 in 48ms (compile: 12ms, render: 37ms)
- GET /dashboard 200 in 669ms (compile: 564ms, render: 105ms)
- GET /employees 200 in 35ms (compile: 7ms, render: 29ms)
-✓ Compiled in 160ms
- GET /employees 200 in 303ms (compile: 124ms, render: 178ms)
- GET /tasks 200 in 261ms (compile: 234ms, render: 26ms)
- GET /materials 200 in 78ms (compile: 55ms, render: 24ms)
- GET /project-custodies 200 in 144ms (compile: 123ms, render: 21ms)
-✓ Compiled in 357ms
-✓ Compiled in 164ms
-✓ Compiled in 494ms
-✓ Compiled in 247ms
- GET /employees 200 in 624ms (compile: 407ms, render: 218ms)
- GET /employees 200 in 1008ms (compile: 560ms, render: 448ms)
+ GET /dashboard 200 in 10.2s (compile: 10.2s, render: 50ms)
+ GET /financial-disbursements 200 in 405ms (compile: 360ms, render: 45ms)
+✓ Compiled in 1684ms
+✓ Compiled in 235ms
