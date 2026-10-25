@@ -8,7 +8,7 @@
 
 ▲ Next.js 16.1.6 (Turbopack)
 - Local:         http://localhost:3000
-- Network:       http://192.168.232.1:3000
+- Network:       http://26.149.121.217:3000
 - Environments: .env.local
 
 ✓ Starting...
@@ -16,16 +16,15 @@ Creating turbopack project {
   dir: 'C:\\Users\\IT-ENG-HAKAM\\Desktop\\test\\apps\\web',
   testMode: true
 }
-✓ Ready in 15.4s
-○ Compiling / ...
- GET / 307 in 9.4s (compile: 8.9s, render: 462ms)
- GET / 307 in 85ms (compile: 17ms, render: 68ms)
- GET /login 200 in 53ms (compile: 5ms, render: 48ms)
+✓ Ready in 15.1s
+○ Compiling /login ...
+ GET /login 200 in 5.5s (compile: 5.3s, render: 216ms)
+ GET / 307 in 1297ms (compile: 1223ms, render: 74ms)
+ GET /login 200 in 78ms (compile: 7ms, render: 72ms)
+ GET / 307 in 81ms (compile: 16ms, render: 65ms)
+ GET /login 200 in 50ms (compile: 7ms, render: 43ms)
 ○ Compiling /dashboard ...
- GET /dashboard 200 in 10.2s (compile: 10.2s, render: 50ms)
- GET /financial-disbursements 200 in 405ms (compile: 360ms, render: 45ms)
-✓ Compiled in 1684ms
-✓ Compiled in 235ms
- GET /financial-disbursements 200 in 396ms (compile: 193ms, render: 203ms)
- GET / 307 in 198ms (compile: 20ms, render: 178ms)
- GET /login 200 in 71ms (compile: 11ms, render: 60ms)
+ GET /dashboard 200 in 11.3s (compile: 11.1s, render: 192ms)
+ GET /financial-disbursements 200 in 319ms (compile: 269ms, render: 50ms)
+✓ Compiled in 987ms
+ GET /financial-disbursements 200 in 332ms (compile: 153ms, render: 179ms)

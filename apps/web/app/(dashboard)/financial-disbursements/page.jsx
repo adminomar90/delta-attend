@@ -311,8 +311,8 @@ export default function FinancialDisbursementsPage() {
     [selectedTransactionAttachments],
   );
 
-  const load = async () => {
-    setLoading(true);
+  const load = async ({ background = false } = {}) => {
+    if (!background) setLoading(true);
     setError('');
 
     try {
@@ -335,7 +335,7 @@ export default function FinancialDisbursementsPage() {
     } catch (err) {
       setError(err.message || 'تعذر تحميل بيانات الصرف المالي');
     } finally {
-      setLoading(false);
+      if (!background) setLoading(false);
     }
   };
 
@@ -855,6 +855,7 @@ export default function FinancialDisbursementsPage() {
   };
 
   const runAction = async (request, stage, action) => {
+    if (saving) return;
     setSaving(true);
     setError('');
     setInfo('');
@@ -868,17 +869,25 @@ export default function FinancialDisbursementsPage() {
     };
 
     try {
-      await api.patch(routeByStage[stage], {
+      const result = await api.patch(routeByStage[stage], {
         action,
         notes: note,
         ...(approvedAmount !== undefined && approvedAmount !== ''
           ? { approvedAmount: Number(approvedAmount) }
           : {}),
       });
+      if (result.request) {
+        setRequests((current) => current.map((item) => (
+          item.id === result.request.id ? result.request : item
+        )));
+        setSelectedRequest((current) => (
+          current?.id === result.request.id ? result.request : current
+        ));
+      }
       setInfo('تم تنفيذ الإجراء بنجاح.');
       setRowNote(request.id, '');
       setRowApprovedAmount(request.id, '');
-      await load();
+      await load({ background: true });
     } catch (err) {
       setError(err.message || 'فشل تنفيذ الإجراء');
     } finally {
