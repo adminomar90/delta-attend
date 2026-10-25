@@ -28,3 +28,7 @@ Creating turbopack project {
  GET /financial-disbursements 200 in 319ms (compile: 269ms, render: 50ms)
 ✓ Compiled in 987ms
  GET /financial-disbursements 200 in 332ms (compile: 153ms, render: 179ms)
+ GET /customers 200 in 544ms (compile: 504ms, render: 40ms)
+ GET /customers 200 in 47ms (compile: 15ms, render: 32ms)
+✓ Compiled in 661ms
+ GET /financial-disbursements 200 in 424ms (compile: 239ms, render: 185ms)

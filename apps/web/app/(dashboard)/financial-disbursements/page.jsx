@@ -912,16 +912,25 @@ export default function FinancialDisbursementsPage() {
   };
 
   const deliverRequest = async (request) => {
+    if (saving) return;
     setSaving(true);
     setError('');
     setInfo('');
     try {
-      await api.patch(`/financial-disbursements/${request.id}/deliver`, {
+      const result = await api.patch(`/financial-disbursements/${request.id}/deliver`, {
         notes: rowNotes[request.id] || '',
       });
+      if (result.request) {
+        setRequests((current) => current.map((item) => (
+          item.id === result.request.id ? result.request : item
+        )));
+        setSelectedRequest((current) => (
+          current?.id === result.request.id ? result.request : current
+        ));
+      }
       setInfo('تم تسجيل تسليم المبلغ.');
       setRowNote(request.id, '');
-      await load();
+      await load({ background: true });
     } catch (err) {
       setError(err.message || 'فشل تسجيل تسليم المبلغ');
     } finally {

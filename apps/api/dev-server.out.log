@@ -48,3 +48,10 @@
 [0mGET /api/customers [32m200[0m 82.662 ms - 4515[0m
 [0mGET /api/customer-receipts [32m200[0m 86.675 ms - 721[0m
 [0mGET /api/auth/users [32m200[0m 95.396 ms - 11856[0m
+[0mGET /api/customers [32m200[0m 73.611 ms - 4515[0m
+[0mGET /api/auth/me [32m200[0m 75.740 ms - 9492[0m
+[0mGET /api/customers [32m200[0m 86.137 ms - 4515[0m
+[0mGET /api/customer-forms [32m200[0m 39.972 ms - 3387[0m
+[0mPOST /api/customer-forms/links [32m201[0m 246.431 ms - 1056[0m
+[0mGET /api/customer-forms [32m200[0m 9.697 ms - 4317[0m
+[0mGET /api/customer-forms/6addcb73ad4671937973b69a [32m200[0m 21.832 ms - 965[0m
