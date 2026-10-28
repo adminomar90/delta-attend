@@ -7,6 +7,7 @@ import { Permission, hasAnyPermission, hasPermission } from '../../../lib/permis
 import { buildCustodyWhatsapp } from '../../../lib/custodyWhatsapp.mjs';
 import InventoryRequestsPanel from '../../../components/inventory/InventoryRequestsPanel';
 import InventorySettlementsPanel from '../../../components/inventory/InventorySettlementsPanel';
+import UnlinkedProductsDeleteModal from '../../../components/inventory/UnlinkedProductsDeleteModal';
 
 const defaultCategories = [
   'كاميرات مراقبة',
@@ -355,6 +356,7 @@ export default function WarehousesPage() {
   const canDeleteWarehouse = currentUser?.role === 'GENERAL_MANAGER';
   const canResetTechnicianCustodies = currentUser?.role === 'GENERAL_MANAGER';
   const [custodyResetOpen, setCustodyResetOpen] = useState(false);
+  const [productsDeleteOpen, setProductsDeleteOpen] = useState(false);
   const canReviewRequests = canManageStock;
   const canPrepare = canManageStock;
   const canDispatch = hasPermission(currentUser, Permission.DISPATCH_MATERIAL_REQUESTS) || canManageStock;
@@ -907,6 +909,7 @@ export default function WarehousesPage() {
   const prepareWarehouseRequest = (request, payload) => runInventoryAction(`/materials/requests/${request._id}/prepare`, payload, 'تم تجهيز وحجز الدفعة؛ بانتظار قبول الفني. لم يخصم الرصيد الفعلي بعد.');
   const confirmWarehouseReceipt = (request, action, notes) => runInventoryAction(`/materials/requests/${request._id}/confirm-receipt`, { action, notes, receiptToken: request.pendingReceipt?.id }, action === 'REJECT' ? 'رفضت الدفعة وفك حجزها.' : 'تم تأكيد الاستلام وخصم الرصيد وتسجيل الذمة.');
   const cancelWarehouseRemainder = (request, notes) => runInventoryAction(`/materials/requests/${request._id}/cancel-remaining`, { notes }, 'ألغي غير المستلم وفك حجزه. المواد المستلمة تبقى على ذمة الفني.');
+  const deleteWarehouseRequest = (request, payload) => runInventoryAction(`/materials/requests/${request._id}`, payload, 'تم حذف الطلب من القوائم وفك حجز غير المستلم. الذمم والحركات المصروفة محفوظة.', 'delete');
   const reviewSettlement = (record, action) => {
     const reviewNotes = action === 'REJECT' ? window.prompt('ملاحظات رفض التصفية') : 'اعتماد أمين المخزن للكميات';
     if (action === 'REJECT' && !reviewNotes?.trim()) return Promise.reject(new Error('ملاحظات الرفض مطلوبة'));
@@ -992,6 +995,7 @@ export default function WarehousesPage() {
             ['settings', 'إعدادات المخزن'],
           ].map(([value, label]) => <button key={value} className={`btn ${activeTab === value ? 'btn-primary' : 'btn-soft'}`} onClick={() => openWarehouseTab(value)}>{label}</button>)}
           {canResetTechnicianCustodies ? <button type="button" className="btn btn-danger" onClick={() => setCustodyResetOpen(true)}>تهيئة ذمم الفنيين</button> : null}
+          {canDeleteWarehouse ? <button type="button" className="btn btn-danger" onClick={() => setProductsDeleteOpen(true)}>حذف المنتجات</button> : null}
         </div>
         <div className="warehouse-barcode-row">
           <label>بحث بالباركود<input ref={barcodeRef} className="input" dir="ltr" value={filters.barcode} onChange={(e) => setFilters((prev) => ({ ...prev, barcode: e.target.value }))} onKeyDown={(e) => { if (e.key === 'Enter') searchBarcode(e.currentTarget.value); }} placeholder="امسح الباركود أو اكتب الرقم ثم Enter" /></label>
@@ -1039,7 +1043,7 @@ export default function WarehousesPage() {
       {activeTab === 'dashboard' ? <DashboardPanels stock={stock} products={products} requests={transferredRequests} custodies={openCustodies} reconciliations={pendingSettlements} /> : null}
       {activeTab === 'categories' ? <CategoryCardsPanel categories={categories} products={materials} saving={saving} canManage={canManageProducts} onCreateCategory={createCategory} onRenameCategory={renameCategory} onDeleteCategory={deleteCategory} onAdd={(category) => { setEditingProduct({ category }); setActiveTab('products'); }} /> : null}
       {activeTab === 'requests' ? (
-        <InventoryRequestsPanel requests={requests} warehouses={activeWarehouses} stockByMaterial={stockByMaterial} actor={currentUser} saving={saving} canManage={canManageStock} onReview={reviewWarehouseRequest} onPrepare={prepareWarehouseRequest} onConfirm={confirmWarehouseReceipt} onCancel={cancelWarehouseRemainder} />
+        <InventoryRequestsPanel requests={requests} warehouses={activeWarehouses} stockByMaterial={stockByMaterial} actor={currentUser} saving={saving} canManage={canManageStock} onReview={reviewWarehouseRequest} onPrepare={prepareWarehouseRequest} onConfirm={confirmWarehouseReceipt} onCancel={cancelWarehouseRemainder} onDelete={deleteWarehouseRequest} />
       ) : null}
       {activeTab === 'stock-in' ? <StockQuickPanel mode="IN" products={materials} warehouses={activeWarehouses} onSubmit={submitStockAdjust} onSubmitBatch={submitStockAdjustBatch} saving={saving} /> : null}
       {activeTab === 'returns' ? <InventorySettlementsPanel reconciliations={reconciliations} warehouses={activeWarehouses} actor={currentUser} canManage={canManageStock} saving={saving} onReview={reviewSettlement} onReceive={receiveSettlementReturns} /> : null}
@@ -1056,6 +1060,15 @@ export default function WarehousesPage() {
       {cartProduct ? <AddToCartModal product={cartProduct} warehouses={activeWarehouses.filter((warehouse) => warehouse.type !== 'DAMAGED')} stockEntry={stockByMaterial.get(productId(cartProduct))} onClose={() => setCartProduct(null)} onSubmit={confirmAddProductToCart} /> : null}
       {cartOpen ? <IssueCartModal cart={issueCart} warehouses={activeWarehouses.filter((warehouse) => warehouse.type !== 'DAMAGED')} projects={projects} employees={employees} form={issueForm} saving={saving} onChangeForm={setIssueForm} onUpdateItem={updateCartItem} onRemoveItem={removeCartItem} onClose={() => setCartOpen(false)} onClear={clearIssueCart} onSubmit={submitIssueCart} /> : null}
       {warehouseDeleteModal && canDeleteWarehouse ? <PermanentWarehouseDeleteModal state={warehouseDeleteModal} saving={saving} onClose={() => setWarehouseDeleteModal(null)} onChange={setWarehouseDeleteModal} onSubmit={deleteWarehousePermanently} /> : null}
+      {productsDeleteOpen && canDeleteWarehouse ? <UnlinkedProductsDeleteModal onClose={() => setProductsDeleteOpen(false)} onComplete={async (result) => {
+        const deletedIds = new Set(result.deletedMaterialIds || []);
+        setProductsDeleteOpen(false);
+        if (deletedIds.has(productId(detailsProduct))) setDetailsProduct(null);
+        if (deletedIds.has(productId(barcodeResult))) setBarcodeResult(null);
+        setIssueCart((prev) => prev.filter((item) => !deletedIds.has(productId(item.product))));
+        setInfo(`تم حذف ${result.deletedMaterialsCount} منتجاً محدداً نهائياً.`);
+        await load(true);
+      }} /> : null}
       {custodyResetOpen && canResetTechnicianCustodies ? <TechnicianCustodyResetModal employees={employees} holders={openCustodiesData.holders || []} onClose={() => setCustodyResetOpen(false)} onComplete={async (result) => {
         setInfo(`تمت تهيئة ذمم ${result.technician.fullName} وحذف ${result.deletedCustodiesCount} ذمة مفتوحة.`);
         setCustodyResetOpen(false);

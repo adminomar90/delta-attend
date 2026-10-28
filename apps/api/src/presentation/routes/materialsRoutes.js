@@ -19,6 +19,8 @@ import {
   listMaterialCategories,
   renameMaterialCategory,
   deleteMaterialCategory,
+  previewUnlinkedProducts,
+  deleteUnlinkedProducts,
   listWarehouses,
   createWarehouse,
   updateWarehouse,
@@ -42,6 +44,7 @@ import {
   confirmReceipt,
   cancelRemainingRequest,
   archiveMaterialRequest,
+  deleteMaterialRequest,
   openCustodiesSummary,
 } from '../controllers/materialsRequestController.js';
 import {
@@ -115,6 +118,8 @@ const productUpload = uploadDocumentMiddleware.fields([
 ]);
 
 materialsRoutes.get('/catalog/categories', listMaterialCategories);
+materialsRoutes.get('/catalog/unlinked-preview', previewUnlinkedProducts);
+materialsRoutes.delete('/catalog/unlinked', deleteUnlinkedProducts);
 materialsRoutes.patch('/catalog/categories/:category', canManageMaterialCatalog, renameMaterialCategory);
 materialsRoutes.delete('/catalog/categories/:category', canManageMaterialCatalog, deleteMaterialCategory);
 materialsRoutes.get('/catalog/barcode/:barcode', getMaterialByBarcode);
@@ -136,6 +141,7 @@ materialsRoutes.get('/employees', listMaterialEmployees);
 materialsRoutes.get('/approvals/requests/pending', canManageMaterialInventory, listMaterialRequestsForApprovals);
 materialsRoutes.post('/requests', canCreateMaterialRequests, createMaterialRequest);
 materialsRoutes.get('/requests/:id', getMaterialRequest);
+materialsRoutes.delete('/requests/:id', canManageMaterialInventory, deleteMaterialRequest);
 materialsRoutes.patch('/requests/:id', canCreateMaterialRequests, updateMaterialRequest);
 materialsRoutes.patch(
   '/requests/:id/review',

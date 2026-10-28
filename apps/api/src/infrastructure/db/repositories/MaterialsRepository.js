@@ -155,12 +155,27 @@ export class MaterialsRepository {
 
   async findMaterialIdsUsedOutsideWarehouse(materialIds, warehouseId) {
     if (!materialIds.length) return [];
-    const filter = { material: { $in: materialIds }, warehouse: { $ne: warehouseId } };
-    const [balances, transactions] = await Promise.all([
-      StockBalanceModel.distinct('material', filter),
-      StockTransactionModel.distinct('material', filter),
-    ]);
-    return [...new Set([...balances, ...transactions].filter(Boolean).map(String))];
+    const warehouses = await WarehouseModel.distinct('_id', { _id: { $ne: warehouseId } });
+    return StockBalanceModel.distinct('material', { material: { $in: materialIds }, warehouse: { $in: warehouses } });
+  }
+
+  async findUnlinkedMaterialIds() {
+    const warehouses = await WarehouseModel.distinct('_id');
+    const linked = await StockBalanceModel.distinct('material', { warehouse: { $in: warehouses } });
+    return MaterialModel.distinct('_id', { _id: { $nin: linked } });
+  }
+
+  async findMaterialsForDeletion(materialIds) {
+    return MaterialModel.find({ _id: { $in: materialIds } })
+      .select('name code barcode category brand model unit active productStatus description storageLocation shelfSection createdAt')
+      .sort({ name: 1, _id: 1 }).lean();
+  }
+
+  async deleteUnlinkedMaterialInventory(materialIds) {
+    const transactions = await StockTransactionModel.deleteMany({ material: { $in: materialIds } });
+    const balances = await StockBalanceModel.deleteMany({ material: { $in: materialIds } });
+    const materials = await this.deleteMaterialsByIds(materialIds);
+    return { deletedMaterialsCount: materials.deletedCount, deletedBalancesCount: balances.deletedCount, deletedTransactionsCount: transactions.deletedCount };
   }
 
   async deleteMaterialsByIds(materialIds) {
@@ -281,7 +296,7 @@ export class MaterialsRepository {
   }
 
   async listRequests(filter = {}, options = {}) {
-    const query = MaterialRequestModel.find(filter)
+    const query = MaterialRequestModel.find({ ...filter, deletedAt: null })
       .populate(requestPopulate)
       .sort(options.sort || { createdAt: -1 });
 

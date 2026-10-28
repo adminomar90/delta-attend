@@ -1,4 +1,4 @@
-import { reviewInventoryRequest, prepareInventoryRequest, acceptInventoryReceipt, isWarehouseOperator, cancelRemainingInventoryRequest, withInventoryRequestLock } from '../../application/services/inventoryWorkflowService.js';
+import { reviewInventoryRequest, prepareInventoryRequest, acceptInventoryReceipt, isWarehouseOperator, cancelRemainingInventoryRequest, withInventoryRequestLock, deleteInventoryRequest } from '../../application/services/inventoryWorkflowService.js';
 import { sendWorkflowResult } from './inventoryWorkflowResponse.js';
 import { CustomerRepository } from '../../infrastructure/db/repositories/CustomerRepository.js';
 import { userCanSeeCustomer } from '../../application/services/customerAccessService.js';
@@ -83,7 +83,7 @@ export const listMaterialEmployees = asyncHandler(async (_req, res) => {
 export const createMaterialRequest = asyncHandler(async (req, res) => {
   if (req.body.operationKey) {
     const previous = await materialsRepository.findRequestByOperationKey(req.body.operationKey);
-    if (previous) { await assertRequestReadable(req, previous); return res.json({ request: previous, alreadyApplied: true }); }
+    if (previous) { await assertRequestReadable(req, previous); if (previous.deletedAt) throw new AppError('الطلب السابق محذوف؛ أنشئ طلباً جديداً', 409); return res.json({ request: previous, alreadyApplied: true }); }
   }
   const target = await resolveTarget(req, req.body);
   const projectId = target.project;
@@ -313,6 +313,7 @@ export const updateMaterialRequest = asyncHandler(async (req, res) => withInvent
   }
 
   await assertRequestReadable(req, request);
+  if (request.deletedAt) throw new AppError('الطلب محذوف ولا يمكن تعديله', 409);
   if (request.pendingReceipt) throw new AppError('توجد دفعة مجهزة أو عملية جارية على الطلب', 409);
 
   const editableStatuses = ['REJECTED', 'PENDING_MANAGER_APPROVAL', 'PENDING_SUPPLIER_APPROVAL', 'NEW', 'UNDER_REVIEW', 'APPROVED'];
@@ -477,6 +478,12 @@ export const updateMaterialRequest = asyncHandler(async (req, res) => withInvent
 
 export const reviewMaterialRequest = asyncHandler(async (req, res) => {
   return sendWorkflowResult(req, res, 'MATERIAL_REQUEST_REVIEWED', await reviewInventoryRequest(req.params.id, req.user, req.body));
+});
+
+export const deleteMaterialRequest = asyncHandler(async (req, res) => {
+  const result = await deleteInventoryRequest(req.params.id, req.user, req.body, { maxFailures: env.maxAuthFailures, lockMinutes: env.lockMinutes });
+  if (!result.alreadyApplied) await auditService.log({ actorId: req.user.id, action: 'MATERIAL_REQUEST_DELETED', entityType: 'MATERIAL_REQUEST', entityId: req.params.id, after: result, req });
+  res.json(result);
 });
 
 export const prepareMaterialRequest = asyncHandler(async (req, res) => {

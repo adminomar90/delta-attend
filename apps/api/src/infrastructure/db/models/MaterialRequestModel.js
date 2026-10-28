@@ -329,6 +329,8 @@ const materialRequestSchema = new mongoose.Schema(
       default: false,
       index: true,
     },
+    deletedAt: { type: Date, default: null, index: true },
+    deletedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
     archivedAt: {
       type: Date,
       default: null,

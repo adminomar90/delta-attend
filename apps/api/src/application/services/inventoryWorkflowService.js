@@ -14,6 +14,7 @@ import { sequenceService } from './sequenceService.js';
 import { Permission } from '../../shared/constants.js';
 import { hasPermission } from '../../shared/permissions.js';
 import { AppError } from '../../shared/errors.js';
+import { verifyPrimaryAdminPassword } from './primaryAdminPasswordService.js';
 
 const id = (value) => String(value?._id || value || '');
 const q = (value) => Number(Number(value || 0).toFixed(4));
@@ -96,6 +97,7 @@ const syncRequest = async (request, custody, extra = {}) => {
 export const reviewInventoryRequest = async (requestId, actor, body) => {
   storekeeper(actor);
   return locked(requestId, async (request) => {
+    if (request.deletedAt) fail('الطلب محذوف ولا يمكن اعتماده');
     if (!['PENDING_MANAGER_APPROVAL', 'NEW', 'UNDER_REVIEW'].includes(request.status)) fail('يجب إعادة تقديم الطلب المرفوض؛ ولا يمكن تغيير الاعتماد بعد بدء التجهيز');
     if (recipientId(request) === id(actor.id)) fail('لا يجوز اعتماد طلب مواد على ذمتك الشخصية', 403);
     const action = String(body.action || 'APPROVE_FULL').toUpperCase();
@@ -128,6 +130,7 @@ const releaseBatch = async (request, batch, actor, rejection = null) => {
 export const prepareInventoryRequest = async (requestId, actor, body) => {
   storekeeper(actor);
   return locked(requestId, async (request) => {
+    if (request.deletedAt) fail('الطلب محذوف ولا يمكن تجهيزه');
     if (['ROLLING_BACK', 'RESERVING'].includes(request.pendingReceipt?.state)) { await releaseBatch(request, request.pendingReceipt, actor); request.pendingReceipt = null; }
     if (request.pendingReceipt?.state === 'READY') fail('الدفعة مجهزة؛ بانتظار قبول الفني للاستلام');
     if (new Set(request.items.map((line) => id(line.material))).size !== request.items.length) fail('الطلب القديم يحتوي بنوداً مكررة؛ صححها قبل التجهيز');
@@ -163,6 +166,7 @@ export const prepareInventoryRequest = async (requestId, actor, body) => {
 };
 
 export const acceptInventoryReceipt = async (requestId, actor, body) => locked(requestId, async (request) => {
+  if (request.deletedAt) fail('الطلب محذوف ولا يقبل الاستلام');
   if (recipientId(request) !== id(actor.id)) fail('قبول أو رفض الاستلام للفني المستلم حصراً', 403);
   if (!['PENDING_RECEIPT', 'PREPARED'].includes(request.status)) {
     if (body.receiptToken && request.lastReceiptToken === body.receiptToken) return { request, alreadyApplied: true };
@@ -369,6 +373,7 @@ export const closeInventoryCustody = async (custodyId, actor) => {
 };
 
 export const cancelRemainingInventoryRequest = async (requestId, actor, body) => locked(requestId, async (initial) => {
+  if (initial.deletedAt) fail('الطلب محذوف بالفعل');
   if (!isWarehouseOperator(actor) && recipientId(initial) !== id(actor.id)) fail('إلغاء الباقي للفني المستلم أو أمين المخزن فقط', 403);
   if (!String(body.notes || '').trim()) fail('سبب إلغاء الكميات غير المستلمة مطلوب', 400);
   if (['CLOSED', 'CANCELLED', 'REJECTED', 'RECONCILED'].includes(initial.status)) fail('الطلب منتهٍ بالفعل');
@@ -386,3 +391,29 @@ export const cancelRemainingInventoryRequest = async (requestId, actor, body) =>
   await Request.updateOne({ _id: requestId }, { $set: { items, status, pendingReceipt: null }, $push: { workflowEvents: event(actor, 'UNRECEIVED_QUANTITIES_CANCELLED', { notes: body.notes, previousApproved: request.items.map((line) => ({ material: line.material, quantity: line.approvedQty })) }) } });
   return { request: await Request.findById(requestId), notice: { userId: recipientId(request), message: 'ألغي باقي الكميات غير المستلمة؛ تبقى المواد المستلمة على الذمة حتى تصفيتها' } };
 });
+
+export const deleteInventoryRequest = async (requestId, actor, body, passwordOptions = {}) => {
+  if (actor.role !== 'GENERAL_MANAGER') fail('حذف الطلبات متاح للمدير العام فقط', 403);
+  const authorization = await verifyPrimaryAdminPassword({ actor, password: body.adminPassword, ...passwordOptions });
+  return locked(requestId, async (initial) => {
+    if (initial.deletedAt) return { deleted: true, alreadyApplied: true, requestId: id(initial), requestNo: initial.requestNo, ...authorization };
+    // A receipt that already started debiting stock must finish before deletion.
+    const batch = initial.pendingReceipt;
+    if (batch?.state === 'ISSUING') fail('بدأ صرف الدفعة؛ أكمل قبول الاستلام أولاً ثم احذف الطلب');
+    if (batch) {
+      if (!['READY', 'RESERVING', 'ROLLING_BACK', 'REJECTING'].includes(batch.state)) fail('توجد دفعة غير مكتملة؛ أكمل معالجتها أولاً');
+      const prepared = ['READY', 'REJECTING'].includes(batch.state) || batch.legacy;
+      await releaseBatch(initial, batch, actor, prepared ? { notes: 'فك الحجز بسبب حذف الطلب' } : null);
+    }
+    const request = await Request.findById(requestId);
+    const items = request.items.map((line) => ({ ...plain(line), approvedQty: q(line.deliveredQty), preparedQty: q(line.deliveredQty), lineStatus: q(line.deliveredQty) > 0 ? 'DELIVERED' : 'CANCELLED' }));
+    const custody = await Custody.findOne({ request: requestId });
+    const received = items.some((line) => q(line.deliveredQty) > 0) || !!custody;
+    const status = !received ? 'CANCELLED' : custody?.status === 'CLOSED' || ['CLOSED', 'RECONCILED'].includes(request.status) ? 'CLOSED' : custody?.status === 'PENDING_RECONCILIATION' ? 'PENDING_RECONCILIATION' : 'PENDING_SETTLEMENT';
+    // Preserve the source document for issued stock and custody reconciliation.
+    // All request queues exclude deletedAt, while settlement can still use it.
+    await Request.updateOne({ _id: requestId }, { $set: { items, status, pendingReceipt: null, deletedAt: new Date(), deletedBy: actor.id },
+      $push: { workflowEvents: event(actor, 'REQUEST_DELETED', { ...authorization, previousStatus: initial.status, notes: body.notes || '' }) } });
+    return { deleted: true, requestId: id(request), requestNo: request.requestNo, custodyPreserved: !!custody, ...authorization };
+  });
+};

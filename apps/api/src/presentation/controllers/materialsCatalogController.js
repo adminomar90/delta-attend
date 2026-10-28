@@ -3,10 +3,12 @@ import { auditService } from '../../application/services/auditService.js';
 import { sequenceService } from '../../application/services/sequenceService.js';
 import { notificationService } from '../../application/services/notificationService.js';
 import { deleteWarehouseWithInventory } from '../../application/services/warehouseDeletionService.js';
+import { previewUnlinkedMaterialsDeletion, deleteUnlinkedMaterials } from '../../application/services/unlinkedMaterialsDeletionService.js';
 import { AppError, asyncHandler } from '../../shared/errors.js';
 import { Permission } from '../../shared/constants.js';
 import { hasPermission } from '../../shared/permissions.js';
 import path from 'path';
+import { env } from '../../config/env.js';
 import {
   materialsRepository,
   projectRepository,
@@ -22,6 +24,16 @@ import {
 } from './materialsCommon.js';
 
 const boolFromBody = (value) => value === true || ['true', '1', 'yes', 'on'].includes(String(value || '').toLowerCase());
+
+export const previewUnlinkedProducts = asyncHandler(async (req, res) => {
+  res.json(await previewUnlinkedMaterialsDeletion({ user: req.user, repository: materialsRepository }));
+});
+
+export const deleteUnlinkedProducts = asyncHandler(async (req, res) => {
+  const result = await deleteUnlinkedMaterials({ user: req.user, repository: materialsRepository, adminPassword: req.body.adminPassword, expectedCount: req.body.expectedCount, materialIds: req.body.materialIds, maxFailures: env.maxAuthFailures, lockMinutes: env.lockMinutes });
+  await auditService.log({ actorId: req.user.id, action: 'UNLINKED_MATERIALS_PERMANENTLY_DELETED', entityType: 'MATERIAL_CATALOG', entityId: 'UNLINKED', after: result, req });
+  res.json(result);
+});
 const fileToAttachment = (file) => ({
   fileName: file.filename,
   originalName: file.originalname,

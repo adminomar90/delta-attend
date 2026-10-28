@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import mongoose from 'mongoose';
 import express from 'express';
+import bcrypt from 'bcryptjs';
 import { UserModel } from '../../src/infrastructure/db/models/UserModel.js';
 import { WarehouseModel } from '../../src/infrastructure/db/models/WarehouseModel.js';
 import { MaterialModel } from '../../src/infrastructure/db/models/MaterialModel.js';
@@ -28,6 +29,7 @@ test('authenticated inventory endpoints enforce catalog selection, roles, recipi
       { fullName: 'Test Technician', email: 'tech@test.invalid', passwordHash: 'test', role: 'TECHNICAL_STAFF' },
       { fullName: 'Test Storekeeper', email: 'keeper@test.invalid', passwordHash: 'test', role: 'WAREHOUSE_KEEPER' },
       { fullName: 'Other Technician', email: 'other@test.invalid', passwordHash: 'test', role: 'TECHNICAL_STAFF' },
+      { fullName: 'Primary Admin', email: 'admin@delta.com', passwordHash: await bcrypt.hash('Isolated-Admin-Password', 4), role: 'GENERAL_MANAGER' },
     ]);
     const tokens = users.map((user) => authTokenService.sign({ sub: String(user._id), role: user.role }));
     const warehouse = await WarehouseModel.create({ name: 'Main', code: 'MAIN' });
@@ -60,6 +62,13 @@ test('authenticated inventory endpoints enforce catalog selection, roles, recipi
     assert.equal((await StockBalanceModel.findOne({ material: material._id, warehouse: warehouse._id })).qtyOnHand, 7);
     const cart = await call(1, 'POST', '/stock/cart-issue', { employeeId: users[0]._id, referenceId: randomUUID(), items: [{ materialId: material._id, warehouseId: warehouse._id, quantity: 2 }] }, 201);
     assert.equal(cart.request.status, 'PENDING_MANAGER_APPROVAL');
+    assert.equal((await StockBalanceModel.findOne({ material: material._id, warehouse: warehouse._id })).qtyOnHand, 7);
+    await call(1, 'DELETE', `/requests/${cart.request._id}`, { adminPassword: 'Isolated-Admin-Password' }, 403);
+    await call(3, 'DELETE', `/requests/${cart.request._id}`, {}, 400);
+    await call(3, 'DELETE', `/requests/${cart.request._id}`, { adminPassword: 'wrong' }, 403);
+    await call(3, 'DELETE', `/requests/${cart.request._id}`, { adminPassword: 'Isolated-Admin-Password' });
+    const listed = await call(3, 'GET', '/requests?archived=all');
+    assert.equal(listed.requests.some((request) => request._id === cart.request._id), false);
     assert.equal((await StockBalanceModel.findOne({ material: material._id, warehouse: warehouse._id })).qtyOnHand, 7);
   } finally {
     if (server) { server.closeAllConnections(); await new Promise((resolve) => server.close(resolve)); }
