@@ -1,6 +1,7 @@
 'use client';
 
-import { useEffect, useMemo, useState, useCallback, useId } from 'react';
+import { useEffect, useMemo, useState, useCallback, useId, useRef } from 'react';
+import DeleteMaterialRequestModal from '../../../components/inventory/DeleteMaterialRequestModal';
 import { api } from '../../../lib/api';
 import { authStorage } from '../../../lib/auth';
 import { Permission, hasAnyPermission, hasPermission } from '../../../lib/permissions';
@@ -210,6 +211,8 @@ export default function MaterialsPage() {
   const [customerError, setCustomerError] = useState('');
   const [users, setUsers] = useState([]);
   const [requests, setRequests] = useState([]);
+  const deletedRequestIds = useRef(new Set());
+  const [requestToDelete, setRequestToDelete] = useState(null);
   const [custodies, setCustodies] = useState([]);
   const [reconciliations, setReconciliations] = useState([]);
   const [summary, setSummary] = useState(null);
@@ -394,11 +397,11 @@ export default function MaterialsPage() {
       setProjects(pRes.projects || []);
       setUsers((uRes.users || []).filter((u) => u?.active));
       setAllUsers((allURes.users || []).filter((u) => u?.active));
-      setRequests(rqRes.requests || []);
+      setRequests((rqRes.requests || []).filter((request) => !request.deletedAt && !deletedRequestIds.current.has(request._id)));
       setCustodies(cuRes.custodies || []);
       setReconciliations(rcRes.reconciliations || []);
       setSummary(smRes);
-      setArchivedRequests(arRes.requests || []);
+      setArchivedRequests((arRes.requests || []).filter((request) => !request.deletedAt && !deletedRequestIds.current.has(request._id)));
       setOpenCustodiesData(ocRes || { holders: [], totalHolders: 0 });
     } catch (err) { setError(err.message || 'تعذر تحميل البيانات'); }
     finally { setLoading(false); }
@@ -510,6 +513,22 @@ export default function MaterialsPage() {
   };
 
   /* ────── archive request ────── */
+  const handleDeleteRequest = async (request) => {
+    if (!isGM) throw new Error('حذف الطلبات متاح للمدير العام فقط');
+    setBusy('delete-request'); setError(''); setInfo('');
+    try {
+      await api.request(`/materials/requests/${request._id}`, { method: 'DELETE', body: '{}', signal: AbortSignal.timeout(30000) });
+      deletedRequestIds.current.add(request._id);
+      setRequests((prev) => prev.filter((item) => item._id !== request._id));
+      setArchivedRequests((prev) => prev.filter((item) => item._id !== request._id));
+      if (detailModal?._id === request._id) setDetailModal(null);
+      setInfo(`تم حذف الطلب ${request.requestNo} من القوائم. الذمم والحركات المصروفة محفوظة.`);
+      void api.get('/materials/stock').then((result) => setStockBalances(result.balances || [])).catch(() => {});
+    } catch (err) {
+      throw new Error(['TimeoutError', 'AbortError'].includes(err.name) ? 'انتهت مهلة الاتصال؛ حدّث القائمة للتحقق من حالة الطلب.' : err.message);
+    } finally { setBusy(''); }
+  };
+
   const handleArchive = async (req) => {
     if (!confirm(`هل تريد أرشفة الطلب ${req.requestNo}؟ سيختفي من القائمة الرئيسية.`)) return;
     setBusy('archive');
@@ -750,6 +769,7 @@ export default function MaterialsPage() {
 
   return (
     <>
+      {requestToDelete && isGM ? <DeleteMaterialRequestModal request={requestToDelete} onClose={() => setRequestToDelete(null)} onDelete={handleDeleteRequest} /> : null}
       {error && <div style={{ padding: '10px 16px', margin: '0 0 12px', borderRadius: 8, background: 'rgba(229,115,115,.15)', color: '#e57373', fontWeight: 500 }}>{error}</div>}
       {info && <div style={{ padding: '10px 16px', margin: '0 0 12px', borderRadius: 8, background: 'rgba(129,199,132,.15)', color: '#81c784', fontWeight: 500 }}>{info}</div>}
 
@@ -851,6 +871,7 @@ export default function MaterialsPage() {
                         <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
                           <button className="btn btn-soft" style={{ fontSize: 11, padding: '3px 8px' }} type="button" onClick={() => sendRequestWhatsapp(req)}>واتساب</button>
                           <button className="btn btn-soft" style={{ fontSize: 11, padding: '3px 8px' }} type="button" onClick={() => downloadRequestPdf(req)}>PDF</button>
+                          {isGM ? <button className="btn btn-danger btn-sm" style={{ fontSize: 11, padding: '3px 8px' }} type="button" disabled={!!busy || req.pendingReceipt?.state === 'ISSUING'} onClick={() => setRequestToDelete(req)}>حذف</button> : null}
                           {canEditBeforePreparerApproval(req) && <button className="btn btn-primary btn-sm" style={{ fontSize: 11, padding: '3px 10px' }} type="button" disabled={!!busy} onClick={() => openEditRequest(req)}>تعديل</button>}
                           {/* Step 2: Manager approves */}
                           {canReview && !isMyRequest(req) && ['PENDING_MANAGER_APPROVAL', 'NEW', 'UNDER_REVIEW'].includes(req.status) && <button className="btn btn-soft" style={{ fontSize: 11, padding: '3px 8px', color: '#81c784' }} type="button" disabled={!!busy} onClick={() => openReview(req)}>اعتماد أمين المخزن</button>}
