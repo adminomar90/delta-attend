@@ -41,6 +41,7 @@ const networkCustomerSchema = new mongoose.Schema(
       default: '',
       trim: true,
     },
+    logoDataUrl: { type: String, default: '', maxlength: 175000 },
     contactInfo: {
       phones: {
         type: [String],

@@ -56,6 +56,18 @@ const networkDeviceSchema = new mongoose.Schema(
       default: '',
       trim: true,
     },
+    username: { type: String, default: '', trim: true },
+    extensionNumber: { type: String, default: '', trim: true },
+    cameraNumber: { type: String, default: '', trim: true },
+    switchNumber: { type: String, default: '', trim: true },
+    switchPort: { type: String, default: '', trim: true },
+    portNumber: { type: String, default: '', trim: true },
+    patchPanelPort: { type: String, default: '', trim: true },
+    patchPanelNumber: { type: String, default: '', trim: true },
+    connectedDeviceType: { type: String, default: '', trim: true },
+    vlanNumber: { type: String, default: '', trim: true },
+    portCount: { type: Number, default: null, min: 1, validate: { validator: (value) => value == null || Number.isSafeInteger(value), message: 'عدد المنافذ يجب أن يكون عدداً صحيحاً موجباً' } },
+    secret: { type: mongoose.Schema.Types.ObjectId, ref: 'NetworkSecret', default: null },
     physicalLocation: {
       type: String,
       default: '',
@@ -107,7 +119,7 @@ networkDeviceSchema.index(
   {
     unique: true,
     partialFilterExpression: {
-      managementIp: { $type: 'string', $ne: '' },
+      managementIp: { $type: 'string', $gt: '' },
     },
   },
 );
@@ -117,7 +129,7 @@ networkDeviceSchema.index(
   {
     unique: true,
     partialFilterExpression: {
-      serialNumber: { $type: 'string', $ne: '' },
+      serialNumber: { $type: 'string', $gt: '' },
     },
   },
 );

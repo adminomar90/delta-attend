@@ -37,6 +37,12 @@ import { NetworkDocsRepository } from '../../infrastructure/db/repositories/Netw
 import { buildNetworkCustomerPdfBuffer } from '../../infrastructure/reports/networkDocsPdfBuilder.js';
 import { AppError, asyncHandler } from '../../shared/errors.js';
 import { decryptSensitiveValue, encryptSensitiveValue } from '../../shared/security.js';
+import { normalizeAttachmentFileName } from '../../shared/attachmentFileName.js';
+import { Permission } from '../../shared/constants.js';
+import { hasPermission } from '../../shared/permissions.js';
+import { buildCameraWorkbook, parseCameraWorkbook, planCameraImport, cameraImportToken, verifyCameraImportToken } from '../../application/services/cameraExcelService.js';
+import { pingStoredNetworkAddress } from '../../application/services/networkPingService.js';
+import { normalizeNetworkCustomerLogo } from '../../shared/networkCustomerLogo.js';
 
 const repository = new NetworkDocsRepository();
 
@@ -106,7 +112,8 @@ const storeAttachmentBuffer = async ({
   const targetDir = path.join(baseDir, ...relativeParts);
   await ensureDirectory(targetDir);
 
-  const filename = `${Date.now()}-${Math.round(Math.random() * 1e9)}-${sanitizeFileName(file.originalname)}`;
+  const extension = path.extname(normalizeAttachmentFileName(file.originalname)).replace(/[^a-zA-Z0-9.]/g, '');
+  const filename = `${Date.now()}-${crypto.randomUUID()}${extension}`;
   const storagePath = path.join(targetDir, filename);
   await fs.writeFile(storagePath, file.buffer);
 
@@ -187,6 +194,10 @@ const logNetworkChange = async ({
 };
 
 const toCustomerResponse = (customer) => customer ? ({ ...customer.toObject(), id: toId(customer) }) : null;
+const toCustomerAuditResponse = (customer) => {
+  const { logoDataUrl, ...response } = toCustomerResponse(customer);
+  return { ...response, hasLogo: !!logoDataUrl };
+};
 const toBranchResponse = (branch) => branch ? ({ ...branch.toObject(), id: toId(branch) }) : null;
 
 const toSecretSummary = (secret) => {
@@ -213,6 +224,8 @@ const toEntityResponse = (entity) => {
     ...plain,
     id: toId(plain),
   };
+  delete response.cameraImportLock;
+  if (typeof plain.originalName === 'string') response.originalName = normalizeAttachmentFileName(plain.originalName);
 
   if (plain.secret) {
     response.secret = toSecretSummary(plain.secret);
@@ -278,8 +291,9 @@ const upsertSecret = async ({
   secretType,
   rawSecret,
   req,
+  preserveWhitespace = false,
 }) => {
-  const value = toCleanString(rawSecret);
+  const value = preserveWhitespace ? String(rawSecret ?? '') : toCleanString(rawSecret);
   if (!value) {
     return null;
   }
@@ -294,7 +308,7 @@ const upsertSecret = async ({
   if (existing) {
     return repository.updateSecretById(existing._id, {
       ...encrypted,
-      maskedPreview: buildMaskedPreview(value),
+      maskedPreview: secretType === SecretType.DEVICE_PASSWORD ? '••••••••' : buildMaskedPreview(value),
       rotatedAt: new Date(),
     });
   }
@@ -304,7 +318,7 @@ const upsertSecret = async ({
     ownerId: String(ownerId),
     secretType,
     ...encrypted,
-    maskedPreview: buildMaskedPreview(value),
+    maskedPreview: secretType === SecretType.DEVICE_PASSWORD ? '••••••••' : buildMaskedPreview(value),
     createdBy: req.user.id,
   });
 };
@@ -321,6 +335,7 @@ const normalizeCustomerPayload = (body = {}, { partial = false } = {}) => {
   }
 
   if (!partial || hasOwn(body, 'companyAddress')) payload.companyAddress = toCleanString(body.companyAddress);
+  if (!partial || hasOwn(body, 'logoDataUrl')) payload.logoDataUrl = normalizeNetworkCustomerLogo(body.logoDataUrl);
   if (!partial || hasOwn(body, 'notes')) payload.notes = toCleanString(body.notes);
   if (!partial || hasOwn(body, 'tags')) payload.tags = toStringArray(body.tags);
 
@@ -392,7 +407,7 @@ const normalizeDevicePayload = (body = {}, { partial = false } = {}) => {
   const payload = {};
 
   if (!partial || hasOwn(body, 'name')) {
-    const name = toCleanString(body.name);
+    const name = toCleanString(body.name) || (body.deviceType === DeviceType.CAMERA && toCleanString(body.cameraNumber) ? `كاميرا ${toCleanString(body.cameraNumber)}` : body.deviceType === DeviceType.UPS && toCleanString(body.patchPanelNumber) && toCleanString(body.patchPanelPort) ? `باج ${toCleanString(body.patchPanelNumber)} / منفذ ${toCleanString(body.patchPanelPort)}` : body.deviceType === DeviceType.UPS && toCleanString(body.portNumber) ? `منفذ ${toCleanString(body.portNumber)}` : '');
     if (!name) {
       throw new AppError('name is required', 400);
     }
@@ -405,9 +420,24 @@ const normalizeDevicePayload = (body = {}, { partial = false } = {}) => {
 
   if (!partial || hasOwn(body, 'vendor')) payload.vendor = toCleanString(body.vendor);
   if (!partial || hasOwn(body, 'model')) payload.model = toCleanString(body.model);
+  if (!partial || hasOwn(body, 'portCount')) {
+    const count = body.portCount === '' || body.portCount == null ? null : Number(body.portCount);
+    if (count !== null && (!Number.isSafeInteger(count) || count < 1)) throw new AppError('عدد المنافذ يجب أن يكون عدداً صحيحاً موجباً', 400);
+    payload.portCount = count;
+  }
   if (!partial || hasOwn(body, 'serialNumber')) payload.serialNumber = toCleanString(body.serialNumber).toUpperCase();
   if (!partial || hasOwn(body, 'macAddress')) payload.macAddress = normalizeMacAddress(body.macAddress);
   if (!partial || hasOwn(body, 'managementIp')) payload.managementIp = normalizeIpv4(body.managementIp, { allowEmpty: true });
+  if (!partial || hasOwn(body, 'username')) payload.username = toCleanString(body.username);
+  if (!partial || hasOwn(body, 'extensionNumber')) payload.extensionNumber = toCleanString(body.extensionNumber);
+  for (const field of ['cameraNumber', 'switchNumber', 'switchPort', 'portNumber', 'patchPanelPort', 'patchPanelNumber', 'connectedDeviceType', 'vlanNumber']) {
+    if (!partial || hasOwn(body, field)) payload[field] = toCleanString(body[field]);
+  }
+  if (body.deviceType === DeviceType.CAMERA && hasOwn(body, 'cameraNumber') && !payload.cameraNumber) throw new AppError('رقم الكاميرا مطلوب', 400);
+  if (body.deviceType === DeviceType.UPS && hasOwn(body, 'portNumber') && !payload.portNumber) throw new AppError('رقم المنفذ مطلوب', 400);
+  if (body.deviceType === DeviceType.UPS && ['patchPanelPort', 'patchPanelNumber'].some((field) => hasOwn(body, field) && !payload[field])) throw new AppError('رقم الباج بنل ورقم المنفذ فيه مطلوبان', 400);
+  if (payload.vlanNumber && (!/^\d+$/.test(payload.vlanNumber) || Number(payload.vlanNumber) < 1 || Number(payload.vlanNumber) > 4094)) throw new AppError('رقم VLAN يجب أن يكون بين 1 و4094', 400);
+  if (hasOwn(body, 'password') && (typeof body.password !== 'string' || body.password.length > 4096)) throw new AppError('كلمة مرور الجهاز غير صالحة', 400);
   if (!partial || hasOwn(body, 'physicalLocation')) payload.physicalLocation = toCleanString(body.physicalLocation);
   if (!partial || hasOwn(body, 'rackName')) payload.rackName = toCleanString(body.rackName);
   if (!partial || hasOwn(body, 'rackPosition')) payload.rackPosition = toCleanString(body.rackPosition);
@@ -623,11 +653,15 @@ export const listNetworkCustomers = asyncHandler(async (req, res) => {
   ]);
 
   const branchCountMap = new Map();
+  const branchSummaryMap = new Map();
   const deviceCountMap = new Map();
 
   for (const branch of branches) {
     const customerId = toId(branch.customer);
     branchCountMap.set(customerId, (branchCountMap.get(customerId) || 0) + 1);
+    const summaries = branchSummaryMap.get(customerId) || [];
+    summaries.push({ id: toId(branch), name: branch.name, city: branch.city || '', address: branch.address || '', documentationStatus: branch.documentationStatus });
+    branchSummaryMap.set(customerId, summaries);
   }
 
   for (const device of devices) {
@@ -639,6 +673,7 @@ export const listNetworkCustomers = asyncHandler(async (req, res) => {
     customers: customers.map((customer) => ({
       ...toCustomerResponse(customer),
       branchCount: branchCountMap.get(toId(customer)) || 0,
+      branches: branchSummaryMap.get(toId(customer)) || [],
       deviceCount: deviceCountMap.get(toId(customer)) || 0,
     })),
   });
@@ -659,7 +694,7 @@ export const createNetworkCustomer = asyncHandler(async (req, res) => {
     entityType: 'NETWORK_CUSTOMER',
     entityId: customer._id,
     customerId: customer._id,
-    after: toCustomerResponse(fullCustomer),
+    after: toCustomerAuditResponse(fullCustomer),
   });
 
   res.status(201).json({ customer: toCustomerResponse(fullCustomer) });
@@ -690,7 +725,7 @@ export const getNetworkCustomerWorkspace = asyncHandler(async (req, res) => {
 
 export const updateNetworkCustomer = asyncHandler(async (req, res) => {
   const customer = await ensureCustomerExists(req.params.id);
-  const before = toCustomerResponse(customer);
+  const before = toCustomerAuditResponse(customer);
   const payload = normalizeCustomerPayload(req.body, { partial: true });
   const updated = await repository.updateCustomerById(customer._id, payload);
 
@@ -702,7 +737,7 @@ export const updateNetworkCustomer = asyncHandler(async (req, res) => {
     entityId: customer._id,
     customerId: customer._id,
     before,
-    after: toCustomerResponse(updated),
+    after: toCustomerAuditResponse(updated),
     reason: ensureReasonIfProvided(req.body.changeReason),
   });
 
@@ -791,16 +826,105 @@ export const listBranchDevices = asyncHandler(async (req, res) => {
   res.json({ devices: devices.map(toEntityResponse) });
 });
 
+export const pingNetworkDevice = asyncHandler(async (req, res) => {
+  const device = await repository.findDeviceById(req.params.id);
+  if (!device) throw new AppError('الجهاز غير موجود', 404);
+  if (!device.managementIp) throw new AppError('سجّل عنوان IP للجهاز قبل إجراء الفحص', 400);
+  const result = await pingStoredNetworkAddress(device.managementIp);
+  res.setHeader('Cache-Control', 'private, no-store');
+  res.json({ ping: { deviceId: toId(device), ...result } });
+});
+
+export const exportNetworkCamerasExcel = asyncHandler(async (req, res) => {
+  const type = req.networkExcelType || DeviceType.CAMERA, recorder = type === DeviceType.NVR;
+  const group = type === DeviceType.CAMERA ? 'CAMERAS' : recorder ? 'RECORDERS' : 'DEVICES';
+  const branch = await ensureBranchExists(req.params.branchId);
+  const template = req.query.template === '1', includePasswords = !template && req.query.includePasswords === '1';
+  if (includePasswords && !hasPermission(req.user, Permission.VIEW_NETWORK_SECRETS)) throw new AppError('تصدير كلمات المرور يحتاج صلاحية عرض أسرار الشبكة', 403);
+  const devices = template ? [] : await repository.listDevices({ branch: branch._id, deviceType: type });
+  const secrets = includePasswords ? await repository.findSecretsByIds(devices.map((device) => toId(device.secret)).filter(Boolean)) : [];
+  const passwords = new Map(secrets.map((secret) => [toId(secret), decryptSensitiveValue(secret)]));
+  const rows = devices.map((device) => ({ portNumber: device.portNumber || device.name, patchPanelPort: device.patchPanelPort, patchPanelNumber: device.patchPanelNumber, connectedDeviceType: device.connectedDeviceType, vlanNumber: device.vlanNumber, vendor: device.vendor, serialNumber: device.serialNumber, macAddress: device.macAddress, physicalLocation: device.physicalLocation, notes: device.notes, name: device.name, model: device.model, portCount: device.portCount, cameraNumber: device.cameraNumber || device.name, managementIp: device.managementIp, switchNumber: device.switchNumber,
+    switchPort: device.switchPort, username: device.username, extensionNumber: device.extensionNumber, password: includePasswords ? passwords.get(toId(device.secret)) || '' : '' }));
+  const buffer = await buildCameraWorkbook(rows, type);
+  if (!template) await auditService.log({ actorId: req.user.id, action: `NETWORK_${group}_EXCEL_EXPORTED`, entityType: 'NETWORK_BRANCH', entityId: branch._id, after: { deviceType: type, count: rows.length, includePasswords }, req });
+  res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+  res.setHeader('Content-Disposition', `attachment; filename="${type.toLowerCase()}-${template ? 'template' : branch._id}.xlsx"`);
+  res.setHeader('Cache-Control', 'private, no-store'); res.send(buffer);
+});
+
+const loadCameraExcelPlan = async (req) => {
+  if (!req.file || !/\.xlsx$/i.test(req.file.originalname || '')) throw new AppError('اختر ملف Excel بصيغة xlsx', 400);
+  const type = req.networkExcelType || DeviceType.CAMERA;
+  const parsed = await parseCameraWorkbook(req.file.buffer, type);
+  const devices = await repository.listDevices({ branch: req.params.branchId });
+  return { parsed, devices, ...planCameraImport(parsed, devices, type) };
+};
+
+export const previewNetworkCamerasImport = asyncHandler(async (req, res) => {
+  const branch = await ensureBranchExists(req.params.branchId);
+  const { parsed, devices, plan, errors } = await loadCameraExcelPlan(req);
+  const expiresAt = Date.now() + 10 * 60000;
+  const token = errors.length ? null : cameraImportToken({ rows: parsed.rows, devices, branchId: branch._id, userId: req.user.id, expiresAt, key: env.jwtSecret, type: req.networkExcelType || DeviceType.CAMERA });
+  res.setHeader('Cache-Control', 'private, no-store');
+  res.json({ rows: plan.map(({ password, ...row }) => ({ ...row, passwordProvided: !!password })), errors, canImport: !!plan.length && !errors.length,
+    createCount: plan.filter((row) => row.action === 'CREATE').length, updateCount: plan.filter((row) => row.action === 'UPDATE').length, previewToken: token });
+});
+
+export const importNetworkCamerasExcel = asyncHandler(async (req, res) => {
+  const type = req.networkExcelType || DeviceType.CAMERA, camera = type === DeviceType.CAMERA;
+  const branch = await ensureBranchExists(req.params.branchId), lockToken = crypto.randomUUID();
+  if (!await repository.lockCameraImport(branch._id, lockToken)) throw new AppError('يوجد استيراد جارٍ لهذا الفرع؛ انتظر اكتماله', 409);
+  const heartbeat = setInterval(() => repository.refreshCameraImportLock(branch._id, lockToken).catch(() => {}), 20000); heartbeat.unref();
+  try {
+    const { parsed, devices, plan, errors } = await loadCameraExcelPlan(req);
+    if (errors.length) throw new AppError('الملف يحتوي أخطاء؛ أعد معاينة الملف وصححها قبل الاستيراد', 400);
+    if (!verifyCameraImportToken(req.body.previewToken, { rows: parsed.rows, devices, branchId: branch._id, userId: req.user.id, key: env.jwtSecret, type })) throw new AppError('تغير الملف أو بيانات الأجهزة أو انتهت المعاينة؛ أعد المعاينة قبل الحفظ', 409);
+    let createdCount = 0, updatedCount = 0; const failures = [];
+    for (const row of plan) {
+      let createdId = null;
+      try {
+        const body = type === DeviceType.UPS ? { deviceType: type, name: `باج ${row.patchPanelNumber} / منفذ ${row.patchPanelPort}`, model: row.model, patchPanelPort: row.patchPanelPort, patchPanelNumber: row.patchPanelNumber, connectedDeviceType: row.connectedDeviceType, switchPort: row.switchPort, vlanNumber: row.vlanNumber, managementIp: row.managementIp, username: row.username }
+          : !camera ? { ...(type === DeviceType.IP_PBX ? { extensionNumber: row.extensionNumber } : {}), ...(type !== DeviceType.NVR ? { vendor: row.vendor, serialNumber: row.serialNumber, macAddress: row.macAddress, physicalLocation: row.physicalLocation, notes: row.notes } : {}), deviceType: type, name: row.name, model: row.model, portCount: row.portCount, managementIp: row.managementIp, username: row.username }
+          : { deviceType: DeviceType.CAMERA, name: `كاميرا ${row.cameraNumber}`, cameraNumber: row.cameraNumber, managementIp: row.managementIp,
+            switchNumber: row.switchNumber, switchPort: row.switchPort, username: row.username };
+        const payload = normalizeDevicePayload(body, { partial: !!row.deviceId });
+        if (await repository.findDeviceConflict(branch._id, payload, row.deviceId)) throw new AppError('عنوان IP مستخدم لجهاز آخر', 409);
+        let device = row.deviceId ? await repository.updateDeviceById(row.deviceId, payload) : await repository.createDevice({ ...payload, customer: toId(branch.customer), branch: branch._id, createdBy: req.user.id });
+        if (!device) throw new AppError('الجهاز لم يعد موجوداً', 404);
+        if (!row.deviceId) createdId = device._id;
+        const secret = await upsertSecret({ ownerType: 'NETWORK_DEVICE', ownerId: device._id, secretType: SecretType.DEVICE_PASSWORD, rawSecret: row.password, preserveWhitespace: true, req });
+        if (secret) await repository.updateDeviceById(device._id, { secret: secret._id });
+        if (row.deviceId) updatedCount++; else createdCount++;
+      } catch (err) {
+        if (createdId) await repository.deleteDeviceById(createdId);
+        failures.push({ rowNumber: row.rowNumber, message: err.statusCode ? err.message : 'تعذر حفظ هذا الصف؛ أعد المعاينة والمحاولة.' });
+      }
+    }
+    if (createdCount || updatedCount) await markBranchDocumentationChanged(branch._id);
+    const result = { createdCount, updatedCount, failedCount: failures.length, failures };
+    await logNetworkChange({ req, action: `NETWORK_${camera ? 'CAMERAS' : type === DeviceType.NVR ? 'RECORDERS' : 'DEVICES'}_EXCEL_IMPORTED`, changeType: 'IMPORT', entityType: 'NETWORK_BRANCH', entityId: branch._id,
+      customerId: toId(branch.customer), branchId: branch._id, after: { ...result, deviceType: type } });
+    res.json(result);
+  } finally { clearInterval(heartbeat); await repository.unlockCameraImport(branch._id, lockToken); }
+});
+
 export const createBranchDevice = asyncHandler(async (req, res) => {
   const branch = await ensureBranchExists(req.params.branchId);
+  if (branch.cameraImportLock?.until > new Date()) throw new AppError('يوجد استيراد أجهزة جارٍ؛ انتظر اكتماله قبل تعديل أجهزة الفرع', 409);
   const payload = normalizeDevicePayload(req.body);
+  if (await repository.findDeviceConflict(branch._id, payload)) throw new AppError('عنوان IP أو الرقم التسلسلي مستخدم لجهاز آخر في هذا الفرع', 409);
   const device = await repository.createDevice({
     ...payload,
     customer: toId(branch.customer),
     branch: branch._id,
     createdBy: req.user.id,
   });
-  const fullDevice = await repository.findDeviceById(device._id);
+  let fullDevice;
+  try {
+    const secret = await upsertSecret({ ownerType: 'NETWORK_DEVICE', ownerId: device._id, secretType: SecretType.DEVICE_PASSWORD, rawSecret: req.body.password, preserveWhitespace: true, req });
+    fullDevice = secret ? await repository.updateDeviceById(device._id, { secret: secret._id }) : await repository.findDeviceById(device._id);
+  } catch (err) { await repository.deleteDeviceById(device._id); throw err; }
   await markBranchDocumentationChanged(branch._id);
 
   await logNetworkChange({
@@ -822,10 +946,16 @@ export const updateNetworkDevice = asyncHandler(async (req, res) => {
   if (!device) {
     throw new AppError('Device not found', 404);
   }
+  const branch = await ensureBranchExists(toId(device.branch));
+  if (branch.cameraImportLock?.until > new Date()) throw new AppError('يوجد استيراد أجهزة جارٍ؛ انتظر اكتماله قبل تعديل أجهزة الفرع', 409);
 
   const before = toEntityResponse(device);
   const payload = normalizeDevicePayload(req.body, { partial: true });
-  const updated = await repository.updateDeviceById(device._id, payload);
+  if (await repository.findDeviceConflict(toId(device.branch), payload, device._id)) throw new AppError('عنوان IP أو الرقم التسلسلي مستخدم لجهاز آخر في هذا الفرع', 409);
+  let updated = await repository.updateDeviceById(device._id, payload);
+  if (!updated) throw new AppError('الجهاز غير موجود', 404);
+  const secret = await upsertSecret({ ownerType: 'NETWORK_DEVICE', ownerId: device._id, secretType: SecretType.DEVICE_PASSWORD, rawSecret: req.body.password, preserveWhitespace: true, req });
+  if (secret) updated = await repository.updateDeviceById(device._id, { secret: secret._id });
   await markBranchDocumentationChanged(toId(device.branch));
 
   await logNetworkChange({
@@ -842,6 +972,19 @@ export const updateNetworkDevice = asyncHandler(async (req, res) => {
   });
 
   res.json({ device: toEntityResponse(updated) });
+});
+
+export const deleteNetworkDevice = asyncHandler(async (req, res) => {
+  const device = await repository.findDeviceById(req.params.id);
+  if (!device) throw new AppError('الجهاز غير موجود', 404);
+  const branch = await ensureBranchExists(toId(device.branch));
+  if (branch.cameraImportLock?.until > new Date()) throw new AppError('يوجد استيراد أجهزة جارٍ؛ انتظر اكتماله قبل حذف أجهزة الفرع', 409);
+  const before = toEntityResponse(device);
+  await repository.deleteDeviceById(device._id);
+  await markBranchDocumentationChanged(toId(device.branch));
+  await logNetworkChange({ req, action: 'NETWORK_DEVICE_DELETED', changeType: 'DELETE', entityType: 'NETWORK_DEVICE', entityId: device._id,
+    customerId: toId(device.customer), branchId: toId(device.branch), before, after: { deleted: true }, reason: ensureReasonIfProvided(req.body?.changeReason) });
+  res.json({ deleted: true, deviceId: toId(device) });
 });
 
 export const listBranchSubnets = asyncHandler(async (req, res) => {
@@ -1380,7 +1523,7 @@ export const uploadNetworkAttachments = asyncHandler(async (req, res) => {
       entityId,
       category,
       storageScope: stored.storageScope,
-      originalName: file.originalname,
+      originalName: normalizeAttachmentFileName(file.originalname),
       mimeType: file.mimetype,
       size: Number(file.size || 0),
       checksum: stored.checksum,
@@ -1444,8 +1587,7 @@ export const downloadNetworkAttachment = asyncHandler(async (req, res) => {
   }
 
   res.setHeader('Content-Type', attachment.mimeType || 'application/octet-stream');
-  res.setHeader('Content-Disposition', `attachment; filename="${sanitizeFileName(attachment.originalName) || 'attachment'}"`);
-  res.sendFile(attachment.storagePath);
+  res.download(attachment.storagePath, normalizeAttachmentFileName(attachment.originalName));
 });
 
 export const listNetworkChangeLogs = asyncHandler(async (req, res) => {

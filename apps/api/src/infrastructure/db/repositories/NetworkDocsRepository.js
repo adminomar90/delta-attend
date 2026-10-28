@@ -59,6 +59,7 @@ export class NetworkDocsRepository {
 
   async listDevices(filter = {}) {
     return NetworkDeviceModel.find(filter)
+      .populate('secret', 'secretType maskedPreview rotatedAt createdAt')
       .populate('customer', 'name')
       .populate('branch', 'name city documentationStatus')
       .populate('createdBy', userSummary)
@@ -69,8 +70,32 @@ export class NetworkDocsRepository {
     return NetworkDeviceModel.create(payload);
   }
 
+  async lockCameraImport(branchId, token) {
+    return NetworkBranchModel.findOneAndUpdate({ _id: branchId, $or: [{ cameraImportLock: null }, { 'cameraImportLock.until': { $lt: new Date() } }] },
+      { $set: { cameraImportLock: { token, until: new Date(Date.now() + 120000) } } }, { new: true });
+  }
+
+  async refreshCameraImportLock(branchId, token) {
+    return NetworkBranchModel.updateOne({ _id: branchId, 'cameraImportLock.token': token }, { $set: { 'cameraImportLock.until': new Date(Date.now() + 120000) } });
+  }
+
+  async unlockCameraImport(branchId, token) {
+    return NetworkBranchModel.updateOne({ _id: branchId, 'cameraImportLock.token': token }, { $set: { cameraImportLock: null } });
+  }
+
+  async findSecretsByIds(ids) {
+    return NetworkSecretModel.find({ _id: { $in: ids } });
+  }
+
+  async findDeviceConflict(branchId, { managementIp, serialNumber }, excludeId = null) {
+    const alternatives = [...(managementIp ? [{ managementIp }] : []), ...(serialNumber ? [{ serialNumber }] : [])];
+    if (!alternatives.length) return null;
+    return NetworkDeviceModel.findOne({ branch: branchId, $or: alternatives, ...(excludeId ? { _id: { $ne: excludeId } } : {}) }).select('managementIp serialNumber').lean();
+  }
+
   async findDeviceById(id) {
     return NetworkDeviceModel.findById(id)
+      .populate('secret', 'secretType maskedPreview rotatedAt createdAt')
       .populate('customer', 'name')
       .populate('branch', 'name city documentationStatus')
       .populate('createdBy', userSummary);
@@ -78,6 +103,7 @@ export class NetworkDocsRepository {
 
   async updateDeviceById(id, payload) {
     return NetworkDeviceModel.findByIdAndUpdate(id, payload, { new: true })
+      .populate('secret', 'secretType maskedPreview rotatedAt createdAt')
       .populate('customer', 'name')
       .populate('branch', 'name city documentationStatus')
       .populate('createdBy', userSummary);
@@ -89,6 +115,12 @@ export class NetworkDocsRepository {
       .populate('vlan', 'name vlanId')
       .populate('createdBy', userSummary)
       .sort({ createdAt: -1 });
+  }
+
+  async deleteDeviceById(id) {
+    await NetworkIpAllocationModel.updateMany({ device: id }, { $set: { device: null } });
+    await NetworkSecretModel.deleteMany({ ownerType: 'NETWORK_DEVICE', ownerId: String(id) });
+    return NetworkDeviceModel.findByIdAndDelete(id);
   }
 
   async createSubnet(payload) {

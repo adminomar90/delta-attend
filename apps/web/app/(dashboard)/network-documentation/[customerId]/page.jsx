@@ -5,16 +5,16 @@ import { useParams, useRouter } from 'next/navigation';
 import { api } from '../../../../lib/api';
 import { authStorage } from '../../../../lib/auth';
 import { Permission, hasAnyPermission, hasPermission } from '../../../../lib/permissions';
+import NetworkDevicesPanel from '../../../../components/network/NetworkDevicesPanel';
 
 const tabs = [
   ['overview', 'الملخص'],
-  ['inventory', 'Inventory'],
+  ['inventory', 'معلومات الأجهزة'],
   ['attachments', 'المرفقات'],
   ['change-log', 'Change Log'],
 ];
 
 const emptyBranchForm = { name: '', city: '', address: '', siteType: 'BRANCH', notes: '' };
-const emptyDeviceForm = { name: '', deviceType: 'ROUTER', vendor: '', model: '', managementIp: '', serialNumber: '', macAddress: '', physicalLocation: '', notes: '' };
 const emptySubnetForm = { cidr: '', gateway: '', dnsServers: '', purpose: '' };
 const emptyIpForm = { ipAddress: '', ipType: 'STATIC', subnetId: '', deviceId: '', hostname: '' };
 const emptyVlanForm = { vlanId: '', name: '', subnetId: '', purpose: '' };
@@ -57,7 +57,6 @@ export default function NetworkCustomerWorkspacePage() {
   const [activeTab, setActiveTab] = useState('overview');
   const [selectedBranchId, setSelectedBranchId] = useState('');
   const [branchForm, setBranchForm] = useState(emptyBranchForm);
-  const [deviceForm, setDeviceForm] = useState(emptyDeviceForm);
   const [subnetForm, setSubnetForm] = useState(emptySubnetForm);
   const [ipForm, setIpForm] = useState(emptyIpForm);
   const [vlanForm, setVlanForm] = useState(emptyVlanForm);
@@ -77,8 +76,11 @@ export default function NetworkCustomerWorkspacePage() {
     try {
       const response = await api.get(`/network-docs/customers/${customerId}/workspace`);
       setWorkspace(response.workspace || null);
-      const firstBranchId = response.workspace?.branches?.[0]?.id || response.workspace?.branches?.[0]?._id || '';
-      setSelectedBranchId((current) => current || firstBranchId);
+      const branches = response.workspace?.branches || [];
+      const firstBranchId = branches[0]?.id || branches[0]?._id || '';
+      const requestedBranchId = new URLSearchParams(window.location.search).get('branch');
+      setSelectedBranchId((current) => branches.some((branch) => (branch.id || branch._id) === current) ? current
+        : branches.some((branch) => (branch.id || branch._id) === requestedBranchId) ? requestedBranchId : firstBranchId);
     } catch (err) {
       setError(err.message || 'تعذر تحميل ملف الزبون');
     } finally {
@@ -247,25 +249,9 @@ export default function NetworkCustomerWorkspacePage() {
 
       {activeTab === 'inventory' ? (
         <section className="card section">
-          <h2>Inventory للفرع {selectedBranch?.name || ''}</h2>
+          <NetworkDevicesPanel key={selectedBranchId || 'no-branch'} branchId={selectedBranchId} branchName={selectedBranch?.name || ''} devices={branchDevices} canManage={canManageDevices} canReveal={canRevealSecrets} canExport={canManageDevices || hasPermission(currentUser, Permission.EXPORT_NETWORK_REPORTS)} onReload={load} />
 
-          {canManageDevices ? (
-            <form className="grid-3" onSubmit={(e) => {
-              e.preventDefault();
-              if (!branchRequired()) return;
-              submitJson('تمت إضافة الجهاز.', () => api.post(`/network-docs/branches/${selectedBranchId}/devices`, deviceForm), () => setDeviceForm(emptyDeviceForm));
-            }}>
-              <label>اسم الجهاز<input className="input" value={deviceForm.name} onChange={(e) => setDeviceForm((c) => ({ ...c, name: e.target.value }))} required /></label>
-              <label>النوع<select className="select" value={deviceForm.deviceType} onChange={(e) => setDeviceForm((c) => ({ ...c, deviceType: e.target.value }))}><option value="ROUTER">Router</option><option value="SWITCH">Switch</option><option value="FIREWALL">Firewall</option><option value="ACCESS_POINT">Access Point</option><option value="NVR">NVR</option><option value="IP_PBX">IP PBX</option><option value="SERVER">Server</option><option value="CAMERA">Camera</option><option value="PRINTER">Printer</option><option value="UPS">UPS</option><option value="OTHER">Other</option></select></label>
-              <label>IP الإدارة<input className="input" value={deviceForm.managementIp} onChange={(e) => setDeviceForm((c) => ({ ...c, managementIp: e.target.value }))} /></label>
-              <label>Vendor<input className="input" value={deviceForm.vendor} onChange={(e) => setDeviceForm((c) => ({ ...c, vendor: e.target.value }))} /></label>
-              <label>Model<input className="input" value={deviceForm.model} onChange={(e) => setDeviceForm((c) => ({ ...c, model: e.target.value }))} /></label>
-              <label>Serial<input className="input" value={deviceForm.serialNumber} onChange={(e) => setDeviceForm((c) => ({ ...c, serialNumber: e.target.value }))} /></label>
-              <label>MAC<input className="input" value={deviceForm.macAddress} onChange={(e) => setDeviceForm((c) => ({ ...c, macAddress: e.target.value }))} /></label>
-              <label className="grid-span-full">الموقع / ملاحظات<input className="input" value={deviceForm.physicalLocation} onChange={(e) => setDeviceForm((c) => ({ ...c, physicalLocation: e.target.value }))} /></label>
-              <div className="form-actions"><button className="btn btn-primary" type="submit" disabled={saving}>إضافة جهاز</button></div>
-            </form>
-          ) : null}
+          <details style={{ marginTop: 24, borderTop: '1px solid var(--border)', paddingTop: 18 }}><summary style={{ cursor: 'pointer', fontWeight: 700 }}>إعدادات الشبكة المتقدمة (IP / VLAN / WAN / VPN / Wi-Fi)</summary>
 
           {canManageIpPlan ? (
             <>
@@ -372,10 +358,10 @@ export default function NetworkCustomerWorkspacePage() {
           </div>
 
           <div style={{ display: 'grid', gap: 16, marginTop: 18 }}>
-            <article className="card section" style={{ padding: 12 }}><strong>الأجهزة</strong><table className="table" style={{ marginTop: 10 }}><thead><tr><th>الاسم</th><th>النوع</th><th>IP</th><th>Vendor/Model</th></tr></thead><tbody>{branchDevices.map((device) => <tr key={device.id || device._id}><td>{device.name}</td><td>{device.deviceType}</td><td>{device.managementIp || '-'}</td><td>{device.vendor || '-'} {device.model || ''}</td></tr>)}</tbody></table></article>
             <article className="card section" style={{ padding: 12 }}><strong>Subnets و IPs</strong><div className="split" style={{ marginTop: 10 }}><div><table className="table"><thead><tr><th>CIDR</th><th>Gateway</th><th>Purpose</th></tr></thead><tbody>{branchSubnets.map((subnet) => <tr key={subnet.id || subnet._id}><td>{subnet.cidr}</td><td>{subnet.gateway || '-'}</td><td>{subnet.purpose || '-'}</td></tr>)}</tbody></table></div><div><table className="table"><thead><tr><th>IP</th><th>Type</th><th>Subnet</th><th>Target</th></tr></thead><tbody>{branchIps.map((item) => <tr key={item.id || item._id}><td>{item.ipAddress}</td><td>{item.ipType}</td><td>{item.subnet?.cidr || '-'}</td><td>{item.device?.name || item.hostname || '-'}</td></tr>)}</tbody></table></div></div></article>
             <article className="card section" style={{ padding: 12 }}><strong>VLAN / WAN / VPN / Wi‑Fi</strong><table className="table" style={{ marginTop: 10 }}><thead><tr><th>النوع</th><th>الاسم</th><th>القيمة</th><th>سر مخفي</th></tr></thead><tbody>{branchVlans.map((item) => <tr key={`v-${item.id || item._id}`}><td>VLAN</td><td>{item.name}</td><td>{item.vlanId}</td><td>-</td></tr>)}{branchWan.map((item) => <tr key={`w-${item.id || item._id}`}><td>WAN</td><td>{item.ispName}</td><td>{(item.publicIps || []).join(', ') || `${item.speed?.downloadMbps || 0}/${item.speed?.uploadMbps || 0}`}</td><td>{item.subscriptionInfo?.secret?.maskedPreview || '-'} {canRevealSecrets && item.subscriptionInfo?.secret?.id ? <button className="btn btn-soft btn-sm" type="button" onClick={() => revealSecret(item.subscriptionInfo.secret.id)}>كشف</button> : null} {item.subscriptionInfo?.secret?.id && revealedSecrets[item.subscriptionInfo.secret.id] ? <div>{revealedSecrets[item.subscriptionInfo.secret.id]}</div> : null}</td></tr>)}{branchVpn.map((item) => <tr key={`p-${item.id || item._id}`}><td>VPN</td><td>{item.name}</td><td>{item.peerIp || '-'}</td><td>{item.secret?.maskedPreview || '-'} {canRevealSecrets && item.secret?.id ? <button className="btn btn-soft btn-sm" type="button" onClick={() => revealSecret(item.secret.id)}>كشف</button> : null} {item.secret?.id && revealedSecrets[item.secret.id] ? <div>{revealedSecrets[item.secret.id]}</div> : null}</td></tr>)}{branchWifi.map((item) => <tr key={`f-${item.id || item._id}`}><td>Wi‑Fi</td><td>{item.ssid}</td><td>{item.securityType}</td><td>{item.secret?.maskedPreview || '-'} {canRevealSecrets && item.secret?.id ? <button className="btn btn-soft btn-sm" type="button" onClick={() => revealSecret(item.secret.id)}>كشف</button> : null} {item.secret?.id && revealedSecrets[item.secret.id] ? <div>{revealedSecrets[item.secret.id]}</div> : null}</td></tr>)}</tbody></table></article>
           </div>
+          </details>
         </section>
       ) : null}
 
@@ -400,7 +386,7 @@ export default function NetworkCustomerWorkspacePage() {
               <div className="form-actions"><button className="btn btn-primary" type="submit" disabled={saving}>رفع</button></div>
             </form>
           ) : null}
-          <table className="table" style={{ marginTop: 16 }}><thead><tr><th>الملف</th><th>التصنيف</th><th>النطاق</th><th>إجراء</th></tr></thead><tbody>{branchAttachments.map((attachment) => <tr key={attachment.id || attachment._id}><td>{attachment.originalName}</td><td>{attachment.category}</td><td>{attachment.storageScope}</td><td><button className="btn btn-soft btn-sm" type="button" onClick={() => downloadAttachment(attachment)}>تنزيل</button></td></tr>)}</tbody></table>
+          <table className="table" style={{ marginTop: 16 }}><thead><tr><th>الملف</th><th>التصنيف</th><th>النطاق</th><th>إجراء</th></tr></thead><tbody>{branchAttachments.map((attachment) => <tr key={attachment.id || attachment._id}><td style={{ maxWidth: 420, overflowWrap: 'anywhere' }}><span dir="auto" style={{ unicodeBidi: 'plaintext' }}>{attachment.originalName}</span></td><td>{attachment.category}</td><td>{attachment.storageScope}</td><td><button className="btn btn-soft btn-sm" type="button" onClick={() => downloadAttachment(attachment)}>تنزيل</button></td></tr>)}</tbody></table>
         </section>
       ) : null}
 

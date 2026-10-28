@@ -31,6 +31,11 @@ import {
   updateNetworkBranch,
   updateNetworkCustomer,
   updateNetworkDevice,
+  deleteNetworkDevice,
+  pingNetworkDevice,
+  exportNetworkCamerasExcel,
+  previewNetworkCamerasImport,
+  importNetworkCamerasExcel,
   updateNetworkIpAllocation,
   updateNetworkSubnet,
   updateNetworkVlan,
@@ -56,7 +61,7 @@ import {
   canViewNetworkSecrets,
   requireAnyPermission,
 } from '../middlewares/authorizationMiddleware.js';
-import { uploadNetworkAttachmentMiddleware } from '../middlewares/uploadMiddleware.js';
+import { uploadNetworkAttachmentMiddleware, uploadImportFileMiddleware } from '../middlewares/uploadMiddleware.js';
 
 const networkDocsRoutes = Router();
 
@@ -92,7 +97,24 @@ networkDocsRoutes.patch('/branches/:id/approve-baseline', canApproveNetworkBasel
 
 networkDocsRoutes.get('/branches/:branchId/devices', listBranchDevices);
 networkDocsRoutes.post('/branches/:branchId/devices', canManageNetworkDevices, createBranchDevice);
+networkDocsRoutes.get('/branches/:branchId/cameras/excel', requireAnyPermission(Permission.MANAGE_NETWORK_DEVICES, Permission.EXPORT_NETWORK_REPORTS), exportNetworkCamerasExcel);
+networkDocsRoutes.post('/branches/:branchId/cameras/import-preview', canManageNetworkDevices, uploadImportFileMiddleware.single('file'), previewNetworkCamerasImport);
+networkDocsRoutes.post('/branches/:branchId/cameras/import', canManageNetworkDevices, uploadImportFileMiddleware.single('file'), importNetworkCamerasExcel);
+const recorderExcel = (req, res, next) => { req.networkExcelType = 'NVR'; next(); };
+networkDocsRoutes.get('/branches/:branchId/recorders/excel', requireAnyPermission(Permission.MANAGE_NETWORK_DEVICES, Permission.EXPORT_NETWORK_REPORTS), recorderExcel, exportNetworkCamerasExcel);
+networkDocsRoutes.post('/branches/:branchId/recorders/import-preview', canManageNetworkDevices, recorderExcel, uploadImportFileMiddleware.single('file'), previewNetworkCamerasImport);
+networkDocsRoutes.post('/branches/:branchId/recorders/import', canManageNetworkDevices, recorderExcel, uploadImportFileMiddleware.single('file'), importNetworkCamerasExcel);
+const deviceExcel = (req, res, next) => {
+  const type = String(req.params.deviceType || '').toUpperCase();
+  if (!['CAMERA', 'NVR', 'SWITCH', 'ROUTER', 'FIREWALL', 'ACCESS_POINT', 'IP_PBX', 'PRINTER', 'SERVER', 'UPS', 'OTHER'].includes(type)) return res.status(400).json({ message: 'نوع الجهاز غير صالح' });
+  req.networkExcelType = type; next();
+};
+networkDocsRoutes.get('/branches/:branchId/device-excel/:deviceType/excel', requireAnyPermission(Permission.MANAGE_NETWORK_DEVICES, Permission.EXPORT_NETWORK_REPORTS), deviceExcel, exportNetworkCamerasExcel);
+networkDocsRoutes.post('/branches/:branchId/device-excel/:deviceType/import-preview', canManageNetworkDevices, deviceExcel, uploadImportFileMiddleware.single('file'), previewNetworkCamerasImport);
+networkDocsRoutes.post('/branches/:branchId/device-excel/:deviceType/import', canManageNetworkDevices, deviceExcel, uploadImportFileMiddleware.single('file'), importNetworkCamerasExcel);
 networkDocsRoutes.patch('/devices/:id', canManageNetworkDevices, updateNetworkDevice);
+networkDocsRoutes.delete('/devices/:id', canManageNetworkDevices, deleteNetworkDevice);
+networkDocsRoutes.post('/devices/:id/ping', requireAnyPermission(Permission.VIEW_NETWORK_DOCUMENTATION, Permission.MANAGE_NETWORK_DEVICES, Permission.MANAGE_NETWORK_IP_PLAN), pingNetworkDevice);
 
 networkDocsRoutes.get('/branches/:branchId/subnets', listBranchSubnets);
 networkDocsRoutes.post('/branches/:branchId/subnets', canManageNetworkIpPlan, createBranchSubnet);

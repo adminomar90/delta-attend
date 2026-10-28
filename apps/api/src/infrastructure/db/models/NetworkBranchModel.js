@@ -79,6 +79,7 @@ const networkBranchSchema = new mongoose.Schema(
       ref: 'User',
       required: true,
     },
+    cameraImportLock: { type: mongoose.Schema.Types.Mixed, default: null },
     lastApprovedAt: {
       type: Date,
       default: null,
