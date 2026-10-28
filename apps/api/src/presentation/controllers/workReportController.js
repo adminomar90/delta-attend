@@ -3,7 +3,7 @@ import { UserRepository } from '../../infrastructure/db/repositories/UserReposit
 import { ProjectRepository } from '../../infrastructure/db/repositories/ProjectRepository.js';
 import { PointsLedgerRepository } from '../../infrastructure/db/repositories/PointsLedgerRepository.js';
 import { GoalRepository } from '../../infrastructure/db/repositories/GoalRepository.js';
-import { buildWorkReportPdfBuffer } from '../../infrastructure/reports/workReportPdfBuilder.js';
+import { buildWorkReportPdfBuffer, WORK_REPORT_PDF_FORMAT_VERSION } from '../../infrastructure/reports/workReportPdfBuilder.js';
 import { auditService } from '../../application/services/auditService.js';
 import { notificationService } from '../../application/services/notificationService.js';
 import {
@@ -247,6 +247,7 @@ const resolveStoredWorkReportPdfAbsolutePath = (publicUrl) => {
 };
 
 const buildStoredWorkReportPdfPayload = ({ publicUrl, filename, absolutePath }) => ({
+  formatVersion: WORK_REPORT_PDF_FORMAT_VERSION,
   publicUrl,
   filename,
   size: fs.existsSync(absolutePath) ? Number(fs.statSync(absolutePath).size || 0) : 0,
@@ -650,7 +651,7 @@ const ensureStoredWorkReportPdf = async ({ report, req }) => {
   const existingFilename = toCleanString(report?.pdfFile?.filename);
   const existingAbsolutePath = resolveStoredWorkReportPdfAbsolutePath(existingPublicUrl);
 
-  if (existingPublicUrl && existingFilename && existingAbsolutePath && fs.existsSync(existingAbsolutePath)) {
+  if (report.pdfFile?.formatVersion === WORK_REPORT_PDF_FORMAT_VERSION && existingPublicUrl && existingFilename && existingAbsolutePath && fs.existsSync(existingAbsolutePath)) {
     return {
       report,
       pdfFile: {

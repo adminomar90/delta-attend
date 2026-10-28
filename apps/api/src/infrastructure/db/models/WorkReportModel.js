@@ -74,6 +74,7 @@ const workReportPdfFileSchema = new mongoose.Schema(
       type: Date,
       default: null,
     },
+    formatVersion: { type: Number, default: 0 },
   },
   { _id: false },
 );

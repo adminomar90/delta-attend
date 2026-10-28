@@ -1,6 +1,9 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import { createPortal } from 'react-dom';
+import CompletedReportsList from '../../../components/CompletedReportsList';
+import { reportNumber } from '../../../lib/completedWorkReports.mjs';
 import { api, assetUrl } from '../../../lib/api';
 import { authStorage } from '../../../lib/auth';
 import { Permission, hasPermission } from '../../../lib/permissions';
@@ -18,7 +21,7 @@ const formatDate = (value) => {
     return '-';
   }
 
-  return new Date(value).toLocaleDateString('ar-IQ');
+  return new Date(value).toLocaleDateString('en-GB', { timeZone: 'Asia/Baghdad' });
 };
 
 const formatDateTime = (value) => {
@@ -26,7 +29,7 @@ const formatDateTime = (value) => {
     return '-';
   }
 
-  return new Date(value).toLocaleString('ar-IQ');
+  return new Date(value).toLocaleString('en-GB', { timeZone: 'Asia/Baghdad' });
 };
 
 const downloadBlob = (blob, filename) => {
@@ -38,7 +41,7 @@ const downloadBlob = (blob, filename) => {
   window.URL.revokeObjectURL(url);
 };
 
-const resolveReportNumber = (report) => `#${String(report?._id || '').slice(-8).toUpperCase()}`;
+const resolveReportNumber = reportNumber;
 
 const formatPoints = (value) => {
   const num = Number(value || 0);
@@ -75,7 +78,7 @@ export default function CompletedWorkReportsPage() {
   }, [currentUser?.role, currentUser?.customPermissions, currentUser?.permissions]);
 
   const selectedReport = useMemo(() => {
-    return reports.find((report) => report._id === selectedReportId) || reports[0] || null;
+    return reports.find((report) => report._id === selectedReportId) || null;
   }, [reports, selectedReportId]);
 
   const selectedAwardsSummary = useMemo(() => {
@@ -99,7 +102,7 @@ export default function CompletedWorkReportsPage() {
       const response = await api.get('/work-reports/completed');
       const nextReports = response.reports || [];
       setReports(nextReports);
-      setSelectedReportId((prev) => prev || nextReports[0]?._id || '');
+      setSelectedReportId((prev) => nextReports.some((report) => report._id === prev) ? prev : '');
     } catch (err) {
       setError(err.message || 'تعذر تحميل التقارير المنجزة');
     } finally {
@@ -110,6 +113,15 @@ export default function CompletedWorkReportsPage() {
   useEffect(() => {
     load();
   }, [canAccess]);
+
+  useEffect(() => {
+    if (!selectedReportId) return;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    const close = (event) => { if (event.key === 'Escape' && !maintenanceModalOpen) setSelectedReportId(''); };
+    document.addEventListener('keydown', close);
+    return () => { document.body.style.overflow = previousOverflow; document.removeEventListener('keydown', close); };
+  }, [selectedReportId, maintenanceModalOpen]);
 
   useEffect(() => {
     const loadMaintenanceInfo = async () => {
@@ -292,87 +304,14 @@ export default function CompletedWorkReportsPage() {
         </div>
       </section>
 
-      <section className="card section" style={{ marginBottom: 16 }}>
-        {loading ? <p style={{ color: 'var(--text-soft)' }}>جارٍ تحميل التقارير المنجزة...</p> : null}
+      <CompletedReportsList reports={reports} loading={loading} canSendWhatsApp={canSendWhatsApp}
+        onDetails={(report) => setSelectedReportId(report._id)} onViewPdf={openPdf} onDownloadPdf={downloadPdf}
+        onWhatsApp={sendToWhatsApp} onEvaluation={createEvaluationLink} evaluationLinks={evaluationLinks} />
 
-        {!loading ? (
-          <table className="table">
-            <thead>
-              <tr>
-                <th>رقم التقرير</th>
-                <th>عنوان التقرير</th>
-                <th>الموظف</th>
-                <th>المشروع</th>
-                <th>تاريخ الإنشاء</th>
-                <th>تاريخ الاعتماد</th>
-                <th>الحالة</th>
-                <th>اعتمده</th>
-                <th>النقاط</th>
-                <th>الإجراءات</th>
-              </tr>
-            </thead>
-            <tbody>
-              {reports.length ? reports.map((report) => {
-                const isSelected = selectedReport?._id === report._id;
-
-                return (
-                  <tr key={report._id} style={isSelected ? { background: 'rgba(77, 145, 255, 0.08)' } : undefined}>
-                    <td>{resolveReportNumber(report)}</td>
-                    <td>
-                      <strong>{report.title || 'بدون عنوان'}</strong>
-                    </td>
-                    <td>{report.employeeName || report.user?.fullName || '-'}</td>
-                    <td>{report.project?.name || report.projectName || '-'}</td>
-                    <td>{formatDateTime(report.createdAt)}</td>
-                    <td>{formatDateTime(report.approvedAt)}</td>
-                    <td>
-                      <span className="status-pill status-approved">
-                        {statusLabelMap[report.status] || report.status}
-                      </span>
-                    </td>
-                    <td>{report.approvedBy?.fullName || '-'}</td>
-                    <td>{formatPoints(report.pointsAwarded)}</td>
-                    <td>
-                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                        <button type="button" className="btn btn-soft" onClick={() => setSelectedReportId(report._id)}>
-                          تفاصيل
-                        </button>
-                        <button type="button" className="btn btn-soft" onClick={() => openPdf(report)}>
-                          عرض PDF
-                        </button>
-                        <button type="button" className="btn btn-soft" onClick={() => downloadPdf(report)}>
-                          تحميل PDF
-                        </button>
-                        {canSendWhatsApp ? (
-                          <button type="button" className="btn btn-soft" onClick={() => sendToWhatsApp(report)}>
-                            واتساب
-                          </button>
-                        ) : null}
-                        <button type="button" className="btn btn-soft" onClick={() => createEvaluationLink(report)}>
-                          إنشاء رابط تقييم الزبون
-                        </button>
-                        <button type="button" className="btn btn-soft" onClick={() => createEvaluationLink(report, { send: true })}>
-                          إرسال رابط التقييم عبر WhatsApp
-                        </button>
-                      </div>
-                      {evaluationLinks[report._id] ? <input className="input" style={{ marginTop: 6 }} value={evaluationLinks[report._id]} readOnly dir="ltr" /> : null}
-                    </td>
-                  </tr>
-                );
-              }) : (
-                <tr>
-                  <td colSpan={10} style={{ color: 'var(--text-soft)' }}>
-                    لا توجد تقارير معتمدة في الأرشيف حالياً.
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        ) : null}
-      </section>
-
-      {selectedReport ? (
-        <section className="card section">
+      {selectedReport && typeof document !== 'undefined' ? createPortal(
+        <div className="modal-backdrop" dir="rtl" onClick={() => setSelectedReportId('')}>
+        <section className="modal-panel" role="dialog" aria-modal="true" aria-labelledby="completed-report-detail-title" style={{ width: 'min(1080px, calc(100vw - 24px))', maxHeight: '92dvh', overflow: 'auto' }} onClick={(event) => event.stopPropagation()}>
+          <div className="modal-header" style={{ borderBottom: '1px solid var(--border)', paddingBottom: 12, marginBottom: 18 }}><strong id="completed-report-detail-title">تفاصيل التقرير المعتمد</strong><button type="button" className="btn btn-soft btn-sm" autoFocus onClick={() => setSelectedReportId('')}>إغلاق ×</button></div>
           <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
             <div>
               <h2 style={{ margin: 0 }}>
@@ -622,6 +561,7 @@ export default function CompletedWorkReportsPage() {
             تم إنشاء ملف PDF الأصلي بتاريخ: {formatDate(selectedReport.pdfFile?.generatedAt)}
           </div>
         </section>
+        </div>, document.body
       ) : null}
 
       <MaintenancePlanModal

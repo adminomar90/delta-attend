@@ -7,7 +7,7 @@
 import { workReportPointsService } from '../../application/services/workReportPointsService.js';
 
 import {
-  createDoc, finalize, safe, fmtDate, fmtDateTime, fmtPoints,
+  createDoc, finalize, safe, fmtPoints,
   resolveLocalImagePath, resolveImageUrl,
   drawHeader, drawStatusBadge, drawSectionTitle, drawTableRow,
   drawKpiCards, drawProgressBar, drawTextBlock, drawImageFrame,
@@ -21,11 +21,15 @@ const STATUS = {
   REJECTED:  { ar: 'مرفوض',            bg: COLORS.danger  },
 };
 
+export const WORK_REPORT_PDF_FORMAT_VERSION = 2;
+const fmtDate = (value) => value ? new Date(value).toLocaleDateString('en-GB', { timeZone: 'Asia/Baghdad' }) : '-';
+const fmtDateTime = (value) => value ? new Date(value).toLocaleString('en-GB', { timeZone: 'Asia/Baghdad' }) : '-';
+
 export const buildWorkReportPdfBuffer = async (
   report,
   { publicBaseUrl = '', uploadRootDir = '' } = {},
 ) => {
-  const ctx = createDoc({ title: `تقرير العمل - ${safe(report?.title)}`, fontScale: 1.18 });
+  const ctx = createDoc({ title: `تقرير العمل - ${safe(report?.title)}`, fontScale: 1.18, englishDigits: true });
 
   /* ═══════════════════════════════════════════════════════════════════════
      1. HEADER BANNER
@@ -38,6 +42,7 @@ export const buildWorkReportPdfBuffer = async (
     subtitle: `${employeeName}  —  ${projectName}`,
     reportId: `#${String(report?._id || '').slice(-8).toUpperCase()}`,
     date: new Date(),
+    dateText: fmtDateTime(new Date()),
   });
 
   /* ═══════════════════════════════════════════════════════════════════════
@@ -170,5 +175,5 @@ export const buildWorkReportPdfBuffer = async (
   /* ═══════════════════════════════════════════════════════════════════════
      FINALIZE
      ═══════════════════════════════════════════════════════════════════════ */
-  return finalize(ctx, { footerLabel: 'تقرير العمل الرسمي — Delta Plus' });
+  return finalize(ctx, { footerLabel: 'تقرير العمل الرسمي' });
 };

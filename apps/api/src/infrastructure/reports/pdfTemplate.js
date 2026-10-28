@@ -57,6 +57,17 @@ const ARABIC_INDIC_DIGITS = ['٠', '١', '٢', '٣', '٤', '٥', '٦', '٧', '٨
 export const toArabicIndicDigits = (value) =>
   String(value ?? '').replace(/\d/g, (digit) => ARABIC_INDIC_DIGITS[Number(digit)] || digit);
 
+export const toEnglishDigits = (value) => String(value ?? '').replace(/[٠-٩۰-۹]/g, (digit) =>
+  String(digit.charCodeAt(0) - (digit >= '۰' ? 0x6f0 : 0x660)));
+
+// Compensate numeric runs inside Arabic paragraphs while retaining Latin words.
+export const prepareEnglishPdfText = (value) => {
+  const text = toEnglishDigits(value);
+  return /[\u0621-\u064A]/.test(text)
+    ? text.replace(/[0-9][0-9.,:/+_%#@-]*/g, (run) => [...run].reverse().join(''))
+    : text;
+};
+
 export const fixMixedDirectionText = (value) =>
   toArabicIndicDigits(value).replace(/([A-Za-z][A-Za-z.,:/+_%#-]*)/g, `${LRM}$1${LRM}`);
 
@@ -94,13 +105,17 @@ export const resolveImageUrl = (publicUrl, base = '') => {
  * Creates a pre-configured PDFDocument and returns a context object (`ctx`)
  * that every other draw helper expects.
  */
-export const createDoc = ({ title = 'Delta Plus Report', author = 'Delta Plus', fontScale = 1 } = {}) => {
+export const createDoc = ({ title = 'Delta Plus Report', author = 'Delta Plus', fontScale = 1, englishDigits = false } = {}) => {
   const doc = new PDFDocument({
     margin: 36,
     size: 'A4',
     bufferPages: true,
     info: { Title: title, Author: author, Creator: 'Delta Plus System' },
   });
+  if (englishDigits) {
+    const text = doc.text.bind(doc);
+    doc.text = (value, ...args) => text(typeof value === 'string' || typeof value === 'number' ? prepareEnglishPdfText(value) : value, ...args);
+  }
 
   const hasFont = fs.existsSync(FONT_REGULAR) && fs.existsSync(FONT_BOLD);
   if (hasFont) {
@@ -116,7 +131,7 @@ export const createDoc = ({ title = 'Delta Plus Report', author = 'Delta Plus', 
   const CW     = PW - ML - doc.page.margins.right;
   const BOTTOM = doc.page.height - doc.page.margins.bottom - 30;
 
-  return { doc, F, FB, PW, ML, CW, BOTTOM, S: fontScale };
+  return { doc, F, FB, PW, ML, CW, BOTTOM, S: fontScale, englishDigits };
 };
 
 const scaledFont = (ctx, size) => Number((size * (ctx.S || 1)).toFixed(1));
@@ -516,14 +531,21 @@ export const drawFooters = (ctx, { label = 'تقرير رسمي' } = {}) => {
   const pages = doc.bufferedPageRange().count;
   for (let i = 0; i < pages; i++) {
     doc.switchToPage(i);
+    const bottomMargin = doc.page.margins.bottom;
+    doc.page.margins.bottom = 0;
     const fy = doc.page.height - 26;
     doc.rect(0, fy, PW, 26).fill(COLORS.navy);
     doc.rect(0, fy, PW, 1.5).fill(COLORS.gold);
     doc.font(F).fontSize(7).fillColor('#8aafc8');
-    doc.text(
+    if (ctx.englishDigits) {
+      doc.text('DELTA PLUS', ML, fy + 7, { width: CW * 0.25, align: 'left' });
+      doc.text(label, ML + CW * 0.25, fy + 7, { width: CW * 0.5, align: 'center', features: ['arab'] });
+      doc.text(`${i + 1} / ${pages}`, ML + CW * 0.75, fy + 7, { width: CW * 0.25, align: 'right' });
+    } else doc.text(
       `DELTA PLUS   |   ${label}   |   صفحة  ${i + 1}  /  ${pages}`,
       ML, fy + 7, { width: CW, align: 'center', features: ['arab'] },
     );
+    doc.page.margins.bottom = bottomMargin;
   }
 };
 
