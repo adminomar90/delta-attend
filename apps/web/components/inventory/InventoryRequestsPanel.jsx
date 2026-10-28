@@ -1,5 +1,6 @@
 'use client';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 
 const id = (value) => String(value?._id || value?.id || value || '');
 const qty = (value) => new Intl.NumberFormat('ar-IQ', { maximumFractionDigits: 3 }).format(Number(value || 0));
@@ -10,6 +11,12 @@ export default function InventoryRequestsPanel({ requests, warehouses, stockByMa
   const [error, setError] = useState('');
   const [filter, setFilter] = useState('active');
   const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    if (!modal) return;
+    const close = (event) => { if (event.key === 'Escape' && !busy) setModal(null); };
+    document.addEventListener('keydown', close);
+    return () => document.removeEventListener('keydown', close);
+  }, [modal, busy]);
   const own = (request) => id(request.requestedFor || request.requestedBy) === id(actor?.id || actor?._id);
   const open = (request, mode) => {
     const batch = request.pendingReceipt;
@@ -48,8 +55,8 @@ export default function InventoryRequestsPanel({ requests, warehouses, stockByMa
       {request.pendingReceipt?.state === 'ISSUING' ? <p style={{ color: 'var(--accent)' }}>بدأ تسجيل هذه الدفعة. أعد قبول الاستلام لاستكمال العملية دون تكرار الخصم.</p> : null}
     </article>)}</div>
     {!visible.length ? <p>لا توجد طلبات ضمن الاختيار الحالي.</p> : null}
-    {modal ? <div className="modal-backdrop" onClick={() => { if (!busy) setModal(null); }}><form className="modal-panel warehouse-cart-modal" onSubmit={submit} onClick={(event) => event.stopPropagation()}>
-      <div className="modal-header"><h3>{modal.mode === 'delete' ? 'حذف الطلب' : modal.mode === 'review' ? 'اعتماد كميات الطلب' : modal.mode === 'prepare' ? 'تجهيز وحجز دفعة' : 'إقرار استلام المواد'} <bdi>{modal.request.requestNo}</bdi></h3><button type="button" className="modal-close" disabled={busy} onClick={() => setModal(null)}>&times;</button></div>
+    {modal && typeof document !== 'undefined' ? createPortal(<div className="modal-backdrop" dir="rtl" onClick={() => { if (!busy) setModal(null); }}><form className="modal-panel warehouse-cart-modal" role="dialog" aria-modal="true" aria-labelledby="inventory-request-dialog-title" onSubmit={submit} onClick={(event) => event.stopPropagation()}>
+      <div className="modal-header"><h3 id="inventory-request-dialog-title">{modal.mode === 'delete' ? 'حذف الطلب' : modal.mode === 'review' ? 'اعتماد كميات الطلب' : modal.mode === 'prepare' ? 'تجهيز وحجز دفعة' : 'إقرار استلام المواد'} <bdi>{modal.request.requestNo}</bdi></h3><button type="button" className="modal-close" autoFocus aria-label="إغلاق" disabled={busy} onClick={() => setModal(null)}>&times;</button></div>
       {modal.mode === 'delete' ? <p>هل تريد حذف هذا الطلب من القوائم؟ تلغى الكميات غير المستلمة مع فك حجزها. الذمم والمواد المصروفة وحركات المخزون المثبتة تبقى محفوظة وتستمر تصفيتها من ذمم الفنيين.</p> : null}
       {modal.mode === 'receipt' ? <p>بتأكيد الاستلام تقر باستلام الكميات الموضحة فعلياً. سيُخصم رصيدها من المخزن وتُسجل على ذمتك.</p> : null}
       {modal.mode === 'prepare' ? <label>المخزن الصالح *<select className="select" required value={modal.warehouseId} onChange={(event) => setModal((prev) => ({ ...prev, warehouseId: event.target.value }))}><option value="">اختر المخزن</option>{warehouses.filter((warehouse) => warehouse.type !== 'DAMAGED').map((warehouse) => <option value={warehouse._id} key={warehouse._id}>{warehouse.name}</option>)}</select></label> : null}
@@ -57,7 +64,7 @@ export default function InventoryRequestsPanel({ requests, warehouses, stockByMa
       <label>ملاحظات<textarea className="textarea" value={modal.notes} onChange={(event) => setModal((prev) => ({ ...prev, notes: event.target.value }))} /></label>
       {error ? <p role="alert" style={{ color: '#fca5a5' }}>{error}</p> : null}
       <div className="form-actions"><button type="button" className="btn btn-soft" disabled={busy} onClick={() => setModal(null)}>إلغاء</button><button className={`btn ${modal.mode === 'delete' ? 'btn-danger' : 'btn-primary'}`} disabled={busy || saving}>{busy ? 'جار التسجيل...' : modal.mode === 'delete' ? 'تأكيد حذف الطلب' : modal.mode === 'receipt' ? 'أؤكد الاستلام وتسجيل الذمة' : modal.mode === 'review' ? 'اعتماد الكميات' : 'حجز وتجهيز الدفعة'}</button></div>
-    </form></div> : null}
+    </form></div>, document.body) : null}
     <style jsx>{`.workflow-steps{display:grid;grid-template-columns:repeat(6,minmax(100px,1fr));gap:8px;margin:16px 0}.workflow-steps span{display:grid;gap:5px;text-align:center;padding:12px 8px;border:1px solid var(--border);border-radius:10px;background:var(--surface-soft);font-size:13px}.workflow-steps b{color:var(--accent)}.workflow-state{font-size:12px;color:var(--accent)}.request-lines{display:grid;gap:8px;margin:14px 0}.request-lines div{display:grid;gap:5px;border-bottom:1px solid var(--border);padding-bottom:8px}.request-lines small{color:var(--text-soft)}@media(max-width:1000px){.workflow-steps{grid-template-columns:repeat(3,1fr)}}@media(max-width:600px){.workflow-steps{grid-template-columns:repeat(2,1fr)}}`}</style>
   </section>;
 }

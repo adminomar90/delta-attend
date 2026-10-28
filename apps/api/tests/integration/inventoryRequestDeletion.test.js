@@ -4,6 +4,8 @@ import { randomUUID } from 'node:crypto';
 import bcrypt from 'bcryptjs';
 import mongoose from 'mongoose';
 import { UserModel } from '../../src/infrastructure/db/models/UserModel.js';
+import '../../src/infrastructure/db/models/CustomerModel.js';
+import '../../src/infrastructure/db/models/ProjectModel.js';
 import { MaterialRequestModel as Request } from '../../src/infrastructure/db/models/MaterialRequestModel.js';
 import { MaterialCustodyModel as Custody } from '../../src/infrastructure/db/models/MaterialCustodyModel.js';
 import { MaterialModel as Material } from '../../src/infrastructure/db/models/MaterialModel.js';
@@ -61,6 +63,16 @@ test('request deletion releases only unreceived reservations and preserves poste
     assert.equal((await Balance.findOne()).qtyOnHand, 19);
     assert.equal((await new MaterialsRepository().listRequests()).length, 0);
     assert.ok((await Request.findById(second._id)).deletedAt);
+
+    // Deleted warehouse and catalog references must never block old request deletion.
+    const orphanRequest = await Request.create({ requestNo: 'MR-2026-00192', status: 'APPROVED', requestedBy: tech.id, requestedFor: tech.id,
+      warehouse: new mongoose.Types.ObjectId(), items: [{ material: new mongoose.Types.ObjectId(), materialName: 'Deleted catalog product', requestedQty: 1, approvedQty: 1 }] });
+    const populated = await new MaterialsRepository().findRequestById(orphanRequest._id);
+    assert.equal(populated.warehouse, null);
+    assert.equal(populated.items[0].material, null);
+    const orphanResult = await remove(orphanRequest._id, actor, {});
+    assert.equal(orphanResult.deleted, true);
+    assert.equal((await new MaterialsRepository().listRequests()).length, 0);
   } finally {
     try { if (mongoose.connection.readyState === 1 && mongoose.connection.name === databaseName && /^codex_request_delete_test_[a-f0-9]{32}$/.test(databaseName)) await mongoose.connection.dropDatabase(); }
     finally { await mongoose.disconnect(); }
