@@ -9,6 +9,7 @@ import InAppNotifToast from './InAppNotifToast';
 import { authStorage } from '../lib/auth';
 import { api } from '../lib/api';
 import { Permission, hasAnyPermission } from '../lib/permissions';
+import { custodyLoginUrl } from '../lib/custodyWhatsapp.mjs';
 
 const titleByPath = {
   '/dashboard': {
@@ -193,7 +194,7 @@ export default function AppShell({ children }) {
       } catch {
         if (cancelled) return;
         authStorage.logout();
-        router.push('/login');
+        router.push(custodyLoginUrl(window.location));
       }
     };
 

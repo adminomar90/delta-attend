@@ -1,7 +1,11 @@
+import { createMaterialRequest } from './materialsRequestController.js';
 import { auditService } from '../../application/services/auditService.js';
 import { sequenceService } from '../../application/services/sequenceService.js';
 import { notificationService } from '../../application/services/notificationService.js';
+import { deleteWarehouseWithInventory } from '../../application/services/warehouseDeletionService.js';
 import { AppError, asyncHandler } from '../../shared/errors.js';
+import { Permission } from '../../shared/constants.js';
+import { hasPermission } from '../../shared/permissions.js';
 import path from 'path';
 import {
   materialsRepository,
@@ -263,6 +267,18 @@ export const updateMaterial = asyncHandler(async (req, res) => {
     throw new AppError('Material not found', 404);
   }
 
+  const stockWarehouseId = toCleanString(req.body.warehouseId || req.body.warehouse);
+  if (req.body.currentQty !== undefined || req.body.qtyOnHand !== undefined || boolFromBody(req.body.transferStockOnWarehouseChange)) {
+    if (!hasPermission(req.user, Permission.MANAGE_MATERIAL_INVENTORY)) throw new AppError('تعديل الأرصدة يحتاج صلاحية إدارة المخزون', 403);
+    if (stockWarehouseId && !boolFromBody(req.body.transferStockOnWarehouseChange)) {
+      const stockBalance = await materialsRepository.findStockBalance(material._id, stockWarehouseId);
+      const newQuantity = Number(req.body.currentQty ?? req.body.qtyOnHand);
+      if (!Number.isFinite(newQuantity) || newQuantity < 0) throw new AppError('كمية المخزون غير صالحة', 400);
+      if (newQuantity < Number(stockBalance?.qtyOnHand || 0) && (req.user.role !== 'GENERAL_MANAGER' || !String(req.body.notes || '').trim())) throw new AppError('خفض الرصيد بتسوية الجرد متاح للمدير العام مع ذكر السبب؛ صرف الفني يتم عبر الطلب', 403);
+      if (newQuantity < Number(stockBalance?.qtyReserved || 0)) throw new AppError('لا يمكن خفض الرصيد عن الكمية المحجوزة', 409);
+    }
+  }
+
   const payload = {};
   const { image, attachments } = resolveUploadFiles(req);
 
@@ -451,6 +467,8 @@ export const listWarehouses = asyncHandler(async (req, res) => {
 export const createWarehouse = asyncHandler(async (req, res) => {
   const name = toCleanString(req.body.name);
   const code = toUpper(req.body.code);
+  const type = toUpper(req.body.type || 'REGULAR');
+  if (!['REGULAR', 'DAMAGED'].includes(type)) throw new AppError('نوع المخزن غير صالح', 400);
 
   if (!name || !code) {
     throw new AppError('name and code are required', 400);
@@ -459,6 +477,7 @@ export const createWarehouse = asyncHandler(async (req, res) => {
   const created = await materialsRepository.createWarehouse({
     name,
     code,
+    type,
     location: toCleanString(req.body.location),
     active: req.body.active === undefined ? true : !!req.body.active,
     notes: toCleanString(req.body.notes),
@@ -520,121 +539,22 @@ export const updateWarehouse = asyncHandler(async (req, res) => {
 });
 
 export const deleteWarehousePermanently = asyncHandler(async (req, res) => {
-  const warehouse = await materialsRepository.findWarehouseById(req.params.id);
-  if (!warehouse) {
-    throw new AppError('Warehouse not found', 404);
-  }
-
-  const sourceBalances = await materialsRepository.listStockBalances({ warehouse: warehouse._id });
-  const balancesToMove = sourceBalances.filter((balance) => roundQty(balance.qtyOnHand || 0) > 0 || roundQty(balance.qtyReserved || 0) > 0);
-  const targetWarehouseId = toCleanString(req.body.targetWarehouseId || req.body.mainWarehouseId || req.body.transferToWarehouseId);
-  if (!targetWarehouseId && balancesToMove.length) {
-    throw new AppError('اختر المخزن الرئيسي الذي ستُنقل إليه الأرصدة', 400);
-  }
-  if (targetWarehouseId && String(targetWarehouseId) === String(warehouse._id)) {
-    throw new AppError('لا يمكن تحويل الرصيد إلى نفس المخزن المراد حذفه', 400);
-  }
-
-  const targetWarehouse = targetWarehouseId ? await materialsRepository.findWarehouseById(targetWarehouseId) : null;
-  if (balancesToMove.length && (!targetWarehouse || targetWarehouse.active === false)) {
-    throw new AppError('المخزن الرئيسي غير موجود أو غير فعال', 404);
-  }
-
-  const reservedBalance = balancesToMove.find((balance) => roundQty(balance.qtyReserved || 0) > 0);
-  if (reservedBalance) {
-    throw new AppError(`لا يمكن حذف المخزن لوجود كمية محجوزة للمادة ${reservedBalance.material?.name || reservedBalance.material?.code || ''}`, 409);
-  }
-
-  const items = Array.isArray(req.body.items) ? req.body.items : [];
-  const itemQtyByMaterial = new Map(items.map((item) => [
-    String(item.materialId || item.material || ''),
-    roundQty(item.quantity ?? item.qtyOnHand ?? item.transferQty),
-  ]));
-
-  for (const balance of balancesToMove) {
-    const materialId = String(balance.material?._id || balance.material || '');
-    const requiredQty = roundQty(balance.qtyOnHand || 0);
-    const inputQty = itemQtyByMaterial.get(materialId);
-    if (inputQty === undefined) {
-      throw new AppError(`يجب إدخال كمية تحويل المادة ${balance.material?.name || materialId}`, 400);
-    }
-    if (roundQty(inputQty) !== requiredQty) {
-      throw new AppError(`كمية تحويل المادة ${balance.material?.name || materialId} يجب أن تساوي الرصيد المتبقي ${requiredQty}`, 400);
-    }
-  }
-
-  const transferReference = `WAREHOUSE_DELETE:${warehouse.code}:${Date.now()}`;
-  const movedItems = [];
-
-  for (const balance of balancesToMove) {
-    const materialId = String(balance.material?._id || balance.material || '');
-    const quantity = roundQty(balance.qtyOnHand || 0);
-    if (quantity <= 0) continue;
-
-    await adjustOnHandStock({
-      materialId,
-      warehouseId: warehouse._id,
-      qtyDelta: -quantity,
-      avgCost: toNumber(balance.avgCost, 0),
-      transactionType: 'OUT',
-      referenceType: 'WAREHOUSE_FINAL_TRANSFER',
-      referenceId: transferReference,
-      notes: `تحويل الرصيد قبل حذف المخزن ${warehouse.name}`,
-      actorId: req.user.id,
-      operationKey: `${transferReference}:OUT:${materialId}`,
-    });
-
-    await adjustOnHandStock({
-      materialId,
-      warehouseId: targetWarehouse._id,
-      qtyDelta: quantity,
-      avgCost: toNumber(balance.avgCost, 0),
-      transactionType: 'IN',
-      referenceType: 'WAREHOUSE_FINAL_TRANSFER',
-      referenceId: transferReference,
-      notes: `استلام رصيد من المخزن المحذوف ${warehouse.name}`,
-      actorId: req.user.id,
-      operationKey: `${transferReference}:IN:${materialId}`,
-    });
-
-    movedItems.push({
-      materialId,
-      materialName: balance.material?.name || '',
-      materialCode: balance.material?.code || '',
-      quantity,
-    });
-  }
-
-  await materialsRepository.deleteStockBalancesByWarehouse(warehouse._id);
-  await materialsRepository.deleteWarehouseById(warehouse._id);
-
+  const { warehouse, ...result } = await deleteWarehouseWithInventory({
+    user: req.user,
+    warehouseId: req.params.id,
+    confirmationName: req.body.confirmationName,
+    repository: materialsRepository,
+  });
   await auditService.log({
     actorId: req.user.id,
     action: 'WAREHOUSE_PERMANENTLY_DELETED',
     entityType: 'WAREHOUSE',
     entityId: warehouse._id,
-    before: {
-      name: warehouse.name,
-      code: warehouse.code,
-      active: warehouse.active,
-    },
-    after: {
-      deleted: true,
-      targetWarehouseId: targetWarehouse ? String(targetWarehouse._id) : null,
-      targetWarehouseName: targetWarehouse?.name || '',
-      transferReference,
-      movedItems,
-    },
+    before: { name: warehouse.name, code: warehouse.code, active: warehouse.active },
+    after: { deleted: true, ...result },
     req,
   });
-
-  res.json({
-    deleted: true,
-    warehouseId: String(warehouse._id),
-    targetWarehouse,
-    movedItems,
-    transferReference,
-  });
+  res.json({ deleted: true, warehouseId: String(warehouse._id), ...result });
 });
 
 export const listStockBalances = asyncHandler(async (req, res) => {
@@ -668,6 +588,8 @@ export const adjustStockBalance = asyncHandler(async (req, res) => {
   const warehouseId = toCleanString(req.body.warehouseId || req.body.warehouse);
   const quantity = roundQty(req.body.quantity);
   const transactionType = toUpper(req.body.transactionType || (quantity >= 0 ? 'IN' : 'OUT'));
+  if (transactionType === 'RETURN_IN') throw new AppError('استلام فائض الفني يتم من التصفية المعتمدة وربطه بالذمة', 409);
+  if (quantity < 0 && (req.user.role !== 'GENERAL_MANAGER' || !String(req.body.notes || '').trim())) throw new AppError('الصرف للفني يتم بالطلب والاستلام؛ تصحيح الرصيد السالب للمدير العام مع سبب فقط', 403);
 
   if (!materialId || !warehouseId) {
     throw new AppError('materialId and warehouseId are required', 400);
@@ -720,214 +642,14 @@ export const adjustStockBalance = asyncHandler(async (req, res) => {
   });
 });
 
-export const issueStockCart = asyncHandler(async (req, res) => {
-  const operationKey = toCleanString(req.body.referenceId || req.body.operationKey);
-  if (operationKey) {
-    const existingRequest = await materialsRepository.findRequestByOperationKey(operationKey);
-    if (existingRequest) return res.json({ request: existingRequest, idempotent: true });
-  }
-  const targetType = toCleanString(req.body.targetType || req.body.issueTarget || 'project').toLowerCase();
-  const projectId = toCleanString(req.body.projectId || req.body.project);
-  const employeeId = toCleanString(req.body.employeeId || req.body.technicianId || req.body.holder);
-  const notes = toCleanString(req.body.notes);
+export const issueStockCart = asyncHandler(async (req, res, next) => {
   const items = Array.isArray(req.body.items) ? req.body.items : [];
-
-  if (!items.length) {
-    throw new AppError('سلة الصرف فارغة', 400);
-  }
-
-  if (!['technician', 'project', 'both'].includes(targetType)) throw new AppError('نوع الذمة غير صالح', 400);
-  const needsTechnician = ['technician', 'both'].includes(targetType);
-  const needsProject = ['project', 'both'].includes(targetType);
-
-  if (needsTechnician && !employeeId) {
-    throw new AppError('اختر الفني قبل صرف السلة', 400);
-  }
-
-  if (needsProject && !projectId) {
-    throw new AppError('اختر المشروع قبل صرف السلة', 400);
-  }
-
-  const holder = needsTechnician ? await userRepository.findById(employeeId) : null;
-  if (needsTechnician && !holder) {
-    throw new AppError('الفني غير موجود', 404);
-  }
-
-  const project = projectId ? await projectRepository.findById(projectId) : null;
-  if (projectId && !project) {
-    throw new AppError('Project not found', 404);
-  }
-
-  const normalizedItems = [];
-  for (const input of items) {
-    const materialId = toCleanString(input.materialId || input.material);
-    const warehouseId = toCleanString(input.warehouseId || input.warehouse);
-    const quantity = Math.abs(roundQty(input.quantity));
-
-    if (!materialId || !warehouseId || quantity <= 0) {
-      throw new AppError('تأكد من اختيار المادة والمخزن والكمية لكل مادة', 400);
-    }
-
-    const material = await ensureMaterial(materialId);
-    const warehouse = await ensureWarehouse(warehouseId);
-    normalizedItems.push({
-      material,
-      warehouse,
-      materialId: String(material._id),
-      warehouseId: String(warehouse._id),
-      quantity,
-      issueType: toCleanString(input.issueType || 'custody'),
-      notes: toCleanString(input.notes),
-    });
-  }
-
-  const requestNo = await sequenceService.next('MATERIAL_REQUEST', { prefix: 'MR', digits: 5 });
-  const request = await materialsRepository.createRequest({
-    requestNo,
-    operationKey,
-    project: project?._id || null,
-    projectName: project?.name || '',
-    manualProjectName: project ? '' : 'صرف مباشر من المخزن',
-    requestedBy: req.user.id,
-    requestedFor: holder?._id || null,
-    assignedPreparer: req.user.id,
-    requestDate: new Date(),
-    priority: 'NORMAL',
-    generalNotes: notes,
-    status: 'PENDING_SETTLEMENT',
-    approvalSummary: {
-      approvalType: 'FULL',
-      approvedBy: req.user.id,
-      approvedAt: new Date(),
-      notes: 'صرف مباشر من سلة المخزن',
-    },
-    items: normalizedItems.map((item) => ({
-      material: item.material._id,
-      materialName: item.material.name,
-      categorySnapshot: item.material.category,
-      unitSnapshot: item.material.unit,
-      requestedQty: item.quantity,
-      availableQtyAtRequest: 0,
-      approvedQty: item.quantity,
-      preparedQty: item.quantity,
-      deliveredQty: item.quantity,
-      lineStatus: 'DELIVERED',
-      lineNotes: item.notes,
-    })),
-  });
-
-  const referenceId = `CART-${Date.now()}`;
-  for (const item of normalizedItems) {
-    await adjustOnHandStock({
-      materialId: item.material._id,
-      warehouseId: item.warehouse._id,
-      qtyDelta: -item.quantity,
-      avgCost: Number(item.material.estimatedUnitCost || 0),
-      transactionType: 'OUT',
-      projectId: project?._id || null,
-      requestId: request._id,
-      referenceType: targetType === 'technician' ? 'TECHNICIAN_CUSTODY_CART' : targetType === 'both' ? 'PROJECT_TECHNICIAN_CUSTODY_CART' : 'PROJECT_CART_ISSUE',
-      referenceId,
-      notes: [targetType === 'technician' ? `صرف ذمة فني: ${holder.fullName}` : targetType === 'both' ? `صرف مشروع وفني: ${project?.name || ''} - ${holder?.fullName || ''}` : `صرف مشروع: ${project?.name || ''}`, item.notes, notes].filter(Boolean).join(' - '),
-      actorId: req.user.id,
-      operationKey: `STOCK_CART:${operationKey || String(request._id)}:${item.materialId}:${item.warehouseId}`,
-    });
-  }
-
-  let dispatch = null;
-  let custody = null;
-  if (['technician', 'project', 'both'].includes(targetType)) {
-    const dispatchNo = await sequenceService.next('MATERIAL_DISPATCH', { prefix: 'DN', digits: 5 });
-    const firstWarehouse = normalizedItems[0]?.warehouse?._id || null;
-    const dispatchItems = normalizedItems.map((item) => ({
-      material: item.material._id,
-      materialName: item.material.name,
-      unit: item.material.unit,
-      deliveredQty: item.quantity,
-      conditionAtDelivery: 'صالحة',
-      notes: item.notes,
-    }));
-
-    dispatch = await materialsRepository.createDispatch({
-      dispatchNo,
-      request: request._id,
-      project: project?._id || null,
-      manualProjectName: project ? '' : 'صرف مباشر من المخزن',
-      recipient: holder?._id || null,
-      custodyType: targetType.toUpperCase(),
-      deliveredBy: req.user.id,
-      preparedBy: req.user.id,
-      warehouse: firstWarehouse,
-      deliveredAt: new Date(),
-      confirmationMethod: 'CHECKBOX',
-      status: 'CONFIRMED',
-      notes,
-      items: dispatchItems,
-    });
-
-    const custodyNo = await sequenceService.next('MATERIAL_CUSTODY', { prefix: 'CU', digits: 5 });
-    custody = await materialsRepository.createCustody({
-      custodyNo,
-      request: request._id,
-      project: project?._id || null,
-      manualProjectName: project ? '' : 'صرف مباشر من المخزن',
-      holder: holder?._id || null,
-      custodyType: targetType.toUpperCase(),
-      openedAt: new Date(),
-      status: 'OPEN',
-      dispatchNotes: [dispatch._id],
-      notes,
-      items: dispatchItems.map((line) => ({
-        material: line.material,
-        materialName: line.materialName,
-        assignedTechnician: holder?._id || null,
-        unit: line.unit,
-        receivedQty: line.deliveredQty,
-        consumedQty: 0,
-        remainingQty: line.deliveredQty,
-        returnedQty: 0,
-        damagedQty: 0,
-        lostQty: 0,
-        lineStatus: 'OPEN',
-        notes: line.notes,
-      })),
-    });
-
-    await materialsRepository.updateRequestById(request._id, {
-      dispatchRef: dispatch._id,
-      custodyRef: custody._id,
-    });
-  }
-
-  const notificationRecipients = [...new Set([
-    holder?._id,
-    project?.projectManager?._id || project?.projectManager,
-    project?.owner?._id || project?.owner,
-  ].filter(Boolean).map(String))];
-  for (const recipientId of notificationRecipients) {
-    await notificationService.notifySystem(
-      recipientId,
-      'صرف مواد مخزنية',
-      `تم صرف ${normalizedItems.length} مادة على ${targetType === 'technician' ? `ذمة الفني ${holder?.fullName || ''}` : targetType === 'both' ? `المشروع ${project?.name || ''} والفني ${holder?.fullName || ''}` : `المشروع ${project?.name || ''}`}.`,
-      { requestId: String(request._id), custodyId: custody?._id ? String(custody._id) : null, projectId: project?._id ? String(project._id) : null, targetType },
-    );
-  }
-
-  await auditService.log({
-    actorId: req.user.id,
-    action: 'MATERIAL_CART_ISSUED',
-    entityType: 'MATERIAL_REQUEST',
-    entityId: request._id,
-    after: {
-      requestNo,
-      targetType,
-      projectId: project?._id || null,
-      employeeId: holder?._id || null,
-      items: normalizedItems.length,
-      custodyId: custody?._id || null,
-    },
-    req,
-  });
-
-  res.status(201).json({ request, dispatch, custody });
+  const warehouses = [...new Set(items.map((item) => String(item.warehouseId || '')))];
+  if (!items.length || warehouses.length !== 1 || !warehouses[0]) throw new AppError('يجب تحديد مخزن واحد لكل طلب', 400);
+  const technicianId = String(req.body.employeeId || req.body.technicianId || '');
+  if (!technicianId) throw new AppError('اختر الفني المستلم', 400);
+  req.body = { ...req.body, operationKey: req.body.referenceId || req.body.operationKey, warehouseId: warehouses[0], requestedForId: technicianId,
+    manualProjectName: req.body.projectId ? '' : 'طلب مواد للفني',
+    items: items.map((item) => ({ materialId: item.materialId || item.material, requestedQty: item.quantity, notes: item.notes })) };
+  return createMaterialRequest(req, res, next);
 });

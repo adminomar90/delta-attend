@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { api } from '../../lib/api';
 import { authStorage } from '../../lib/auth';
 import { useAuth } from '../../lib/AuthContext';
+import { resolveCustodyReturnPath } from '../../lib/custodyWhatsapp.mjs';
 
 export default function LoginPage() {
   const router = useRouter();
@@ -60,7 +61,8 @@ export default function LoginPage() {
       
       // Ensure data is saved before redirecting
       setTimeout(() => {
-        router.push('/dashboard');
+        const next = new URLSearchParams(window.location.search).get('next');
+        router.push(resolveCustodyReturnPath(next, window.location.origin) || '/dashboard');
       }, 100);
     } catch (err) {
       console.error('Login error:', err);

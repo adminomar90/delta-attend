@@ -6,6 +6,7 @@ import { buildMaterialsPdfBuffer } from '../../infrastructure/reports/materialsP
 import { buildMaterialRequestPdfBuffer } from '../../infrastructure/reports/materialRequestPdfBuilder.js';
 import {
   materialsRepository,
+  assertRequestReadable,
   toUpper,
   roundQty,
   sumBy,
@@ -367,6 +368,7 @@ export const exportRequestPdf = asyncHandler(async (req, res) => {
   if (!request) {
     throw new AppError('Material request not found', 404);
   }
+  await assertRequestReadable(req, request);
 
   const buffer = await buildMaterialRequestPdfBuffer({ request });
   const filename = `material-request-${request.requestNo}.pdf`;

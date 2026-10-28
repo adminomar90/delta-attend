@@ -40,6 +40,9 @@ const returnItemSchema = new mongoose.Schema(
 
 const materialReturnReceiptSchema = new mongoose.Schema(
   {
+    operationKey: { type: String, default: '' },
+    warehouse: { type: mongoose.Schema.Types.ObjectId, ref: 'Warehouse', default: null },
+    damagedWarehouse: { type: mongoose.Schema.Types.ObjectId, ref: 'Warehouse', default: null },
     returnNo: {
       type: String,
       required: true,
@@ -67,7 +70,7 @@ const materialReturnReceiptSchema = new mongoose.Schema(
     project: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'Project',
-      required: true,
+      default: null,
       index: true,
     },
     returnedBy: {
@@ -112,4 +115,5 @@ const materialReturnReceiptSchema = new mongoose.Schema(
   },
 );
 
+materialReturnReceiptSchema.index({ operationKey: 1 }, { unique: true, partialFilterExpression: { operationKey: { $type: 'string', $gt: '' } } });
 export const MaterialReturnReceiptModel = mongoose.model('MaterialReturnReceipt', materialReturnReceiptSchema);

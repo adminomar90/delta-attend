@@ -100,7 +100,7 @@ export default function ApprovalsPage() {
   }, [currentUser?.role, currentUser?.customPermissions, currentUser?.permissions]);
 
   const canApproveMaterials = useMemo(() => {
-    return hasPermission(currentUser, Permission.REVIEW_MATERIAL_REQUESTS);
+    return hasPermission(currentUser, Permission.MANAGE_MATERIAL_INVENTORY);
   }, [currentUser?.role, currentUser?.customPermissions, currentUser?.permissions]);
 
   const canViewApprovalHistory = useMemo(() => {

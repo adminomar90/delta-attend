@@ -15,6 +15,8 @@ const materialPopulate = [
 const escapeRegex = (value = '') => String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
 const requestPopulate = [
+  { path: 'warehouse', select: 'name code active type' },
+  { path: 'customer', select: 'name phone whatsapp email province address' },
   { path: 'project', select: 'name code status owner' },
   { path: 'requestedBy', select: 'fullName role employeeCode phone manager' },
   { path: 'requestedFor', select: 'fullName role employeeCode phone' },
@@ -143,10 +145,36 @@ export class MaterialsRepository {
     return StockBalanceModel.deleteMany({ warehouse: warehouseId });
   }
 
+  async findWarehouseMaterialIds(warehouseId) {
+    const [balances, transactions] = await Promise.all([
+      StockBalanceModel.distinct('material', { warehouse: warehouseId }),
+      StockTransactionModel.distinct('material', { warehouse: warehouseId }),
+    ]);
+    return [...new Set([...balances, ...transactions].filter(Boolean).map(String))];
+  }
+
+  async findMaterialIdsUsedOutsideWarehouse(materialIds, warehouseId) {
+    if (!materialIds.length) return [];
+    const filter = { material: { $in: materialIds }, warehouse: { $ne: warehouseId } };
+    const [balances, transactions] = await Promise.all([
+      StockBalanceModel.distinct('material', filter),
+      StockTransactionModel.distinct('material', filter),
+    ]);
+    return [...new Set([...balances, ...transactions].filter(Boolean).map(String))];
+  }
+
+  async deleteMaterialsByIds(materialIds) {
+    return MaterialModel.deleteMany({ _id: { $in: materialIds } });
+  }
+
+  async deleteStockTransactionsByWarehouse(warehouseId) {
+    return StockTransactionModel.deleteMany({ warehouse: warehouseId });
+  }
+
   async listStockBalances(filter = {}) {
     return StockBalanceModel.find(filter)
       .populate('material', 'code name barcode brand model category unit active minStock estimatedUnitCost')
-      .populate('warehouse', 'name code location active')
+      .populate('warehouse', 'name code location active type')
       .sort({ updatedAt: -1 });
   }
 
@@ -203,7 +231,7 @@ export class MaterialsRepository {
     );
 
     const filter = { material: materialId, warehouse: warehouseId };
-    if (qtyDelta < 0) filter.qtyOnHand = { $gte: Math.abs(qtyDelta) };
+    if (qtyDelta < 0) filter.$expr = { $gte: [{ $subtract: ['$qtyOnHand', '$qtyReserved'] }, Math.abs(qtyDelta)] };
     if (operationKey) filter.appliedOperationKeys = { $ne: operationKey };
 
     const update = { $inc: { qtyOnHand: qtyDelta } };
@@ -309,6 +337,28 @@ export class MaterialsRepository {
 
   async createCustody(payload) {
     return MaterialCustodyModel.create(payload);
+  }
+
+  async findResettableTechnicianCustodies(technicianId, statuses) {
+    return MaterialCustodyModel.find({ holder: technicianId, status: { $in: statuses } }).sort({ createdAt: -1 }).lean();
+  }
+
+  async deleteTechnicianOpenCustodies(technicianId, custodyIds, statuses) {
+    if (!custodyIds.length) return { deletedCustodiesCount: 0, deletedReconciliationsCount: 0, deletedReturnReceiptsCount: 0 };
+    const filter = { _id: { $in: custodyIds }, holder: technicianId, status: { $in: statuses } };
+    const current = await MaterialCustodyModel.find(filter).select('_id').lean();
+    const ids = current.map((custody) => custody._id);
+    const reconciliations = await MaterialReconciliationModel.deleteMany({ custody: { $in: ids } });
+    const receipts = await MaterialReturnReceiptModel.deleteMany({ custody: { $in: ids } });
+    await MaterialRequestModel.updateMany({ custodyRef: { $in: ids } }, {
+      $set: { custodyRef: null, reconciliationRef: null, status: 'CLOSED', closedAt: new Date() },
+    });
+    const deleted = await MaterialCustodyModel.deleteMany({ ...filter, _id: { $in: ids } });
+    return {
+      deletedCustodiesCount: deleted.deletedCount,
+      deletedReconciliationsCount: reconciliations.deletedCount,
+      deletedReturnReceiptsCount: receipts.deletedCount,
+    };
   }
 
   async listCustodies(filter = {}, options = {}) {

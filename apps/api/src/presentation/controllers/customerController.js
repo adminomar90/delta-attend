@@ -1,5 +1,5 @@
 import { CustomerRepository } from '../../infrastructure/db/repositories/CustomerRepository.js';
-import { DailyWorkPlanRepository } from '../../infrastructure/db/repositories/DailyWorkPlanRepository.js';
+import { userCanSeeCustomer } from '../../application/services/customerAccessService.js';
 import { auditService } from '../../application/services/auditService.js';
 import {
   buildCustomerAttachment,
@@ -12,12 +12,11 @@ import {
   toCleanString,
   toDateValue,
 } from '../../application/services/customerService.js';
-import { Permission, Roles } from '../../shared/constants.js';
+import { Permission } from '../../shared/constants.js';
 import { hasPermission } from '../../shared/permissions.js';
 import { AppError, asyncHandler } from '../../shared/errors.js';
 
 const customerRepository = new CustomerRepository();
-const dailyWorkPlanRepository = new DailyWorkPlanRepository();
 
 const toId = (value) => String(value?._id || value?.id || value || '').trim();
 const actorLabel = (req) => req.user.fullName || req.user.name || 'مستخدم النظام';
@@ -115,31 +114,6 @@ const buildCustomerPayload = async (req, existingCustomer = null) => {
     lastModifiedByName: actorLabel(req),
     lastModifiedAt: new Date(),
   };
-};
-
-const userCanManageCustomers = (user) =>
-  hasPermission(user, Permission.MANAGE_CUSTOMERS) || hasPermission(user, Permission.CREATE_CUSTOMERS);
-
-const userCanSeeCustomer = async (req, customer) => {
-  if (userCanManageCustomers(req.user) || req.user.role === Roles.GENERAL_MANAGER) return true;
-  if (hasPermission(req.user, Permission.VIEW_CUSTOMER_FINANCIAL_INFO)) return true;
-  if (!hasPermission(req.user, Permission.VIEW_CUSTOMERS)) return false;
-
-  const actorId = toId(req.user.id);
-  if (toId(customer.createdBy) === actorId) return true;
-  const linkedPlanIds = (customer.linkedDailyWorkPlans || []).map(toId).filter(Boolean);
-  if (!linkedPlanIds.length) return false;
-
-  const visiblePlans = await dailyWorkPlanRepository.list({
-    _id: { $in: linkedPlanIds },
-    $or: [
-      { 'assignees.user': actorId },
-      { teamLeader: actorId },
-      { supervisor: actorId },
-      { createdBy: actorId },
-    ],
-  }, { limit: 1 });
-  return visiblePlans.length > 0;
 };
 
 const redactForFinancialOnly = (customer, req) => {

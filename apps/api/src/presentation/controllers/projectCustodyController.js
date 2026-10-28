@@ -10,6 +10,7 @@ import { Permission } from '../../shared/constants.js';
 import { notificationService } from '../../application/services/notificationService.js';
 import { sequenceService } from '../../application/services/sequenceService.js';
 import { resolveManagedUserIds } from '../../shared/accessScope.js';
+import { workflowCustodyStatus } from '../../application/services/inventoryWorkflowService.js';
 
 const repository = new MaterialsRepository();
 const projectRepository = new ProjectRepository();
@@ -153,11 +154,14 @@ export const getProjectCustody = asyncHandler(async (req, res) => {
 });
 
 export const closeProjectCustody = asyncHandler(async (req, res) => {
+  const project = await projectRepository.findById(req.params.projectId);
+  if (!project) throw new AppError('المشروع غير موجود', 404);
+  await assertProjectCustodyScope(req, project);
   const reason = String(req.body.reason || '').trim();
   if (!reason) throw new AppError('سبب الإغلاق مطلوب', 400);
   const custodies = await repository.listCustodies({ project: req.params.projectId }, { limit: 1000 });
   if (!custodies.length) throw new AppError('لا توجد ذمة للمشروع', 404);
-  const unresolved = custodies.some((custody) => (custody.items || []).some((item) => n(item.consumedQty) + n(item.returnedQty) + n(item.damagedQty) + n(item.lostQty) < n(item.receivedQty)));
+  const unresolved = custodies.some((custody) => workflowCustodyStatus(custody.items) !== 'CLOSED');
   if (unresolved) throw new AppError('لا يمكن إغلاق ذمة المشروع قبل تسوية جميع المواد', 409);
   const updated = [];
   for (const custody of custodies) updated.push(await repository.updateCustodyById(custody._id, { status: 'CLOSED', closedAt: new Date(), isOverdue: false, notes: [custody.notes, `إغلاق ذمة المشروع: ${reason}`].filter(Boolean).join('\n') }));
@@ -166,6 +170,9 @@ export const closeProjectCustody = asyncHandler(async (req, res) => {
 });
 
 export const reopenProjectCustody = asyncHandler(async (req, res) => {
+  const project = await projectRepository.findById(req.params.projectId);
+  if (!project) throw new AppError('المشروع غير موجود', 404);
+  await assertProjectCustodyScope(req, project);
   const reason = String(req.body.reason || '').trim();
   if (!reason) throw new AppError('سبب إعادة الفتح مطلوب', 400);
   const custodies = await repository.listCustodies({ project: req.params.projectId, status: 'CLOSED' }, { limit: 1000 });
@@ -186,6 +193,10 @@ export const updateProjectCustodyItem = asyncHandler(async (req, res) => {
   if (!reason || !note) throw new AppError('سبب العملية والملاحظة إلزاميان', 400);
   const custody = await repository.findCustodyById(req.params.custodyId);
   if (!custody || idOf(custody.project) !== String(req.params.projectId)) throw new AppError('سجل الذمة غير موجود', 404);
+  const project = await projectRepository.findById(req.params.projectId);
+  if (!project) throw new AppError('المشروع غير موجود', 404);
+  await assertProjectCustodyScope(req, project);
+  if (custody.appliedReceiptKeys?.length) throw new AppError('ذمة مستلمة ضمن الدورة الجديدة؛ استخدم التصفية والإرجاع ثم طلباً جديداً لتغيير الكميات أو المستلم', 409);
   if (custody.status === 'CLOSED') throw new AppError('لا يمكن تعديل ذمة مغلقة', 409);
   const line = custody.items.id(req.params.itemId);
   if (!line) throw new AppError('المادة غير موجودة في الذمة', 404);

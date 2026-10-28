@@ -15,6 +15,7 @@ const warehouseSchema = new mongoose.Schema(
       trim: true,
       index: true,
     },
+    type: { type: String, enum: ['REGULAR', 'DAMAGED'], default: 'REGULAR', index: true },
     location: {
       type: String,
       default: '',

@@ -40,6 +40,7 @@ const custodyItemSchema = new mongoose.Schema(
       default: 0,
       min: 0,
     },
+    damagedReturnedQty: { type: Number, default: 0, min: 0 },
     damagedQty: {
       type: Number,
       default: 0,
@@ -100,6 +101,8 @@ const materialCustodySchema = new mongoose.Schema(
       index: true,
     },
     custodyType: { type: String, enum: ['TECHNICIAN', 'PROJECT', 'BOTH'], default: 'BOTH', index: true },
+    appliedReceiptKeys: { type: [String], default: [] },
+    appliedReturnKeys: { type: [String], default: [] },
     recipientDepartment: { type: String, default: '', trim: true },
     receiptConfirmedAt: { type: Date, default: null },
     attachments: { type: [mongoose.Schema.Types.Mixed], default: [] },

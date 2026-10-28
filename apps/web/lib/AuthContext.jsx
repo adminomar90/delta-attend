@@ -1,5 +1,7 @@
 'use client';
 
+import { custodyLoginUrl } from './custodyWhatsapp.mjs';
+
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import { api, AUTH_EXPIRED_EVENT } from './api';
@@ -92,7 +94,7 @@ export function AuthProvider({ children }) {
       if (isPublicPage) return;
       setUser(null);
       syncStorage(null);
-      router.push('/login');
+      router.push(custodyLoginUrl(window.location));
     };
     window.addEventListener(AUTH_EXPIRED_EVENT, handleExpired);
     return () => window.removeEventListener(AUTH_EXPIRED_EVENT, handleExpired);

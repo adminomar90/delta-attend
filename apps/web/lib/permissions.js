@@ -1,4 +1,4 @@
-﻿'use client';
+'use client';
 
 export const Permission = {
   MANAGE_USERS: 'MANAGE_USERS',
@@ -116,6 +116,7 @@ export const Permission = {
 };
 
 const RolePermissions = {
+  WAREHOUSE_KEEPER: [Permission.MANAGE_MATERIAL_CATALOG, Permission.MANAGE_MATERIAL_INVENTORY, Permission.CREATE_MATERIAL_REQUESTS, Permission.REVIEW_MATERIAL_REQUESTS, Permission.PREPARE_MATERIAL_REQUESTS, Permission.DISPATCH_MATERIAL_REQUESTS, Permission.RECONCILE_MATERIAL_CUSTODY, Permission.CLOSE_MATERIAL_CUSTODY, Permission.VIEW_MATERIAL_REPORTS, Permission.VIEW_PROJECT_CUSTODIES, Permission.EXPORT_PROJECT_CUSTODIES],
   GENERAL_MANAGER: Object.values(Permission),
   HR_MANAGER: [
     Permission.MANAGE_USERS,

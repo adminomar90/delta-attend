@@ -40,11 +40,15 @@ import {
   listMaterialRequestsForApprovals,
   supplierApproveMaterialRequest,
   confirmReceipt,
+  cancelRemainingRequest,
   archiveMaterialRequest,
   openCustodiesSummary,
 } from '../controllers/materialsRequestController.js';
 import {
   listCustodies,
+  previewCustodyReset,
+  resetCustodiesForTechnician,
+  exportTechnicianCustodyPdf,
   getCustody,
   custodyWhatsappLink,
   submitCustodyReconciliation,
@@ -72,6 +76,7 @@ const materialsRoutes = Router();
    even if they don't hold a material-management permission. Each controller
    verifies ownership / assignment. */
 materialsRoutes.patch('/requests/:id/confirm-receipt', requireAuth, confirmReceipt);
+materialsRoutes.patch('/requests/:id/cancel-remaining', requireAuth, cancelRemainingRequest);
 materialsRoutes.patch('/requests/:id/supplier-approve', requireAuth, supplierApproveMaterialRequest);
 materialsRoutes.patch('/requests/:id/prepare', requireAuth, prepareMaterialRequest);
 
@@ -128,13 +133,13 @@ materialsRoutes.post('/stock/cart-issue', canManageMaterialInventory, issueStock
 
 materialsRoutes.get('/requests', listMaterialRequests);
 materialsRoutes.get('/employees', listMaterialEmployees);
-materialsRoutes.get('/approvals/requests/pending', canReviewMaterialRequests, listMaterialRequestsForApprovals);
+materialsRoutes.get('/approvals/requests/pending', canManageMaterialInventory, listMaterialRequestsForApprovals);
 materialsRoutes.post('/requests', canCreateMaterialRequests, createMaterialRequest);
 materialsRoutes.get('/requests/:id', getMaterialRequest);
 materialsRoutes.patch('/requests/:id', canCreateMaterialRequests, updateMaterialRequest);
 materialsRoutes.patch(
   '/requests/:id/review',
-  requireAnyPermission(Permission.REVIEW_MATERIAL_REQUESTS, Permission.MANAGE_MATERIAL_INVENTORY),
+  canManageMaterialInventory,
   reviewMaterialRequest,
 );
 materialsRoutes.patch(
@@ -162,6 +167,10 @@ materialsRoutes.patch('/project-custodies/:projectId/close', requireAnyPermissio
 materialsRoutes.patch('/project-custodies/:projectId/reopen', requireAnyPermission(Permission.REOPEN_PROJECT_CUSTODY), reopenProjectCustody);
 materialsRoutes.patch('/project-custodies/:projectId/custodies/:custodyId/items/:itemId', requireAnyPermission(Permission.MANAGE_MATERIAL_INVENTORY, Permission.ADJUST_PROJECT_CUSTODY, Permission.CANCEL_PROJECT_CUSTODY_ITEM, Permission.TRANSFER_PROJECT_CUSTODY_TECHNICIAN, Permission.TRANSFER_PROJECT_CUSTODY_PROJECT), updateProjectCustodyItem);
 
+materialsRoutes.get('/custodies/statement/pdf', exportTechnicianCustodyPdf);
+materialsRoutes.get('/custodies/:id/pdf', exportTechnicianCustodyPdf);
+materialsRoutes.get('/custodies/reset-preview', previewCustodyReset);
+materialsRoutes.delete('/custodies/reset', resetCustodiesForTechnician);
 materialsRoutes.get('/custodies', listCustodies);
 materialsRoutes.get('/custodies/:id', getCustody);
 materialsRoutes.post('/custodies/:id/whatsapp-link', custodyWhatsappLink);
@@ -176,15 +185,15 @@ materialsRoutes.post(
 materialsRoutes.patch('/custodies/:id/close', canCloseMaterialCustody, closeCustody);
 
 materialsRoutes.get('/reconciliations', listReconciliations);
-materialsRoutes.get('/approvals/reconciliations/pending', canReviewMaterialRequests, listReconciliationsForApprovals);
+materialsRoutes.get('/approvals/reconciliations/pending', canManageMaterialInventory, listReconciliationsForApprovals);
 materialsRoutes.patch(
   '/reconciliations/:id/review',
-  requireAnyPermission(Permission.REVIEW_MATERIAL_REQUESTS, Permission.MANAGE_MATERIAL_INVENTORY),
+  canManageMaterialInventory,
   reviewReconciliation,
 );
 materialsRoutes.post(
   '/reconciliations/:id/returns',
-  requireAnyPermission(Permission.DISPATCH_MATERIAL_REQUESTS, Permission.MANAGE_MATERIAL_INVENTORY),
+  canManageMaterialInventory,
   receiveReturnedMaterials,
 );
 materialsRoutes.post('/reconciliations/:id/whatsapp-link', reconciliationWhatsappLink);

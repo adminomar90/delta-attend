@@ -58,6 +58,8 @@ const reconciliationItemSchema = new mongoose.Schema(
       default: 0,
       min: 0,
     },
+    damagedToReturnQty: { type: Number, default: 0, min: 0 },
+    damagedReturnedConfirmed: { type: Number, default: 0, min: 0 },
     notes: {
       type: String,
       default: '',
@@ -124,6 +126,8 @@ const materialReconciliationSchema = new mongoose.Schema(
       default: '',
       trim: true,
     },
+    pendingReturnBatch: { type: mongoose.Schema.Types.Mixed, default: null },
+    appliedReturnKeys: { type: [String], default: [] },
     reviewNotes: {
       type: String,
       default: '',

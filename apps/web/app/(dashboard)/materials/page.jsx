@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
+import { useEffect, useMemo, useState, useCallback, useId } from 'react';
 import { api } from '../../../lib/api';
 import { authStorage } from '../../../lib/auth';
 import { Permission, hasAnyPermission, hasPermission } from '../../../lib/permissions';
@@ -8,7 +8,7 @@ import { Permission, hasAnyPermission, hasPermission } from '../../../lib/permis
 /* ─── constants ─── */
 const statusLabel = {
   /* new workflow */
-  PENDING_MANAGER_APPROVAL: 'بانتظار اعتماد مدير المشاريع',
+  PENDING_MANAGER_APPROVAL: 'بانتظار اعتماد أمين المخزن',
   PENDING_SUPPLIER_APPROVAL: 'بانتظار اعتماد المجهز',
   IN_PROGRESS: 'قيد التجهيز',
   PENDING_RECEIPT: 'بانتظار استلام الموظف',
@@ -34,7 +34,123 @@ const unitLabels = { PIECE: 'قطعة', METER: 'متر', KG: 'كجم', TON: 'ط�
 
 const toNum = (v) => { const n = Number(v); return Number.isFinite(n) ? n : 0; };
 const uid = () => `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
-const makeItem = () => ({ id: uid(), materialName: '', unit: 'METER', requestedQty: '', notes: '' });
+const makeItem = () => ({ id: uid(), materialId: '', materialName: '', unit: 'METER', requestedQty: '', notes: '' });
+
+const normalizeMaterialSearch = (value) => String(value || '').normalize('NFKC').toLowerCase()
+  .replace(/[\u064B-\u065F\u0670\u0640]/g, '').replace(/[أإآٱ]/g, 'ا').replace(/ى/g, 'ي');
+
+const filterRequestMaterials = (materials, query) => {
+  const words = normalizeMaterialSearch(query).trim().split(/\s+/).filter(Boolean);
+  return materials.filter((material) => {
+    const text = normalizeMaterialSearch([material.name, material.code, material.barcode, material.brand, material.model, material.category].filter(Boolean).join(' '));
+    return words.every((word) => text.includes(word));
+  });
+};
+
+const RequestTargetFields = ({ form, setForm, projects, customers, customerError }) => {
+  const isCustomer = form.requestTarget === 'CUSTOMER';
+  const project = projects.find((item) => item._id === form.projectId);
+  const customer = customers.find((item) => item._id === form.customerId);
+  const changeTarget = (requestTarget) => setForm((prev) => prev.requestTarget === requestTarget ? prev : ({ ...prev, requestTarget, projectId: '', manualProjectName: '', customerId: '', clientName: '' }));
+  return (
+    <fieldset style={{ border: '1px solid var(--border)', borderRadius: 10, padding: 12, margin: '0 0 16px' }}>
+      <legend>الطلب صادر إلى</legend>
+      <div style={{ display: 'flex', gap: 24, marginBottom: 12 }}>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}><input type="checkbox" checked={!isCustomer} onChange={() => changeTarget('PROJECT')} />مشروع</label>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}><input type="checkbox" checked={isCustomer} onChange={() => changeTarget('CUSTOMER')} />زبون</label>
+      </div>
+      {isCustomer ? (
+        <>
+          <label>الزبون *
+            <select className="select" required value={form.customerId || ''} onChange={(event) => {
+              const selected = customers.find((item) => item._id === event.target.value);
+              setForm((prev) => ({ ...prev, customerId: selected?._id || '', clientName: selected?.name || '' }));
+            }} style={{ width: '100%' }}>
+              <option value="">{customerError ? 'تعذر تحميل الزبائن' : customers.length ? 'اختر الزبون' : 'لا يوجد زبائن متاحون'}</option>
+              {form.customerId && !customer && <option value={form.customerId}>{form.clientName || 'الزبون المسجل في الطلب'}</option>}
+              {customers.map((item) => <option key={item._id} value={item._id}>{item.name}{item.phone ? ` — ${item.phone}` : ''}{item.province ? ` — ${item.province}` : ''}</option>)}
+            </select>
+          </label>
+          {customerError && <p role="alert" style={{ color: '#e57373' }}>{customerError}</p>}
+          {customer && <div className="grid-3" style={{ marginTop: 12, color: 'var(--text-soft)' }}>
+            <div>اسم الزبون: {customer.name}</div><div>الهاتف: {customer.phone || customer.whatsapp || '—'}</div>
+            <div>البريد: {customer.email || '—'}</div><div>المحافظة: {customer.province || '—'}</div><div>العنوان: {customer.address || '—'}</div>
+          </div>}
+        </>
+      ) : (
+        <>
+          <label>المشروع *
+            <select className="select" required value={form.projectId || (form.manualProjectName ? '__manual__' : '')} onChange={(event) => {
+              const selected = projects.find((item) => item._id === event.target.value);
+              setForm((prev) => ({ ...prev, projectId: selected?._id || '', manualProjectName: '', clientName: selected?.clientName || '' }));
+            }} style={{ width: '100%' }}>
+              <option value="">{projects.length ? 'اختر المشروع' : 'لا توجد مشاريع متاحة'}</option>
+              {form.manualProjectName && !form.projectId && <option value="__manual__">{form.manualProjectName}</option>}
+              {form.projectId && !project && <option value={form.projectId}>{form.projectName || 'المشروع المسجل في الطلب'}</option>}
+              {projects.map((item) => <option key={item._id} value={item._id}>{item.name}{item.code ? ` — ${item.code}` : ''}</option>)}
+            </select>
+          </label>
+          {project && <div className="grid-3" style={{ marginTop: 12, color: 'var(--text-soft)' }}>
+            <div>اسم المشروع: {project.name}</div><div>الكود: {project.code || '—'}</div><div>الموقع: {project.location || '—'}</div>
+            <div>الزبون: {project.clientName || project.customer?.name || '—'}</div><div>الهاتف: {project.clientPhone || '—'}</div><div>الوصف: {project.description || '—'}</div>
+          </div>}
+        </>
+      )}
+    </fieldset>
+  );
+};
+
+const MaterialSearch = ({ materials, value, onSelect, disabled, placeholder }) => {
+  const listId = useId();
+  const [query, setQuery] = useState(null);
+  const [open, setOpen] = useState(false);
+  const [activeIndex, setActiveIndex] = useState(-1);
+  const selected = materials.find((material) => material._id === value);
+  const options = useMemo(() => filterRequestMaterials(materials, query || ''), [materials, query]);
+  const choose = (material) => {
+    onSelect(material);
+    setQuery(null);
+    setOpen(false);
+    setActiveIndex(-1);
+  };
+
+  useEffect(() => {
+    if (open && activeIndex >= 0) document.getElementById(`${listId}-${activeIndex}`)?.scrollIntoView({ block: 'nearest' });
+  }, [activeIndex, open, listId]);
+
+  return (
+    <div style={{ position: 'relative', minWidth: 240 }} onBlur={(event) => {
+      if (!event.currentTarget.contains(event.relatedTarget)) { setOpen(false); setQuery(null); }
+    }}>
+      <input className="input" role="combobox" aria-label="المادة" aria-autocomplete="list" aria-expanded={open}
+        aria-controls={listId} aria-activedescendant={open && activeIndex >= 0 && options[activeIndex] ? `${listId}-${activeIndex}` : undefined}
+        autoComplete="off" required disabled={disabled} placeholder={placeholder} value={query ?? selected?.name ?? ''}
+        onFocus={() => { setOpen(true); setActiveIndex(-1); }}
+        onChange={(event) => { setQuery(event.target.value); onSelect(null); setOpen(true); setActiveIndex(-1); }}
+        onKeyDown={(event) => {
+          if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+            event.preventDefault(); setOpen(true);
+            setActiveIndex((index) => options.length ? (event.key === 'ArrowDown' ? (index + 1) % options.length : (index <= 0 ? options.length - 1 : index - 1)) : -1);
+          } else if (event.key === 'Enter' && open) {
+            event.preventDefault();
+            if (options[activeIndex]) choose(options[activeIndex]);
+          } else if (event.key === 'Escape') { event.preventDefault(); setOpen(false); setQuery(null); }
+        }} style={{ width: '100%' }} />
+      {open && !disabled && (
+        <div id={listId} role="listbox" aria-label="مواد المخزن" style={{ position: 'absolute', insetInline: 0, top: '100%', zIndex: 50, maxHeight: 260, overflowY: 'auto', background: 'var(--bg-card, #0b1b30)', border: '1px solid #174568', borderRadius: 8, boxShadow: '0 8px 24px #0006' }}>
+          {options.length ? options.map((material, index) => (
+            <div key={material._id} id={`${listId}-${index}`} role="option" aria-selected={material._id === value}
+              onMouseDown={(event) => event.preventDefault()} onMouseEnter={() => setActiveIndex(index)} onClick={() => choose(material)}
+              style={{ padding: '10px 12px', cursor: 'pointer', background: activeIndex === index ? '#174568' : 'transparent' }}>
+              <div>{material.name}</div>
+              <small style={{ color: 'var(--text-soft)' }}>{[material.code, material.brand, material.model].filter(Boolean).join(' - ')} · المتوفر: {material.qtyAvailable} {unitLabels[material.unit] || material.unit}</small>
+            </div>
+          )) : <div role="status" style={{ padding: 12 }}>لا توجد مواد مطابقة للبحث في هذا المخزن</div>}
+        </div>
+      )}
+    </div>
+  );
+};
 
 const flattenOrgChart = (roots = []) => {
   const q = Array.isArray(roots) ? [...roots] : [], list = [];
@@ -87,8 +203,11 @@ export default function MaterialsPage() {
   const [info, setInfo] = useState('');
   const [allUsers, setAllUsers] = useState([]); /* all employees — used for preparer dropdown */
   const [materials, setMaterials] = useState([]);
+  const [stockBalances, setStockBalances] = useState([]);
   const [warehouses, setWarehouses] = useState([]);
   const [projects, setProjects] = useState([]);
+  const [customers, setCustomers] = useState([]);
+  const [customerError, setCustomerError] = useState('');
   const [users, setUsers] = useState([]);
   const [requests, setRequests] = useState([]);
   const [custodies, setCustodies] = useState([]);
@@ -120,14 +239,9 @@ export default function MaterialsPage() {
 
   /* request form */
   const [requestForm, setRequestForm] = useState({
-    projectId: '', manualProjectName: '', priority: 'NORMAL', clientName: '', requestedForId: '',
+    requestTarget: 'PROJECT', customerId: '', projectId: '', manualProjectName: '', priority: 'NORMAL', clientName: '', requestedForId: '',
     assignedPreparerId: '', warehouseId: '', generalNotes: '', items: [makeItem()],
   });
-
-  /* project combobox state */
-  const [projectSearch, setProjectSearch] = useState('');
-  const [projectDropdownOpen, setProjectDropdownOpen] = useState(false);
-  const projectComboRef = useRef(null);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -139,22 +253,16 @@ export default function MaterialsPage() {
     else if (params.get('action') === 'request') setActiveTab('requests');
   }, []);
 
-  useEffect(() => {
-    if (!requestForm.projectId || projectSearch) return;
-    const linkedProject = projects.find((project) => project._id === requestForm.projectId);
-    if (linkedProject) setProjectSearch(linkedProject.name || linkedProject.code || '');
-  }, [projects, requestForm.projectId, projectSearch]);
-
-  const filteredProjects = useMemo(() => {
-    if (!projectSearch.trim()) return projects;
-    const q = projectSearch.trim().toLowerCase();
-    return projects.filter((p) => p.name?.toLowerCase().includes(q));
-  }, [projects, projectSearch]);
-
   const activeWarehouses = useMemo(
-    () => warehouses.filter((warehouse) => warehouse?.active !== false),
+    () => warehouses.filter((warehouse) => warehouse?.active !== false && warehouse.type !== 'DAMAGED'),
     [warehouses],
   );
+
+  const requestMaterials = useMemo(() => stockBalances
+    .filter((balance) => String(balance.warehouse?._id || balance.warehouse) === requestForm.warehouseId
+      && balance.material?._id && balance.material.active !== false && toNum(balance.qtyAvailable) > 0)
+    .map((balance) => ({ ...balance.material, qtyAvailable: balance.qtyAvailable }))
+    .sort((a, b) => a.name.localeCompare(b.name, 'ar')), [stockBalances, requestForm.warehouseId]);
 
   useEffect(() => {
     if (!activeWarehouses.length) return;
@@ -171,7 +279,7 @@ export default function MaterialsPage() {
       const q = reqFilterSearch.trim().toLowerCase();
       list = list.filter((r) =>
         (r.requestNo || '').toLowerCase().includes(q) ||
-        (r.project?.name || r.manualProjectName || '').toLowerCase().includes(q) ||
+        (r.project?.name || r.manualProjectName || r.clientName || '').toLowerCase().includes(q) ||
         (r.requestedFor?.fullName || '').toLowerCase().includes(q) ||
         (r.requestedBy?.fullName || '').toLowerCase().includes(q) ||
         (r.assignedPreparer?.fullName || '').toLowerCase().includes(q)
@@ -185,7 +293,7 @@ export default function MaterialsPage() {
     const q = archiveSearch.trim().toLowerCase();
     return archivedRequests.filter((r) =>
       (r.requestNo || '').toLowerCase().includes(q) ||
-      (r.project?.name || r.manualProjectName || '').toLowerCase().includes(q) ||
+      (r.project?.name || r.manualProjectName || r.clientName || '').toLowerCase().includes(q) ||
       (r.requestedFor?.fullName || '').toLowerCase().includes(q) ||
       (r.requestedBy?.fullName || '').toLowerCase().includes(q) ||
       (r.assignedPreparer?.fullName || '').toLowerCase().includes(q) ||
@@ -210,16 +318,6 @@ export default function MaterialsPage() {
     );
   }, [openCustodiesData.holders, custodyHolderSearch]);
 
-  useEffect(() => {
-    const handleClickOutside = (e) => {
-      if (projectComboRef.current && !projectComboRef.current.contains(e.target)) {
-        setProjectDropdownOpen(false);
-      }
-    };
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, []);
-
   /* permissions */
   const canAccess = useMemo(() => hasAnyPermission(currentUser, [
     Permission.CREATE_MATERIAL_REQUESTS, Permission.REVIEW_MATERIAL_REQUESTS,
@@ -229,9 +327,9 @@ export default function MaterialsPage() {
     Permission.MANAGE_MATERIAL_CATALOG,
   ]), [currentUser?.role, currentUser?.customPermissions, currentUser?.permissions]);
 
-  const canReview = hasPermission(currentUser, Permission.REVIEW_MATERIAL_REQUESTS);
-  const canPrepare = hasPermission(currentUser, Permission.PREPARE_MATERIAL_REQUESTS);
-  const canDispatch = hasPermission(currentUser, Permission.DISPATCH_MATERIAL_REQUESTS);
+  const canReview = hasPermission(currentUser, Permission.MANAGE_MATERIAL_INVENTORY);
+  const canPrepare = canReview;
+  const canDispatch = false;
   const canReconcile = hasAnyPermission(currentUser, [Permission.RECONCILE_MATERIAL_CUSTODY, Permission.RECONCILE_OTHERS_MATERIAL_CUSTODY]);
   const canClose = hasPermission(currentUser, Permission.CLOSE_MATERIAL_CUSTODY);
   const canReports = hasPermission(currentUser, Permission.VIEW_MATERIAL_REPORTS);
@@ -240,20 +338,18 @@ export default function MaterialsPage() {
   const myId = currentUser?.id || currentUser?._id || '';
   const isGM = currentUser?.role === 'GENERAL_MANAGER';
   const isMyPreparer = (req) => {
-    const pid = req.assignedPreparer?._id || req.assignedPreparer?.id || req.assignedPreparer;
-    if (!pid) return isGM; /* no preparer assigned → only GM */
-    return pid === myId || isGM;
+    return canPrepare;
   };
 
   const isMyRequest = (req) => {
     const rid = String(req.requestedBy?._id || req.requestedBy || '');
     const fid = String(req.requestedFor?._id || req.requestedFor || '');
-    return rid === String(myId) || fid === String(myId) || isGM;
+    return (fid || rid) === String(myId);
   };
 
   const canEditBeforePreparerApproval = (req) => {
     if (!req) return false;
-    const editableStatuses = ['PENDING_MANAGER_APPROVAL', 'PENDING_SUPPLIER_APPROVAL', 'NEW', 'UNDER_REVIEW', 'APPROVED'];
+    const editableStatuses = ['REJECTED', 'PENDING_MANAGER_APPROVAL', 'PENDING_SUPPLIER_APPROVAL', 'NEW', 'UNDER_REVIEW', 'APPROVED'];
     const hasPreparation = (req.preparations || []).length > 0
       || (req.items || []).some((item) => toNum(item.preparedQty) > 0 || toNum(item.deliveredQty) > 0);
     return editableStatuses.includes(req.status) && !hasPreparation && (isMyRequest(req) || canReview || currentUser?.role === 'GENERAL_MANAGER');
@@ -263,7 +359,8 @@ export default function MaterialsPage() {
   const load = useCallback(async () => {
     setLoading(true); setError('');
     try {
-      const [mRes, wRes, pRes, uRes, allURes, rqRes, cuRes, rcRes, smRes, arRes, ocRes] = await Promise.all([
+      setCustomerError('');
+      const [mRes, wRes, pRes, uRes, allURes, rqRes, cuRes, rcRes, smRes, arRes, ocRes, stockRes, customerRes] = await Promise.all([
         api.get('/materials/catalog'),
         api.get('/materials/warehouses?active=true'),
         api.get('/projects').catch(() => ({ projects: [] })),
@@ -284,8 +381,15 @@ export default function MaterialsPage() {
         canReports ? api.get('/materials/reports/summary').catch(() => null) : Promise.resolve(null),
         api.get('/materials/requests?archived=true').catch(() => ({ requests: [] })),
         api.get('/materials/open-custodies-summary').catch(() => ({ holders: [], totalHolders: 0 })),
+        api.get('/materials/stock'),
+        api.get('/customers').catch((err) => {
+          setCustomerError(err.message || 'تعذر تحميل الزبائن. تحقق من صلاحية عرض الزبائن.');
+          return { customers: [] };
+        }),
       ]);
       setMaterials(mRes.materials || []);
+      setStockBalances(stockRes.balances || []);
+      setCustomers((customerRes.customers || []).filter((customer) => !customer.archived));
       setWarehouses(wRes.warehouses || []);
       setProjects(pRes.projects || []);
       setUsers((uRes.users || []).filter((u) => u?.active));
@@ -313,7 +417,7 @@ export default function MaterialsPage() {
       '[ طلب مواد - Delta Plus ]',
       '----------------------------------',
       `رقم الطلب: ${req.requestNo}`,
-      `المشروع: ${req.project?.name || req.manualProjectName || req.projectName || '-'}`,
+      `${req.requestTarget === 'CUSTOMER' ? 'الزبون' : 'المشروع'}: ${req.requestTarget === 'CUSTOMER' ? (req.customer?.name || req.clientName || '-') : (req.project?.name || req.manualProjectName || req.projectName || '-')}`,
       `الطالب: ${req.requestedFor?.fullName || req.requestedBy?.fullName || '-'}`,
       `المجهز: ${req.assignedPreparer?.fullName || 'غير معين'}`,
       `عدد البنود: ${(req.items || []).length}`,
@@ -379,9 +483,10 @@ export default function MaterialsPage() {
 
   /* ────── confirm receipt ────── */
   const handleConfirmReceipt = async (req) => {
+    if (!window.confirm('هل تؤكد استلام الدفعة المجهزة فعلياً؟ سيتم خصم المخزون وتسجيل المواد على ذمتك.')) return;
     setBusy('confirmReceipt');
     await doAction(async () => {
-      await api.patch(`/materials/requests/${req._id}/confirm-receipt`, {});
+      await api.patch(`/materials/requests/${req._id}/confirm-receipt`, { receiptToken: req.pendingReceipt?.id });
       setInfo('تم تأكيد الاستلام بنجاح');
     });
   };
@@ -421,19 +526,21 @@ export default function MaterialsPage() {
     }));
   };
 
-  const getMaterialOption = (mat) => `${mat.code} - ${mat.name} (${unitLabels[mat.unit] || mat.unit})`;
-
   /* ────────── CREATE REQUEST ────────── */
   const createRequest = async (e) => {
     e.preventDefault(); setBusy('create'); setError(''); setInfo('');
     try {
+      if (requestForm.items.some((item) => !item.materialId)) throw new Error('يرجى اختيار المادة من نتائج البحث لكل بند.');
       const items = requestForm.items
         .filter((it) => it.materialName?.trim() && toNum(it.requestedQty) > 0)
-        .map((it) => ({ materialName: it.materialName.trim(), unit: it.unit || 'PIECE', requestedQty: toNum(it.requestedQty), notes: it.notes }));
+        .map((it) => {
+          const material = requestMaterials.find((mat) => mat._id === it.materialId);
+          if (!material) throw new Error('يرجى اختيار مادة متوفرة في المخزن المحدد.');
+          return { materialId: material._id, materialName: material.name, unit: material.unit, requestedQty: toNum(it.requestedQty), notes: it.notes };
+        });
       if (!items.length) throw new Error('يرجى إضافة مادة واحدة على الأقل مع كمية أكبر من صفر.');
       await api.post('/materials/requests', { ...requestForm, items });
-      setRequestForm({ projectId: '', manualProjectName: '', priority: 'NORMAL', clientName: '', requestedForId: '', assignedPreparerId: '', warehouseId: activeWarehouses[0]?._id || '', generalNotes: '', items: [makeItem()] });
-      setProjectSearch('');
+      setRequestForm({ requestTarget: 'PROJECT', customerId: '', projectId: '', manualProjectName: '', priority: 'NORMAL', clientName: '', requestedForId: '', assignedPreparerId: '', warehouseId: activeWarehouses[0]?._id || '', generalNotes: '', items: [makeItem()] });
       setInfo('تم إنشاء الطلب بنجاح'); await load();
     } catch (err) { setError(err.message || 'فشل إنشاء الطلب'); }
     finally { setBusy(''); }
@@ -442,6 +549,9 @@ export default function MaterialsPage() {
   const openEditRequest = (req) => {
     setEditRequestModal({
       request: req,
+      warehouseId: req.warehouse?._id || req.warehouse || activeWarehouses[0]?._id || '',
+      requestTarget: req.requestTarget || (req.customer ? 'CUSTOMER' : 'PROJECT'),
+      customerId: req.customer?._id || req.customer || '',
       projectId: req.project?._id || req.project || '',
       manualProjectName: req.manualProjectName || req.projectName || '',
       priority: req.priority || 'NORMAL',
@@ -452,6 +562,7 @@ export default function MaterialsPage() {
       editReason: 'تعديل الطلب قبل اعتماد المجهز',
       items: (req.items || []).map((it) => ({
         id: uid(),
+        materialId: it.material?._id || it.material || '',
         materialName: it.materialName || it.material?.name || '',
         unit: it.unitSnapshot || it.material?.unit || 'PIECE',
         requestedQty: it.requestedQty || '',
@@ -475,6 +586,7 @@ export default function MaterialsPage() {
       const items = editRequestModal.items
         .filter((it) => it.materialName?.trim() && toNum(it.requestedQty) > 0)
         .map((it) => ({
+          materialId: it.materialId,
           materialName: it.materialName.trim(),
           unit: it.unit || 'PIECE',
           requestedQty: toNum(it.requestedQty),
@@ -482,6 +594,9 @@ export default function MaterialsPage() {
         }));
       if (!items.length) throw new Error('يرجى إضافة مادة واحدة على الأقل مع كمية أكبر من صفر.');
       await api.patch(`/materials/requests/${editRequestModal.request._id}`, {
+        warehouseId: editRequestModal.warehouseId,
+        requestTarget: editRequestModal.requestTarget,
+        customerId: editRequestModal.customerId,
         projectId: editRequestModal.projectId,
         manualProjectName: editRequestModal.projectId ? '' : editRequestModal.manualProjectName,
         priority: editRequestModal.priority,
@@ -492,7 +607,7 @@ export default function MaterialsPage() {
         editReason: editRequestModal.editReason,
         items,
       });
-      setInfo('تم تعديل الطلب وإعادته لمرحلة اعتماد مدير المشاريع');
+      setInfo('تم تعديل الطلب وإعادته لمرحلة اعتماد أمين المخزن');
       setEditRequestModal(null);
       await load();
     } catch (err) {
@@ -585,11 +700,10 @@ export default function MaterialsPage() {
   /* ────────── RECONCILE ────────── */
   const openReconcile = (custody) => {
     const items = (custody.items || [])
-      .filter((x) => x.lineStatus !== 'CLOSED')
       .map((x) => ({
         materialId: x.material?._id || x.material, materialName: x.materialName,
-        receivedQty: toNum(x.receivedQty), consumedQty: 0, remainingQty: toNum(x.remainingQty),
-        damagedQty: 0, lostQty: 0, toReturnQty: toNum(x.remainingQty),
+        receivedQty: toNum(x.receivedQty), returnedQty: toNum(x.returnedQty), consumedQty: toNum(x.consumedQty), remainingQty: toNum(x.remainingQty),
+        damagedQty: toNum(x.damagedQty), lostQty: toNum(x.lostQty), toReturnQty: toNum(x.remainingQty),
       }));
     setReconcileModal({ custody, items });
   };
@@ -655,6 +769,8 @@ export default function MaterialsPage() {
         <button type="button" style={tabStyle('archive')} onClick={() => setActiveTab('archive')}>الأرشيف</button>
         {canReports && <button type="button" style={tabStyle('reports')} onClick={() => setActiveTab('reports')}>التقارير</button>}
         <div className="tabs-spacer" />
+        <a className="btn btn-primary" href="/warehouses?tab=requests">متابعة التجهيز والاستلام</a>
+        <a className="btn btn-soft" href="/warehouses?tab=settlements">اعتماد التصفية والمرتجعات</a>
         <button className="btn btn-soft" type="button" onClick={load} disabled={loading} style={{ alignSelf: 'center', fontSize: 12 }}>{loading ? 'جارٍ...' : 'تحديث ↻'}</button>
       </div>
 
@@ -665,52 +781,16 @@ export default function MaterialsPage() {
           <section className="card section" style={{ marginBottom: 16 }}>
             <h2 style={{ marginTop: 0 }}>طلب مواد جديد</h2>
             <form onSubmit={createRequest}>
+              <RequestTargetFields form={requestForm} setForm={setRequestForm} projects={projects} customers={customers} customerError={customerError} />
               <div className="grid-3" style={{ marginBottom: 12 }}>
-                <label>المشروع *
-                  <div ref={projectComboRef} style={{ position: 'relative' }}>
-                    <input
-                      className="input"
-                      value={projectSearch}
-                      onChange={(e) => {
-                        setProjectSearch(e.target.value);
-                        setProjectDropdownOpen(true);
-                        setRequestForm((p) => ({ ...p, projectId: '', manualProjectName: e.target.value }));
-                      }}
-                      onFocus={() => setProjectDropdownOpen(true)}
-                      placeholder="ابحث أو اكتب اسم المشروع"
-                      required={!requestForm.projectId && !requestForm.manualProjectName}
-                      autoComplete="off"
-                    />
-                    {projectDropdownOpen && filteredProjects.length > 0 && (
-                      <ul style={{ position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 50, background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 6, maxHeight: 200, overflowY: 'auto', margin: 0, padding: 0, listStyle: 'none', boxShadow: '0 4px 12px rgba(0,0,0,.15)' }}>
-                        {filteredProjects.map((p) => (
-                          <li
-                            key={p._id}
-                            style={{ padding: '8px 12px', cursor: 'pointer', fontSize: 14, borderBottom: '1px solid var(--border)' }}
-                            onMouseDown={() => {
-                              setRequestForm((prev) => ({ ...prev, projectId: p._id, manualProjectName: '' }));
-                              setProjectSearch(p.name);
-                              setProjectDropdownOpen(false);
-                            }}
-                            onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--bg)'; }}
-                            onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
-                          >
-                            {p.name}
-                          </li>
-                        ))}
-                      </ul>
-                    )}
-                  </div>
-                </label>
                 <label>المخزن *
-                  <select className="select" required value={requestForm.warehouseId} onChange={(e) => setRequestForm((p) => ({ ...p, warehouseId: e.target.value }))}>
+                  <select className="select" required value={requestForm.warehouseId} onChange={(e) => setRequestForm((p) => ({ ...p, warehouseId: e.target.value, items: p.items.map((item) => ({ ...item, materialId: '', materialName: '', unit: 'METER' })) }))}>
                     <option value="" disabled>{activeWarehouses.length ? 'اختر المخزن' : 'لا توجد مخازن متاحة'}</option>
                     {activeWarehouses.map((w) => <option key={w._id} value={w._id}>{w.name}{w.code ? ` - ${w.code}` : ''}</option>)}
                   </select>
                 </label>
-                <label>مجهز الطلب<select className="select" value={requestForm.assignedPreparerId} onChange={(e) => setRequestForm((p) => ({ ...p, assignedPreparerId: e.target.value }))}><option value="">بدون تعيين</option>{allUsers.map((u) => <option key={u.id || u._id} value={u.id || u._id}>{u.fullName}{u.employeeCode ? ` (${u.employeeCode})` : ''}</option>)}</select></label>
-                <label>المستلم (طالب المواد)<select className="select" value={requestForm.requestedForId} onChange={(e) => setRequestForm((p) => ({ ...p, requestedForId: e.target.value }))}><option value="">نفس المستخدم</option>{users.map((u) => <option key={u.id || u._id} value={u.id || u._id}>{u.fullName}{u.employeeCode ? ` (${u.employeeCode})` : ''}</option>)}</select></label>
-                <label>العميل<input className="input" value={requestForm.clientName} onChange={(e) => setRequestForm((p) => ({ ...p, clientName: e.target.value }))} /></label>
+                <label>أمين المخزن<select className="select" value={requestForm.assignedPreparerId} onChange={(e) => setRequestForm((p) => ({ ...p, assignedPreparerId: e.target.value }))}><option value="">بدون تعيين</option>{allUsers.filter((user) => hasPermission(user, Permission.MANAGE_MATERIAL_INVENTORY)).map((u) => <option key={u.id || u._id} value={u.id || u._id}>{u.fullName}{u.employeeCode ? ` (${u.employeeCode})` : ''}</option>)}</select></label>
+                <label>الفني المستلم<select className="select" disabled={!canReview} value={requestForm.requestedForId} onChange={(e) => setRequestForm((p) => ({ ...p, requestedForId: e.target.value }))}><option value="">نفس المستخدم</option>{users.map((u) => <option key={u.id || u._id} value={u.id || u._id}>{u.fullName}{u.employeeCode ? ` (${u.employeeCode})` : ''}</option>)}</select></label>
                 <label>الأولوية<select className="select" value={requestForm.priority} onChange={(e) => setRequestForm((p) => ({ ...p, priority: e.target.value }))}><option value="URGENT">عاجل</option><option value="NORMAL">طبيعي</option><option value="LOW">منخفض</option></select></label>
               </div>
               <label style={{ display: 'block', marginBottom: 12 }}>ملاحظات عامة<input className="input" value={requestForm.generalNotes} onChange={(e) => setRequestForm((p) => ({ ...p, generalNotes: e.target.value }))} style={{ width: '100%' }} /></label>
@@ -721,9 +801,14 @@ export default function MaterialsPage() {
                 <tbody>
                   {requestForm.items.map((it) => (
                     <tr key={it.id}>
-                      <td><input className="input" value={it.materialName} onChange={(e) => updateRequestItem(it.id, { materialName: e.target.value })} placeholder="اسم المادة" style={{ minWidth: 200 }} /></td>
+                      <td><MaterialSearch key={`${requestForm.warehouseId}-${it.id}`} materials={requestMaterials} value={it.materialId}
+                        disabled={loading || !requestForm.warehouseId || !requestMaterials.length}
+                        placeholder={loading ? 'جارٍ تحميل المواد...' : !requestForm.warehouseId ? 'اختر المخزن أولاً' : !requestMaterials.length ? 'لا توجد مواد متوفرة في هذا المخزن' : 'ابحث عن المادة...'}
+                        onSelect={(material) => {
+                        updateRequestItem(it.id, { materialId: material?._id || '', materialName: material?.name || '', unit: material?.unit || 'METER' });
+                      }} /></td>
                       <td><input className="input" type="number" min={0} step="any" value={it.requestedQty} onChange={(e) => updateRequestItem(it.id, { requestedQty: e.target.value })} placeholder="الكمية" style={{ width: 100 }} /></td>
-                      <td><select className="select" value={it.unit} onChange={(e) => updateRequestItem(it.id, { unit: e.target.value })} style={{ minWidth: 90 }}><option value="METER">متر</option><option value="PIECE">قطعة</option><option value="ROLL">لفة</option></select></td>
+                      <td><input className="input" readOnly aria-label="الوحدة" value={it.materialId ? (unitLabels[it.unit] || it.unit) : ''} placeholder="الوحدة" style={{ width: 90 }} /></td>
                       <td><input className="input" value={it.notes} onChange={(e) => updateRequestItem(it.id, { notes: e.target.value })} placeholder="ملاحظات" /></td>
                       <td>{requestForm.items.length > 1 && <button type="button" className="btn btn-soft" style={{ color: '#e57373', padding: '2px 8px' }} onClick={() => setRequestForm((p) => ({ ...p, items: p.items.filter((x) => x.id !== it.id) }))}>✕</button>}</td>
                     </tr>
@@ -733,7 +818,7 @@ export default function MaterialsPage() {
               <div style={{ display: 'flex', gap: 8 }}>
                 <button className="btn btn-soft" type="button" onClick={() => setRequestForm((p) => ({ ...p, items: [...p.items, makeItem()] }))}>+ إضافة بند</button>
                 <div style={{ flex: 1 }} />
-                <button className="btn btn-primary" type="submit" disabled={busy === 'create'}>{busy === 'create' ? 'جارٍ الإرسال...' : 'إرسال الطلب'}</button>
+                <button className="btn btn-primary" type="submit" disabled={busy === 'create' || loading || !requestMaterials.length}>{busy === 'create' ? 'جارٍ الإرسال...' : 'إرسال الطلب'}</button>
               </div>
             </form>
           </section>
@@ -743,7 +828,7 @@ export default function MaterialsPage() {
             <h2 style={{ marginTop: 0 }}>طلبات المواد ({filteredRequests.length})</h2>
             {/* filter bar */}
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>
-              <input className="input" placeholder="بحث: رقم الطلب، المشروع، الطالب، المجهز" value={reqFilterSearch} onChange={(e) => setReqFilterSearch(e.target.value)} style={{ minWidth: 220, flex: 1 }} />
+              <input className="input" placeholder="بحث: رقم الطلب، المشروع، الزبون، الطالب، المجهز" value={reqFilterSearch} onChange={(e) => setReqFilterSearch(e.target.value)} style={{ minWidth: 220, flex: 1 }} />
               <select className="select" value={reqFilterStatus} onChange={(e) => setReqFilterStatus(e.target.value)} style={{ minWidth: 160 }}>
                 <option value="">كل الحالات</option>
                 {Object.entries(statusLabel).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
@@ -752,12 +837,12 @@ export default function MaterialsPage() {
             </div>
             <div style={{ overflowX: 'auto' }}>
               <table className="table">
-                <thead><tr><th>رقم الطلب</th><th>المشروع</th><th>الطالب</th><th>مجهز الطلب</th><th>الحالة</th><th>بنود</th><th>إجراءات</th></tr></thead>
+                <thead><tr><th>رقم الطلب</th><th>المشروع / الزبون</th><th>الطالب</th><th>مجهز الطلب</th><th>الحالة</th><th>بنود</th><th>إجراءات</th></tr></thead>
                 <tbody>
                   {filteredRequests.length ? filteredRequests.map((req) => (
                     <tr key={req._id}>
                       <td><button type="button" className="btn btn-soft" style={{ padding: '2px 8px', fontSize: 12 }} onClick={() => setDetailModal(req)}>{req.requestNo}</button></td>
-                      <td>{req.project?.name || req.manualProjectName || req.projectName || '-'}</td>
+                      <td>{req.requestTarget === 'CUSTOMER' ? (req.customer?.name || req.clientName || '-') : (req.project?.name || req.manualProjectName || req.projectName || '-')}</td>
                       <td>{req.requestedFor?.fullName || req.requestedBy?.fullName || '-'}</td>
                       <td>{req.assignedPreparer?.fullName || <span style={{ color: 'var(--text-soft)' }}>غير معين</span>}</td>
                       <td style={{ whiteSpace: 'nowrap' }}><Badge status={req.status} /></td>
@@ -768,16 +853,13 @@ export default function MaterialsPage() {
                           <button className="btn btn-soft" style={{ fontSize: 11, padding: '3px 8px' }} type="button" onClick={() => downloadRequestPdf(req)}>PDF</button>
                           {canEditBeforePreparerApproval(req) && <button className="btn btn-primary btn-sm" style={{ fontSize: 11, padding: '3px 10px' }} type="button" disabled={!!busy} onClick={() => openEditRequest(req)}>تعديل</button>}
                           {/* Step 2: Manager approves */}
-                          {canReview && ['PENDING_MANAGER_APPROVAL', 'NEW', 'UNDER_REVIEW'].includes(req.status) && <button className="btn btn-soft" style={{ fontSize: 11, padding: '3px 8px', color: '#81c784' }} type="button" disabled={!!busy} onClick={() => openReview(req)}>اعتماد المدير</button>}
+                          {canReview && !isMyRequest(req) && ['PENDING_MANAGER_APPROVAL', 'NEW', 'UNDER_REVIEW'].includes(req.status) && <button className="btn btn-soft" style={{ fontSize: 11, padding: '3px 8px', color: '#81c784' }} type="button" disabled={!!busy} onClick={() => openReview(req)}>اعتماد أمين المخزن</button>}
                           {/* Step 3: Supplier/Preparer approves */}
-                          {isMyPreparer(req) && ['PENDING_SUPPLIER_APPROVAL', 'APPROVED'].includes(req.status) && <button className="btn btn-soft" style={{ fontSize: 11, padding: '3px 8px', color: '#42a5f5' }} type="button" disabled={!!busy} onClick={() => handleSupplierApprove(req, 'ACCEPT')}>قبول المجهز</button>}
-                          {isMyPreparer(req) && ['PENDING_SUPPLIER_APPROVAL', 'APPROVED'].includes(req.status) && <button className="btn btn-soft" style={{ fontSize: 11, padding: '3px 8px', color: '#e57373' }} type="button" disabled={!!busy} onClick={() => handleSupplierApprove(req, 'REJECT')}>رفض المجهز</button>}
                           {/* Step 4: Prepare */}
-                          {isMyPreparer(req) && ['IN_PROGRESS', 'PREPARING'].includes(req.status) && <button className="btn btn-soft" style={{ fontSize: 11, padding: '3px 8px', color: '#ffb74d' }} type="button" disabled={!!busy} onClick={() => openPrepare(req)}>تجهيز</button>}
+                          {isMyPreparer(req) && !isMyRequest(req) && ['APPROVED', 'PENDING_SUPPLIER_APPROVAL', 'IN_PROGRESS', 'PREPARING', 'RECEIVED'].includes(req.status) && <button className="btn btn-soft" style={{ fontSize: 11, padding: '3px 8px', color: '#ffb74d' }} type="button" disabled={!!busy} onClick={() => openPrepare(req)}>تجهيز وحجز دفعة</button>}
                           {/* Step 5: Employee confirms receipt */}
                           {isMyRequest(req) && ['PENDING_RECEIPT', 'PREPARED'].includes(req.status) && <button className="btn btn-soft" style={{ fontSize: 11, padding: '3px 8px', color: '#ab47bc' }} type="button" disabled={!!busy} onClick={() => handleConfirmReceipt(req)}>تأكيد الاستلام</button>}
                           {/* Legacy dispatch button */}
-                          {isMyPreparer(req) && ['PREPARED', 'PREPARING', 'IN_PROGRESS', 'PENDING_RECEIPT', 'RECEIVED'].includes(req.status) && <button className="btn btn-soft" style={{ fontSize: 11, padding: '3px 8px', color: '#64b5f6' }} type="button" disabled={!!busy} onClick={() => openDispatch(req)}>تسليم يدوي</button>}
                           {/* Archive closed requests */}
                           {canReview && ['CLOSED', 'RECONCILED'].includes(req.status) && !req.archived && <button className="btn btn-soft" style={{ fontSize: 11, padding: '3px 8px', color: '#78909c' }} type="button" disabled={!!busy} onClick={() => handleArchive(req)}>أرشفة</button>}
                         </div>
@@ -810,7 +892,7 @@ export default function MaterialsPage() {
                       <td>
                         <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
                           <button className="btn btn-soft" style={{ fontSize: 11, padding: '3px 8px' }} type="button" onClick={() => sendCustodyWhatsapp(cu)}>واتساب</button>
-                          {(canPrepare || isGM) && ['OPEN', 'PARTIALLY_RECONCILED'].includes(cu.status) && (
+                          {String(cu.holder?._id || cu.holder || '') === String(myId) && ['OPEN', 'PARTIALLY_RECONCILED'].includes(cu.status) && (
                             <button className="btn btn-soft" style={{ fontSize: 11, padding: '3px 8px', color: '#ffd54f' }} type="button" disabled={!!busy} onClick={() => openReconcile(cu)}>تصفية الذمة</button>
                           )}
                           {(canPrepare || isGM) && ['FULLY_RECONCILED'].includes(cu.status) && (
@@ -839,14 +921,14 @@ export default function MaterialsPage() {
                       <td>
                         <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
                           <button className="btn btn-soft" style={{ fontSize: 11, padding: '3px 8px' }} type="button" onClick={() => sendReconciliationWhatsapp(rc)}>واتساب</button>
-                          {(() => { const pid = rc.request?.assignedPreparer; return (!pid && isGM) || pid === myId || isGM; })() && rc.status === 'SUBMITTED' && (
+                          {canReview && String(rc.submittedBy?._id || rc.submittedBy || '') !== String(myId) && rc.status === 'SUBMITTED' && (
                             <button className="btn btn-soft" style={{ fontSize: 11, padding: '3px 8px', color: '#81c784' }} type="button" disabled={!!busy} onClick={async () => { setBusy('approve-recon'); await doAction(async () => { await api.patch(`/materials/reconciliations/${rc._id}/review`, { action: 'APPROVE', points: 100 }); setInfo('تم اعتماد التصفية'); }); }}>اعتماد التصفية</button>
                           )}
-                          {(() => { const pid = rc.request?.assignedPreparer; return (!pid && isGM) || pid === myId || isGM; })() && rc.status === 'SUBMITTED' && (
+                          {canReview && String(rc.submittedBy?._id || rc.submittedBy || '') !== String(myId) && rc.status === 'SUBMITTED' && (
                             <button className="btn btn-soft" style={{ fontSize: 11, padding: '3px 8px', color: '#e57373' }} type="button" disabled={!!busy} onClick={async () => { setBusy('reject-recon'); await doAction(async () => { await api.patch(`/materials/reconciliations/${rc._id}/review`, { action: 'REJECT', rejectReason: 'مطلوب مراجعة البيانات' }); setInfo('تم رفض التصفية'); }); }}>رفض التصفية</button>
                           )}
-                          {(() => { const pid = rc.request?.assignedPreparer; return (!pid && isGM) || pid === myId || isGM; })() && rc.status === 'APPROVED' && (rc.items || []).some((x) => toNum(x.toReturnQty) > toNum(x.returnedQtyConfirmed || 0)) && (
-                            <button className="btn btn-soft" style={{ fontSize: 11, padding: '3px 8px', color: '#4fc3f7' }} type="button" disabled={!!busy} onClick={() => openReturn(rc)}>استلام راجع</button>
+                          {canReview && String(rc.submittedBy?._id || rc.submittedBy || '') !== String(myId) && rc.status === 'APPROVED' && (rc.items || []).some((x) => toNum(x.toReturnQty) > toNum(x.returnedQtyConfirmed || 0) || toNum(x.damagedToReturnQty) > toNum(x.damagedReturnedConfirmed)) && (
+                            <a className="btn btn-soft" href="/warehouses?tab=settlements">استلام الفائض والتالف</a>
                           )}
                         </div>
                       </td>
@@ -940,7 +1022,7 @@ export default function MaterialsPage() {
                 <thead>
                   <tr>
                     <th>رقم الطلب</th>
-                    <th>المشروع</th>
+                    <th>المشروع / الزبون</th>
                     <th>الطالب</th>
                     <th>المجهز</th>
                     <th>الحالة</th>
@@ -953,7 +1035,7 @@ export default function MaterialsPage() {
                   {filteredArchive.map((req) => (
                     <tr key={req._id}>
                       <td><button type="button" className="btn btn-soft" style={{ padding: '2px 8px', fontSize: 12 }} onClick={() => setDetailModal(req)}>{req.requestNo}</button></td>
-                      <td>{req.project?.name || req.manualProjectName || req.projectName || '-'}</td>
+                      <td>{req.requestTarget === 'CUSTOMER' ? (req.customer?.name || req.clientName || '-') : (req.project?.name || req.manualProjectName || req.projectName || '-')}</td>
                       <td>{req.requestedFor?.fullName || req.requestedBy?.fullName || '-'}</td>
                       <td>{req.assignedPreparer?.fullName || '-'}</td>
                       <td style={{ whiteSpace: 'nowrap' }}><Badge status={req.archived ? 'ARCHIVED' : req.status} /></td>
@@ -1110,9 +1192,9 @@ export default function MaterialsPage() {
                       <tr key={i}>
                         <td>{it.materialName}</td>
                         <td style={{ color: 'var(--text-soft)' }}>{it.receivedQty}</td>
-                        <td><input className="input" type="number" min={0} step="any" value={it.consumedQty} onChange={(e) => setReconcileModal((p) => ({ ...p, items: p.items.map((x, j) => j === i ? { ...x, consumedQty: e.target.value, remainingQty: Math.max(0, x.receivedQty - toNum(e.target.value) - toNum(x.damagedQty) - toNum(x.lostQty)), toReturnQty: Math.max(0, x.receivedQty - toNum(e.target.value) - toNum(x.damagedQty) - toNum(x.lostQty)) } : x) }))} style={{ width: 70 }} /></td>
-                        <td><input className="input" type="number" min={0} step="any" value={it.damagedQty} onChange={(e) => setReconcileModal((p) => ({ ...p, items: p.items.map((x, j) => j === i ? { ...x, damagedQty: e.target.value, remainingQty: Math.max(0, x.receivedQty - toNum(x.consumedQty) - toNum(e.target.value) - toNum(x.lostQty)), toReturnQty: Math.max(0, x.receivedQty - toNum(x.consumedQty) - toNum(e.target.value) - toNum(x.lostQty)) } : x) }))} style={{ width: 70 }} /></td>
-                        <td><input className="input" type="number" min={0} step="any" value={it.lostQty} onChange={(e) => setReconcileModal((p) => ({ ...p, items: p.items.map((x, j) => j === i ? { ...x, lostQty: e.target.value, remainingQty: Math.max(0, x.receivedQty - toNum(x.consumedQty) - toNum(x.damagedQty) - toNum(e.target.value)), toReturnQty: Math.max(0, x.receivedQty - toNum(x.consumedQty) - toNum(x.damagedQty) - toNum(e.target.value)) } : x) }))} style={{ width: 70 }} /></td>
+                        <td><input className="input" type="number" min={0} step="any" value={it.consumedQty} onChange={(e) => setReconcileModal((p) => ({ ...p, items: p.items.map((x, j) => j === i ? { ...x, consumedQty: e.target.value, remainingQty: Math.max(0, x.receivedQty - toNum(x.returnedQty) - toNum(e.target.value) - toNum(x.damagedQty) - toNum(x.lostQty)), toReturnQty: Math.max(0, x.receivedQty - toNum(x.returnedQty) - toNum(e.target.value) - toNum(x.damagedQty) - toNum(x.lostQty)) } : x) }))} style={{ width: 70 }} /></td>
+                        <td><input className="input" type="number" min={0} step="any" value={it.damagedQty} onChange={(e) => setReconcileModal((p) => ({ ...p, items: p.items.map((x, j) => j === i ? { ...x, damagedQty: e.target.value, remainingQty: Math.max(0, x.receivedQty - toNum(x.returnedQty) - toNum(x.consumedQty) - toNum(e.target.value) - toNum(x.lostQty)), toReturnQty: Math.max(0, x.receivedQty - toNum(x.returnedQty) - toNum(x.consumedQty) - toNum(e.target.value) - toNum(x.lostQty)) } : x) }))} style={{ width: 70 }} /></td>
+                        <td><input className="input" type="number" min={0} step="any" value={it.lostQty} onChange={(e) => setReconcileModal((p) => ({ ...p, items: p.items.map((x, j) => j === i ? { ...x, lostQty: e.target.value, remainingQty: Math.max(0, x.receivedQty - toNum(x.returnedQty) - toNum(x.consumedQty) - toNum(x.damagedQty) - toNum(e.target.value)), toReturnQty: Math.max(0, x.receivedQty - toNum(x.returnedQty) - toNum(x.consumedQty) - toNum(x.damagedQty) - toNum(e.target.value)) } : x) }))} style={{ width: 70 }} /></td>
                         <td style={{ color: '#4fc3f7', fontWeight: 600 }}>{remaining}</td>
                       </tr>
                     );
@@ -1346,22 +1428,16 @@ export default function MaterialsPage() {
         {editRequestModal && (
           <form onSubmit={submitEditRequest}>
             <p style={{ marginTop: 0, color: 'var(--text-soft)' }}>
-              يمكن تعديل الطلب قبل اعتماد المجهز فقط. بعد الحفظ سيعود الطلب إلى مرحلة اعتماد مدير المشاريع حتى تتم مراجعة الكميات الجديدة.
+              يمكن تعديل الطلب قبل اعتماد المجهز فقط. بعد الحفظ سيعود الطلب إلى مرحلة اعتماد أمين المخزن حتى تتم مراجعة الكميات الجديدة.
             </p>
+            <RequestTargetFields form={editRequestModal} setForm={setEditRequestModal} projects={projects} customers={customers} customerError={customerError} />
+            <label>المخزن *<select className="select" required value={editRequestModal.warehouseId} onChange={(event) => setEditRequestModal((prev) => ({ ...prev, warehouseId: event.target.value, items: [makeItem()] }))}>{activeWarehouses.map((warehouse) => <option key={warehouse._id} value={warehouse._id}>{warehouse.name}</option>)}</select></label>
             <div className="grid-3" style={{ marginBottom: 12 }}>
-              <label>المشروع
-                <select className="select" value={editRequestModal.projectId} onChange={(e) => setEditRequestModal((p) => ({ ...p, projectId: e.target.value, manualProjectName: e.target.value ? '' : p.manualProjectName }))}>
-                  <option value="">مشروع يدوي</option>
-                  {projects.map((project) => <option key={project._id} value={project._id}>{project.name}</option>)}
-                </select>
-              </label>
-              <label>اسم المشروع اليدوي
-                <input className="input" value={editRequestModal.manualProjectName} disabled={!!editRequestModal.projectId} onChange={(e) => setEditRequestModal((p) => ({ ...p, manualProjectName: e.target.value }))} placeholder="اكتب اسم المشروع" />
-              </label>
+
               <label>مجهز الطلب
                 <select className="select" value={editRequestModal.assignedPreparerId} onChange={(e) => setEditRequestModal((p) => ({ ...p, assignedPreparerId: e.target.value }))}>
                   <option value="">بدون تعيين</option>
-                  {allUsers.map((u) => <option key={u.id || u._id} value={u.id || u._id}>{u.fullName}{u.employeeCode ? ` (${u.employeeCode})` : ''}</option>)}
+                  {allUsers.filter((user) => hasPermission(user, Permission.MANAGE_MATERIAL_INVENTORY)).map((u) => <option key={u.id || u._id} value={u.id || u._id}>{u.fullName}{u.employeeCode ? ` (${u.employeeCode})` : ''}</option>)}
                 </select>
               </label>
               <label>المستلم
@@ -1369,9 +1445,6 @@ export default function MaterialsPage() {
                   <option value="">نفس المستخدم</option>
                   {users.map((u) => <option key={u.id || u._id} value={u.id || u._id}>{u.fullName}{u.employeeCode ? ` (${u.employeeCode})` : ''}</option>)}
                 </select>
-              </label>
-              <label>العميل
-                <input className="input" value={editRequestModal.clientName} onChange={(e) => setEditRequestModal((p) => ({ ...p, clientName: e.target.value }))} />
               </label>
               <label>الأولوية
                 <select className="select" value={editRequestModal.priority} onChange={(e) => setEditRequestModal((p) => ({ ...p, priority: e.target.value }))}>
@@ -1393,12 +1466,10 @@ export default function MaterialsPage() {
               <tbody>
                 {editRequestModal.items.map((it) => (
                   <tr key={it.id}>
-                    <td><input className="input" value={it.materialName} onChange={(e) => updateEditRequestItem(it.id, { materialName: e.target.value })} placeholder="اسم المادة" style={{ minWidth: 200 }} /></td>
+                    <td><MaterialSearch key={`${editRequestModal.warehouseId}-${it.id}`} materials={stockBalances.filter((balance) => String(balance.warehouse?._id || balance.warehouse) === editRequestModal.warehouseId && balance.material?._id && balance.material.active !== false && toNum(balance.qtyAvailable) > 0).map((balance) => ({ ...balance.material, qtyAvailable: balance.qtyAvailable }))} value={it.materialId || ''} placeholder="ابحث عن مادة من المخزن" onSelect={(material) => updateEditRequestItem(it.id, { materialId: material?._id || '', materialName: material?.name || '', unit: material?.unit || 'PIECE' })} /></td>
                     <td><input className="input" type="number" min={0} step="any" value={it.requestedQty} onChange={(e) => updateEditRequestItem(it.id, { requestedQty: e.target.value })} placeholder="الكمية" style={{ width: 100 }} /></td>
                     <td>
-                      <select className="select" value={it.unit} onChange={(e) => updateEditRequestItem(it.id, { unit: e.target.value })} style={{ minWidth: 90 }}>
-                        {Object.entries(unitLabels).map(([value, labelText]) => <option key={value} value={value}>{labelText}</option>)}
-                      </select>
+                      <input className="input" readOnly value={unitLabels[it.unit] || it.unit} style={{ width: 90 }} />
                     </td>
                     <td><input className="input" value={it.notes} onChange={(e) => updateEditRequestItem(it.id, { notes: e.target.value })} placeholder="ملاحظات" /></td>
                     <td>{editRequestModal.items.length > 1 && <button type="button" className="btn btn-soft" style={{ color: '#e57373', padding: '2px 8px' }} onClick={() => setEditRequestModal((p) => ({ ...p, items: p.items.filter((x) => x.id !== it.id) }))}>✕</button>}</td>
@@ -1421,7 +1492,9 @@ export default function MaterialsPage() {
         {detailModal && (
           <>
             <div className="grid-3" style={{ gap: 8, marginBottom: 12 }}>
-              <div><span style={{ color: 'var(--text-soft)' }}>المشروع:</span> {detailModal.project?.name || detailModal.manualProjectName || detailModal.projectName || '-'}</div>
+              <div><span style={{ color: 'var(--text-soft)' }}>جهة الطلب:</span> {detailModal.requestTarget === 'CUSTOMER' ? 'زبون' : 'مشروع'}</div>
+              <div><span style={{ color: 'var(--text-soft)' }}>{detailModal.requestTarget === 'CUSTOMER' ? 'الزبون:' : 'المشروع:'}</span> {detailModal.requestTarget === 'CUSTOMER' ? (detailModal.customer?.name || detailModal.clientName || '-') : (detailModal.project?.name || detailModal.manualProjectName || detailModal.projectName || '-')}</div>
+              {detailModal.requestTarget === 'CUSTOMER' && <><div>الهاتف: {detailModal.customer?.phone || detailModal.customer?.whatsapp || '—'}</div><div>العنوان: {[detailModal.customer?.province, detailModal.customer?.address].filter(Boolean).join(' - ') || '—'}</div></>}
               <div><span style={{ color: 'var(--text-soft)' }}>الطالب:</span> {detailModal.requestedBy?.fullName || '-'}</div>
               <div><span style={{ color: 'var(--text-soft)' }}>المستلم:</span> {detailModal.requestedFor?.fullName || detailModal.requestedBy?.fullName || '-'}</div>
               <div><span style={{ color: 'var(--text-soft)' }}>المجهز:</span> {detailModal.assignedPreparer?.fullName || 'غير معين'}</div>

@@ -4,6 +4,9 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { api, assetUrl } from '../../../lib/api';
 import { authStorage } from '../../../lib/auth';
 import { Permission, hasAnyPermission, hasPermission } from '../../../lib/permissions';
+import { buildCustodyWhatsapp } from '../../../lib/custodyWhatsapp.mjs';
+import InventoryRequestsPanel from '../../../components/inventory/InventoryRequestsPanel';
+import InventorySettlementsPanel from '../../../components/inventory/InventorySettlementsPanel';
 
 const defaultCategories = [
   'كاميرات مراقبة',
@@ -349,8 +352,11 @@ export default function WarehousesPage() {
   const canAccess = hasAnyPermission(currentUser, canAccessPermissions);
   const canManageProducts = hasPermission(currentUser, Permission.MANAGE_MATERIAL_CATALOG);
   const canManageStock = hasPermission(currentUser, Permission.MANAGE_MATERIAL_INVENTORY);
-  const canReviewRequests = hasPermission(currentUser, Permission.REVIEW_MATERIAL_REQUESTS) || canManageStock;
-  const canPrepare = hasPermission(currentUser, Permission.PREPARE_MATERIAL_REQUESTS);
+  const canDeleteWarehouse = currentUser?.role === 'GENERAL_MANAGER';
+  const canResetTechnicianCustodies = currentUser?.role === 'GENERAL_MANAGER';
+  const [custodyResetOpen, setCustodyResetOpen] = useState(false);
+  const canReviewRequests = canManageStock;
+  const canPrepare = canManageStock;
   const canDispatch = hasPermission(currentUser, Permission.DISPATCH_MATERIAL_REQUESTS) || canManageStock;
   const canReconcile = hasAnyPermission(currentUser, [Permission.RECONCILE_MATERIAL_CUSTODY, Permission.RECONCILE_OTHERS_MATERIAL_CUSTODY]);
   const canReports = hasPermission(currentUser, Permission.VIEW_MATERIAL_REPORTS);
@@ -380,7 +386,7 @@ export default function WarehousesPage() {
   const [barcodeResult, setBarcodeResult] = useState(null);
   const [customCategories, setCustomCategories] = useState([]);
   const [hiddenCategories, setHiddenCategories] = useState([]);
-  const [warehouseForm, setWarehouseForm] = useState({ name: '', code: '', location: '', notes: '' });
+  const [warehouseForm, setWarehouseForm] = useState({ name: '', code: '', location: '', notes: '', type: 'REGULAR' });
   const [editingWarehouse, setEditingWarehouse] = useState(null);
   const [warehouseInventoryModal, setWarehouseInventoryModal] = useState(null);
   const [issueCart, setIssueCart] = useState([]);
@@ -463,7 +469,7 @@ export default function WarehousesPage() {
       const entry = map.get(id) || { qtyOnHand: 0, qtyReserved: 0, qtyAvailable: 0, warehouses: [] };
       entry.qtyOnHand += Number(balance.qtyOnHand || 0);
       entry.qtyReserved += Number(balance.qtyReserved || 0);
-      entry.qtyAvailable += Number(balance.qtyAvailable ?? (Number(balance.qtyOnHand || 0) - Number(balance.qtyReserved || 0)));
+      if (balance.warehouse?.type !== 'DAMAGED') entry.qtyAvailable += Number(balance.qtyAvailable ?? (Number(balance.qtyOnHand || 0) - Number(balance.qtyReserved || 0)));
       entry.warehouses.push(balance);
       map.set(id, entry);
     });
@@ -642,6 +648,7 @@ export default function WarehousesPage() {
     setWarehouseForm({
       name: warehouse.name || '',
       code: warehouse.code || '',
+      type: warehouse.type || 'REGULAR',
       location: warehouse.location || '',
       notes: warehouse.notes || '',
     });
@@ -673,81 +680,38 @@ export default function WarehousesPage() {
     setWarehouseInventoryModal({ warehouse, rows });
   };
 
-  const deleteWarehouse = async (warehouse) => {
-    if (!window.confirm(`هل تريد حذف المخزن "${warehouse.name}" من قوائم الاستخدام؟`)) return;
-    setSaving(true);
-    setError('');
-    setInfo('');
-    try {
-      await api.patch(`/materials/warehouses/${warehouse._id}`, { active: false });
-      setInfo('تم حذف المخزن من قوائم الاستخدام.');
-      await load(true);
-    } catch (err) {
-      setError(err.message || 'تعذر حذف المخزن');
-    } finally {
-      setSaving(false);
-    }
-  };
-
   const openPermanentDeleteWarehouse = (warehouse) => {
+    if (!canDeleteWarehouse) return;
     const balances = stock
       .filter((balance) => productId(balance.warehouse) === productId(warehouse))
-      .filter((balance) => Number(balance.qtyOnHand || 0) > 0 || Number(balance.qtyReserved || 0) > 0)
       .map((balance) => ({
         materialId: productId(balance.material),
         materialName: balance.material?.name || '-',
         materialCode: balance.material?.code || '',
         qtyOnHand: Number(balance.qtyOnHand || 0),
         qtyReserved: Number(balance.qtyReserved || 0),
-        transferQty: Number(balance.qtyOnHand || 0),
         unit: balance.material?.unit || '',
       }));
-    const preferredMain = activeWarehouses.find((item) => productId(item) !== productId(warehouse) && (item.code === 'WH-MAIN' || /الرئيسي|main/i.test(`${item.name || ''} ${item.code || ''}`)))
-      || activeWarehouses.find((item) => productId(item) !== productId(warehouse));
-    setWarehouseDeleteModal({
-      warehouse,
-      targetWarehouseId: preferredMain?._id || '',
-      confirmText: '',
-      balances,
-    });
-  };
-
-  const updateWarehouseDeleteItem = (index, patch) => {
-    setWarehouseDeleteModal((prev) => prev ? ({
-      ...prev,
-      balances: prev.balances.map((item, itemIndex) => (itemIndex === index ? { ...item, ...patch } : item)),
-    }) : prev);
+    setWarehouseDeleteModal({ warehouse, confirmText: '', balances });
   };
 
   const deleteWarehousePermanently = async () => {
-    if (!warehouseDeleteModal?.warehouse?._id) return;
-    const isEmptyWarehouse = !warehouseDeleteModal.balances.length;
-    const expectedConfirmText = isEmptyWarehouse ? (warehouseDeleteModal.warehouse.name || 'حذف نهائي') : 'حذف نهائي';
-    if (warehouseDeleteModal.confirmText !== expectedConfirmText) {
-      setError(`اكتب عبارة "${expectedConfirmText}" لتأكيد العملية.`);
-      return;
-    }
-    const hasReserved = warehouseDeleteModal.balances.some((item) => Number(item.qtyReserved || 0) > 0);
-    if (hasReserved) {
-      setError('لا يمكن الحذف النهائي لوجود كميات محجوزة داخل هذا المخزن.');
-      return;
-    }
+    if (!canDeleteWarehouse || !warehouseDeleteModal?.warehouse?._id) return;
+    if (warehouseDeleteModal.confirmText.trim() !== warehouseDeleteModal.warehouse.name.trim()) return;
     setSaving(true);
     setError('');
     setInfo('');
     try {
-      await api.delete(`/materials/warehouses/${warehouseDeleteModal.warehouse._id}/permanent`, {
-        targetWarehouseId: warehouseDeleteModal.targetWarehouseId,
-        items: warehouseDeleteModal.balances.map((item) => ({
-          materialId: item.materialId,
-          quantity: Number(item.transferQty || 0),
-        })),
+      const result = await api.delete(`/materials/warehouses/${warehouseDeleteModal.warehouse._id}/permanent`, {
+        confirmationName: warehouseDeleteModal.confirmText,
       });
-      setInfo('تم تحويل الأرصدة وحذف المخزن نهائياً.');
+      setInfo(`تم حذف المخزن وأرصدته وحركاته نهائياً، وحذف ${result.deletedMaterialsCount || 0} مادة خاصة به.${result.retainedSharedMaterialsCount ? ' تم الإبقاء على المواد المشتركة مع المخازن الأخرى.' : ''}`);
       setWarehouseDeleteModal(null);
+      if (productId(editingWarehouse) === productId(warehouseDeleteModal.warehouse)) cancelEditWarehouse();
+      setIssueCart([]);
       await load(true);
     } catch (err) {
-      setError(err.message || 'تعذر حذف المخزن نهائياً');
+      setError(err.message);
     } finally {
       setSaving(false);
     }
@@ -778,6 +742,7 @@ export default function WarehousesPage() {
       setError('اختر المخزن والكمية قبل إضافة المادة للسلة.');
       return;
     }
+    if (issueCart.length && issueCart[0].warehouseId !== warehouseId) { setError('كل طلب مرتبط بمخزن واحد. أرسل السلة الحالية قبل طلب مواد من مخزن آخر.'); return; }
     setError('');
     setIssueCart((prev) => {
       const existing = prev.find((item) => productId(item.product) === productId(product) && item.warehouseId === warehouseId);
@@ -787,7 +752,7 @@ export default function WarehousesPage() {
       return [...prev, { product, warehouseId, quantity: qtyValue, issueType, notes }];
     });
     setCartProduct(null);
-    setInfo('تمت إضافة المادة إلى سلة الصرف.');
+    setInfo('تمت إضافة المادة إلى سلة طلب المواد.');
   };
 
   const updateCartItem = (index, patch) => {
@@ -806,14 +771,14 @@ export default function WarehousesPage() {
 
   const submitIssueCart = async () => {
     if (!issueCart.length) {
-      setError('سلة الصرف فارغة.');
+      setError('سلة طلب المواد فارغة.');
       return;
     }
     if (['project', 'both'].includes(issueForm.targetType) && !issueForm.projectId) {
       setError('اختر المشروع قبل الصرف.');
       return;
     }
-    if (['technician', 'both'].includes(issueForm.targetType) && !issueForm.employeeId) {
+    if (!issueForm.employeeId) {
       setError('اختر الفني قبل الصرف.');
       return;
     }
@@ -833,7 +798,7 @@ export default function WarehousesPage() {
       await api.post('/materials/stock/cart-issue', {
         targetType: issueForm.targetType,
         projectId: ['project', 'both'].includes(issueForm.targetType) ? issueForm.projectId : '',
-        employeeId: ['technician', 'both'].includes(issueForm.targetType) ? issueForm.employeeId : '',
+        employeeId: issueForm.employeeId,
         notes: issueForm.notes,
         referenceId,
         items: issueCart.map((item) => ({
@@ -845,7 +810,7 @@ export default function WarehousesPage() {
         })),
       });
       clearIssueCart();
-      setInfo('تم صرف مواد السلة بنجاح.');
+      setInfo('أرسل طلب المواد إلى أمين المخزن؛ لا يتم الصرف إلا بعد تجهيز الدفعة وقبول الفني.');
       await load(true);
     } catch (err) {
       setError(err.message || 'تعذر صرف مواد السلة');
@@ -928,82 +893,26 @@ export default function WarehousesPage() {
     }
   };
 
-  const reviewWarehouseRequest = async (request, action = 'APPROVE_FULL', items = []) => {
-    setSaving(true);
-    setError('');
-    setInfo('');
-    try {
-      await api.patch(`/materials/requests/${request._id}/review`, {
-        action,
-        notes: action === 'REJECT' ? 'رفض من إدارة المواد داخل المخازن' : 'اعتماد وتحويل إلى المخزن',
-        items,
-      });
-      setInfo(action === 'REJECT' ? 'تم رفض طلب المواد.' : 'تم اعتماد الطلب وتحويله إلى المخزن.');
-      await load(true);
-    } catch (err) {
-      setError(err.message || 'تعذر تنفيذ مراجعة طلب المواد');
-    } finally {
-      setSaving(false);
-    }
+  const runInventoryAction = async (path, payload, message, method = 'patch') => {
+    setSaving(true); setError(''); setInfo('');
+    try { const result = await api[method](path, payload); setInfo(message); await load(true); return result; }
+    catch (err) { setError(err.message); throw err; }
+    finally { setSaving(false); }
   };
-
-  const prepareWarehouseRequest = async (request, payload) => {
-    setSaving(true);
-    setError('');
-    setInfo('');
-    try {
-      await api.patch(`/materials/requests/${request._id}/prepare`, {
-        warehouseId: payload.warehouseId,
-        notes: payload.notes || 'تجهيز من قسم المخازن',
-        items: payload.items,
-      });
-      setInfo('تم تجهيز المواد وخصمها من المخزون.');
-      await load(true);
-    } catch (err) {
-      setError(err.message || 'تعذر تجهيز طلب المواد من المخزن');
-    } finally {
-      setSaving(false);
-    }
+  const reviewWarehouseRequest = (request, action, payload = {}) => {
+    const notes = action === 'REJECT' ? window.prompt('سبب رفض طلب المواد') : payload.notes || 'اعتماد كميات أمين المخزن';
+    if (action === 'REJECT' && !notes?.trim()) return Promise.reject(new Error('سبب الرفض مطلوب'));
+    return runInventoryAction(`/materials/requests/${request._id}/review`, { ...payload, action, notes }, action === 'REJECT' ? 'تم رفض الطلب.' : 'تم اعتماد الكميات للتجهيز والحجز.');
   };
-
-  const dispatchWarehouseRequest = async (request, payload) => {
-    setSaving(true);
-    setError('');
-    setInfo('');
-    try {
-      await api.patch(`/materials/requests/${request._id}/dispatch`, {
-        warehouseId: payload.warehouseId,
-        recipientId: payload.recipientId,
-        notes: payload.notes || 'صرف من قسم المخازن',
-        custodyNotes: payload.custodyNotes || 'ذمة منشأة من المخازن',
-        items: payload.items,
-      });
-      setInfo('تم صرف الطلب وإنشاء/تحديث ذمة الفني.');
-      await load(true);
-    } catch (err) {
-      setError(err.message || 'تعذر صرف طلب المواد');
-    } finally {
-      setSaving(false);
-    }
+  const prepareWarehouseRequest = (request, payload) => runInventoryAction(`/materials/requests/${request._id}/prepare`, payload, 'تم تجهيز وحجز الدفعة؛ بانتظار قبول الفني. لم يخصم الرصيد الفعلي بعد.');
+  const confirmWarehouseReceipt = (request, action, notes) => runInventoryAction(`/materials/requests/${request._id}/confirm-receipt`, { action, notes, receiptToken: request.pendingReceipt?.id }, action === 'REJECT' ? 'رفضت الدفعة وفك حجزها.' : 'تم تأكيد الاستلام وخصم الرصيد وتسجيل الذمة.');
+  const cancelWarehouseRemainder = (request, notes) => runInventoryAction(`/materials/requests/${request._id}/cancel-remaining`, { notes }, 'ألغي غير المستلم وفك حجزه. المواد المستلمة تبقى على ذمة الفني.');
+  const reviewSettlement = (record, action) => {
+    const reviewNotes = action === 'REJECT' ? window.prompt('ملاحظات رفض التصفية') : 'اعتماد أمين المخزن للكميات';
+    if (action === 'REJECT' && !reviewNotes?.trim()) return Promise.reject(new Error('ملاحظات الرفض مطلوبة'));
+    return runInventoryAction(`/materials/reconciliations/${record._id}/review`, { action, reviewNotes }, action === 'REJECT' ? 'تم رفض التصفية وإعادتها للفني.' : 'اعتمدت التصفية؛ استلم الفائض والتالف الفعلي إن وجد.');
   };
-
-  const reviewSettlement = async (reconciliation, action) => {
-    setSaving(true);
-    setError('');
-    setInfo('');
-    try {
-      await api.patch(`/materials/reconciliations/${reconciliation._id}/review`, {
-        action,
-        reviewNotes: action === 'APPROVE' ? 'اعتماد التصفية من قسم المخازن' : 'رفض التصفية من قسم المخازن',
-      });
-      setInfo(action === 'APPROVE' ? 'تم اعتماد التصفية.' : 'تم رفض التصفية.');
-      await load(true);
-    } catch (err) {
-      setError(err.message || 'تعذر اعتماد التصفية');
-    } finally {
-      setSaving(false);
-    }
-  };
+  const receiveSettlementReturns = (record, payload) => runInventoryAction(`/materials/reconciliations/${record._id}/returns`, payload, 'سجل الفائض في المخزن الصالح والتالف في مخزن التالف، وحدثت الذمة.', 'post');
 
   const openWarehouseKpi = (target) => {
     const go = (url) => { window.location.href = url; };
@@ -1044,7 +953,7 @@ export default function WarehousesPage() {
         </div>
         <div className="action-row">
           {canManageProducts ? <button className="btn btn-primary" onClick={() => setEditingProduct({})}>إضافة منتج جديد</button> : null}
-          {canManageStock ? <button className="btn btn-primary" onClick={() => setCartOpen(true)}>سلة الصرف ({issueCart.length})</button> : null}
+          {canManageStock ? <button className="btn btn-primary" onClick={() => setCartOpen(true)}>سلة طلب المواد ({issueCart.length})</button> : null}
           <button className="btn btn-soft" onClick={() => window.location.href = '/materials'}>صفحة طلب المواد</button>
           {canReports ? <button className="btn btn-soft" onClick={() => exportReport('excel')}>Excel</button> : null}
           {canReports ? <button className="btn btn-soft" onClick={() => exportReport('pdf')}>PDF</button> : null}
@@ -1082,6 +991,7 @@ export default function WarehousesPage() {
             ['reports', 'تقارير المخازن'],
             ['settings', 'إعدادات المخزن'],
           ].map(([value, label]) => <button key={value} className={`btn ${activeTab === value ? 'btn-primary' : 'btn-soft'}`} onClick={() => openWarehouseTab(value)}>{label}</button>)}
+          {canResetTechnicianCustodies ? <button type="button" className="btn btn-danger" onClick={() => setCustodyResetOpen(true)}>تهيئة ذمم الفنيين</button> : null}
         </div>
         <div className="warehouse-barcode-row">
           <label>بحث بالباركود<input ref={barcodeRef} className="input" dir="ltr" value={filters.barcode} onChange={(e) => setFilters((prev) => ({ ...prev, barcode: e.target.value }))} onKeyDown={(e) => { if (e.key === 'Enter') searchBarcode(e.currentTarget.value); }} placeholder="امسح الباركود أو اكتب الرقم ثم Enter" /></label>
@@ -1129,35 +1039,28 @@ export default function WarehousesPage() {
       {activeTab === 'dashboard' ? <DashboardPanels stock={stock} products={products} requests={transferredRequests} custodies={openCustodies} reconciliations={pendingSettlements} /> : null}
       {activeTab === 'categories' ? <CategoryCardsPanel categories={categories} products={materials} saving={saving} canManage={canManageProducts} onCreateCategory={createCategory} onRenameCategory={renameCategory} onDeleteCategory={deleteCategory} onAdd={(category) => { setEditingProduct({ category }); setActiveTab('products'); }} /> : null}
       {activeTab === 'requests' ? (
-        <RequestsPanel
-          requests={workflowRequests}
-          warehouses={activeWarehouses}
-          employees={employees}
-          stockByMaterial={stockByMaterial}
-          saving={saving}
-          canReview={canReviewRequests}
-          canPrepare={canPrepare || canManageStock}
-          canDispatch={canDispatch}
-          onReview={reviewWarehouseRequest}
-          onPrepare={prepareWarehouseRequest}
-          onDispatch={dispatchWarehouseRequest}
-        />
+        <InventoryRequestsPanel requests={requests} warehouses={activeWarehouses} stockByMaterial={stockByMaterial} actor={currentUser} saving={saving} canManage={canManageStock} onReview={reviewWarehouseRequest} onPrepare={prepareWarehouseRequest} onConfirm={confirmWarehouseReceipt} onCancel={cancelWarehouseRemainder} />
       ) : null}
       {activeTab === 'stock-in' ? <StockQuickPanel mode="IN" products={materials} warehouses={activeWarehouses} onSubmit={submitStockAdjust} onSubmitBatch={submitStockAdjustBatch} saving={saving} /> : null}
-      {activeTab === 'returns' ? <StockQuickPanel mode="RETURN_IN" products={materials} warehouses={activeWarehouses} onSubmit={(form) => submitStockAdjust({ ...form, quantity: Math.abs(Number(form.quantity || 0)), transactionType: 'RETURN_IN' })} onSubmitBatch={submitStockAdjustBatch} saving={saving} /> : null}
+      {activeTab === 'returns' ? <InventorySettlementsPanel reconciliations={reconciliations} warehouses={activeWarehouses} actor={currentUser} canManage={canManageStock} saving={saving} onReview={reviewSettlement} onReceive={receiveSettlementReturns} /> : null}
       {activeTab === 'custodies' ? <CustodiesPanel custodies={custodies} employees={employees} openCustodiesData={openCustodiesData} onRefresh={() => load(true)} /> : null}
-      {activeTab === 'settlements' ? <SettlementsPanel reconciliations={pendingSettlements} saving={saving} onReview={reviewSettlement} /> : null}
-      {activeTab === 'damaged' ? <DamagedPanel custodies={custodies} /> : null}
+      {activeTab === 'settlements' ? <InventorySettlementsPanel reconciliations={reconciliations} warehouses={activeWarehouses} actor={currentUser} canManage={canManageStock} saving={saving} onReview={reviewSettlement} onReceive={receiveSettlementReturns} /> : null}
+      {activeTab === 'damaged' ? <DamagedPanel custodies={custodies} stock={stock} /> : null}
       {activeTab === 'movement' ? <MovementPanel summary={summary} /> : null}
       {activeTab === 'reports' ? <ReportsPanel summary={summary} canReports={canReports} onExport={exportReport} /> : null}
-      {activeTab === 'settings' ? <WarehouseSettingsPanel warehouses={warehouses} form={warehouseForm} saving={saving} canManageStock={canManageStock} editingWarehouse={editingWarehouse} onChange={setWarehouseForm} onCreate={saveWarehouse} onCancelEdit={cancelEditWarehouse} onEdit={startEditWarehouse} onShowInventory={openWarehouseInventory} onDelete={deleteWarehouse} onRestore={restoreWarehouse} onPermanentDelete={openPermanentDeleteWarehouse} /> : null}
+      {activeTab === 'settings' ? <WarehouseSettingsPanel warehouses={warehouses} form={warehouseForm} saving={saving} canManageStock={canManageStock} canDeleteWarehouse={canDeleteWarehouse} editingWarehouse={editingWarehouse} onChange={setWarehouseForm} onCreate={saveWarehouse} onCancelEdit={cancelEditWarehouse} onEdit={startEditWarehouse} onShowInventory={openWarehouseInventory} onRestore={restoreWarehouse} onPermanentDelete={openPermanentDeleteWarehouse} /> : null}
 
       {editingProduct ? <ProductModal product={editingProduct} initialBarcode={editingProduct?.barcode || initialBarcode} warehouses={activeWarehouses} categories={categories} stockEntry={stockByMaterial.get(productId(editingProduct))} saving={saving} onClose={() => { setEditingProduct(null); setInitialBarcode(''); }} onSubmit={saveProduct} /> : null}
       {stockModal ? <StockAdjustModal product={stockModal.product} warehouses={activeWarehouses} mode={stockModal.mode} saving={saving} onClose={() => setStockModal(null)} onSubmit={submitStockAdjust} /> : null}
       {detailsProduct ? <ProductDetailsModal product={detailsProduct} stockEntry={stockByMaterial.get(productId(detailsProduct))} onClose={() => setDetailsProduct(null)} /> : null}
-      {cartProduct ? <AddToCartModal product={cartProduct} warehouses={activeWarehouses} stockEntry={stockByMaterial.get(productId(cartProduct))} onClose={() => setCartProduct(null)} onSubmit={confirmAddProductToCart} /> : null}
-      {cartOpen ? <IssueCartModal cart={issueCart} warehouses={activeWarehouses} projects={projects} employees={employees} form={issueForm} saving={saving} onChangeForm={setIssueForm} onUpdateItem={updateCartItem} onRemoveItem={removeCartItem} onClose={() => setCartOpen(false)} onClear={clearIssueCart} onSubmit={submitIssueCart} /> : null}
-      {warehouseDeleteModal ? <PermanentWarehouseDeleteModal state={warehouseDeleteModal} warehouses={activeWarehouses} saving={saving} onClose={() => setWarehouseDeleteModal(null)} onChange={setWarehouseDeleteModal} onUpdateItem={updateWarehouseDeleteItem} onSubmit={deleteWarehousePermanently} /> : null}
+      {cartProduct ? <AddToCartModal product={cartProduct} warehouses={activeWarehouses.filter((warehouse) => warehouse.type !== 'DAMAGED')} stockEntry={stockByMaterial.get(productId(cartProduct))} onClose={() => setCartProduct(null)} onSubmit={confirmAddProductToCart} /> : null}
+      {cartOpen ? <IssueCartModal cart={issueCart} warehouses={activeWarehouses.filter((warehouse) => warehouse.type !== 'DAMAGED')} projects={projects} employees={employees} form={issueForm} saving={saving} onChangeForm={setIssueForm} onUpdateItem={updateCartItem} onRemoveItem={removeCartItem} onClose={() => setCartOpen(false)} onClear={clearIssueCart} onSubmit={submitIssueCart} /> : null}
+      {warehouseDeleteModal && canDeleteWarehouse ? <PermanentWarehouseDeleteModal state={warehouseDeleteModal} saving={saving} onClose={() => setWarehouseDeleteModal(null)} onChange={setWarehouseDeleteModal} onSubmit={deleteWarehousePermanently} /> : null}
+      {custodyResetOpen && canResetTechnicianCustodies ? <TechnicianCustodyResetModal employees={employees} holders={openCustodiesData.holders || []} onClose={() => setCustodyResetOpen(false)} onComplete={async (result) => {
+        setInfo(`تمت تهيئة ذمم ${result.technician.fullName} وحذف ${result.deletedCustodiesCount} ذمة مفتوحة.`);
+        setCustodyResetOpen(false);
+        await load(true);
+      }} /> : null}
       {warehouseInventoryModal ? <WarehouseInventoryModal state={warehouseInventoryModal} onClose={() => setWarehouseInventoryModal(null)} /> : null}
 
       <style jsx global>{`
@@ -1307,7 +1210,7 @@ function ProductsView({ products, stockByMaterial, viewMode, canManageProducts, 
 }
 
 function AddToCartModal({ product, warehouses, stockEntry, onClose, onSubmit }) {
-  const defaultWarehouse = stockEntry?.warehouses?.find((item) => Number(item.qtyAvailable ?? item.qtyOnHand ?? 0) > 0)?.warehouse;
+  const defaultWarehouse = stockEntry?.warehouses?.find((item) => item.warehouse?.type !== 'DAMAGED' && Number(item.qtyAvailable ?? item.qtyOnHand ?? 0) > 0)?.warehouse;
   const [form, setForm] = useState({
     warehouseId: productId(defaultWarehouse) || warehouses[0]?._id || '',
     quantity: 1,
@@ -1332,7 +1235,7 @@ function AddToCartModal({ product, warehouses, stockEntry, onClose, onSubmit }) 
         <div className="modal-header">
           <div>
             <h3>إضافة للسلة</h3>
-            <p className="daily-plan-modal-subtitle">حدد الكمية والمخزن قبل إضافة المادة إلى سلة الصرف.</p>
+            <p className="daily-plan-modal-subtitle">حدد الكمية والمخزن قبل إضافة المادة إلى سلة طلب المواد.</p>
           </div>
           <button type="button" className="modal-close" onClick={onClose}>&times;</button>
         </div>
@@ -1355,12 +1258,7 @@ function AddToCartModal({ product, warehouses, stockEntry, onClose, onSubmit }) 
           <label>الكمية
             <input className="input" type="number" min="0.0001" step="any" autoFocus value={form.quantity} onChange={(e) => setValue('quantity', e.target.value)} />
           </label>
-          <label>نوع القيد
-            <select className="select" value={form.issueType} onChange={(e) => setValue('issueType', e.target.value)}>
-              <option value="custody">ذمة</option>
-              <option value="project_consumption">استهلاك مشروع</option>
-            </select>
-          </label>
+          <p>تسجل الكمية على ذمة الفني عند قبوله الاستلام، ويحدد الاستهلاك عند التصفية.</p>
           <div className="daily-plan-card-subtitle warehouse-available-note">المتوفر في المخزن المختار: {qty(availableQty)}</div>
           <label className="grid-span-full">ملاحظة<input className="input" value={form.notes} onChange={(e) => setValue('notes', e.target.value)} /></label>
         </div>
@@ -1388,7 +1286,7 @@ function IssueCartModal({ cart, warehouses, projects, employees, form, saving, o
         <div className="modal-header">
           <div>
             <h3>سلة صرف المواد</h3>
-            <p className="daily-plan-modal-subtitle">اجمع عدة مواد ثم اصرفها دفعة واحدة على ذمة مشروع أو فني.</p>
+            <p className="daily-plan-modal-subtitle">أرسل طلباً بالمواد لأمين المخزن، ثم يقبل الفني الدفعة المجهزة لتسجيل الذمة.</p>
           </div>
           <button type="button" className="modal-close" onClick={onClose}>&times;</button>
         </div>
@@ -1409,7 +1307,7 @@ function IssueCartModal({ cart, warehouses, projects, employees, form, saving, o
               </select>
             </label>
           ) : null}
-          {['technician', 'both'].includes(form.targetType) ? (
+          {true ? (
             <label>الفني
               <select className="select" value={form.employeeId} onChange={(e) => setForm('employeeId', e.target.value)}>
                 <option value="">اختر الفني</option>
@@ -1451,12 +1349,7 @@ function IssueCartModal({ cart, warehouses, projects, employees, form, saving, o
                     </select>
                   </td>
                   <td><input className="input" type="number" min="0.0001" step="any" value={item.quantity} onChange={(e) => onUpdateItem(index, { quantity: e.target.value })} /></td>
-                  <td>
-                    <select className="select" value={item.issueType} onChange={(e) => onUpdateItem(index, { issueType: e.target.value })}>
-                      <option value="custody">ذمة</option>
-                      <option value="project_consumption">استهلاك مشروع</option>
-                    </select>
-                  </td>
+                  <td>ذمة عند قبول الاستلام</td>
                   <td><input className="input" value={item.notes || ''} onChange={(e) => onUpdateItem(index, { notes: e.target.value })} /></td>
                   <td><button type="button" className="btn btn-soft btn-sm" onClick={() => onRemoveItem(index)}>حذف</button></td>
                 </tr>
@@ -1472,7 +1365,7 @@ function IssueCartModal({ cart, warehouses, projects, employees, form, saving, o
           <div className="form-actions">
             <button type="button" className="btn btn-soft" onClick={onClear} disabled={!cart.length || saving}>تفريغ السلة</button>
             <button type="button" className="btn btn-soft" onClick={onClose}>إغلاق</button>
-            <button type="button" className="btn btn-primary" onClick={onSubmit} disabled={!cart.length || saving}>{saving ? 'جاري الصرف...' : 'صرف السلة'}</button>
+            <button type="button" className="btn btn-primary" onClick={onSubmit} disabled={!cart.length || saving}>{saving ? 'جار إرسال الطلب...' : 'إرسال طلب المواد'}</button>
           </div>
         </div>
       </div>
@@ -1488,7 +1381,6 @@ function ProductActions({ product, canManageProducts, canManageStock, onDetails,
       {canManageProducts ? <button className="btn btn-soft btn-sm" onClick={() => onEdit(product)}>تعديل</button> : null}
       {canManageProducts ? <button className="btn btn-soft btn-sm" onClick={() => onArchive(product)}>أرشفة</button> : null}
       {canManageStock ? <button className="btn btn-primary btn-sm" onClick={() => onStockIn(product)}>إدخال</button> : null}
-      {canManageStock ? <button className="btn btn-soft btn-sm" onClick={() => onStockOut(product)}>صرف</button> : null}
       <style jsx>{`.warehouse-actions { flex-wrap: wrap; margin-top: 12px; }`}</style>
     </div>
   );
@@ -1525,81 +1417,99 @@ function DashboardPanels({ stock, products, requests, custodies, reconciliations
   );
 }
 
-function PermanentWarehouseDeleteModal({ state, warehouses, saving, onClose, onChange, onUpdateItem, onSubmit }) {
-  const sourceId = productId(state.warehouse);
-  const targetOptions = warehouses.filter((warehouse) => productId(warehouse) !== sourceId);
-  const totalQty = state.balances.reduce((sum, item) => sum + Number(item.qtyOnHand || 0), 0);
-  const hasReserved = state.balances.some((item) => Number(item.qtyReserved || 0) > 0);
-  const isEmptyWarehouse = !state.balances.length;
-  const expectedConfirmText = isEmptyWarehouse ? (state.warehouse.name || 'حذف نهائي') : 'حذف نهائي';
-  const canSubmit = (isEmptyWarehouse || state.targetWarehouseId) && state.confirmText === expectedConfirmText && !hasReserved && !saving;
+function TechnicianCustodyResetModal({ employees, holders, onClose, onComplete }) {
+  const [technicianId, setTechnicianId] = useState('');
+  const [preview, setPreview] = useState(null);
+  const [confirmationName, setConfirmationName] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const [revision, setRevision] = useState(0);
+  const options = useMemo(() => {
+    const map = new Map(employees.map((employee) => [productId(employee), { id: productId(employee), name: employee.fullName, code: employee.employeeCode }]));
+    holders.forEach((holder) => { if (!map.has(String(holder.holderId))) map.set(String(holder.holderId), { id: String(holder.holderId), name: holder.holderName, code: holder.employeeCode }); });
+    return [...map.values()].filter((employee) => employee.id && employee.id !== 'unknown').sort((a, b) => (a.name || '').localeCompare(b.name || '', 'ar'));
+  }, [employees, holders]);
 
+  useEffect(() => {
+    let cancelled = false;
+    setPreview(null); setConfirmationName(''); setError('');
+    if (!technicianId) { setLoading(false); return () => { cancelled = true; }; }
+    setLoading(true);
+    api.get(`/materials/custodies/reset-preview?technicianId=${encodeURIComponent(technicianId)}`)
+      .then((result) => { if (!cancelled) setPreview(result); })
+      .catch((err) => { if (!cancelled) setError(err.message || 'تعذر تحميل ذمم الفني'); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [technicianId, revision]);
+
+  const currentPreview = preview?.technician.id === technicianId ? preview : null;
+  const canSubmit = !loading && !busy && currentPreview?.custodies.length > 0
+    && confirmationName.trim() === currentPreview.technician.fullName.trim();
+  const submit = async () => {
+    if (!canSubmit) return;
+    setBusy(true); setError('');
+    try {
+      const result = await api.delete('/materials/custodies/reset', { technicianId, confirmationName, previewToken: currentPreview.previewToken });
+      await onComplete(result);
+    } catch (err) { setError(err.message || 'تعذرت تهيئة ذمم الفني'); }
+    finally { setBusy(false); }
+  };
+  const labels = { OPEN: 'مفتوحة', PARTIALLY_RECONCILED: 'مصفاة جزئياً', PENDING_RECONCILIATION: 'بانتظار التصفية', OVERDUE: 'متأخرة' };
   return (
-    <div className="modal-backdrop" onClick={onClose}>
+    <div className="modal-backdrop" onClick={() => { if (!busy) onClose(); }}>
+      <div className="modal-panel warehouse-cart-modal" onClick={(event) => event.stopPropagation()}>
+        <div className="modal-header"><h3>تهيئة ذمم الفنيين</h3><button type="button" className="modal-close" onClick={onClose} disabled={busy}>&times;</button></div>
+        <p>اختر الفني لمعاينة جميع ذممه المفتوحة وغير المصفاة قبل حذفها نهائياً. تبقى الذمم المغلقة والمصفاة بالكامل محفوظة.</p>
+        <label>الفني *<select className="select" value={technicianId} disabled={busy} onChange={(event) => { setTechnicianId(event.target.value); setPreview(null); setConfirmationName(''); }} style={{ width: '100%' }}>
+          <option value="">اختر الفني</option><option value="unassigned">ذمم بدون فني</option>{options.map((employee) => <option key={employee.id} value={employee.id}>{employee.name}{employee.code ? ` — ${employee.code}` : ''}</option>)}
+        </select></label>
+        {loading ? <p role="status">جار تحميل الذمم...</p> : null}
+        {error ? <p role="alert" style={{ color: '#fca5a5' }}>{error}</p> : null}
+        {currentPreview ? <>
+          <p>عدد الذمم التي ستُحذف: <strong>{currentPreview.custodies.length}</strong></p>
+          <div className="warehouse-cart-table-wrap" style={{ maxHeight: 280, overflowY: 'auto' }}><table className="table"><thead><tr><th>رقم الذمة</th><th>الحالة</th><th>البنود</th><th>الكمية المتبقية</th></tr></thead>
+            <tbody>{currentPreview.custodies.length ? currentPreview.custodies.map((custody) => <tr key={custody.id}><td>{custody.custodyNo}</td><td>{labels[custody.status] || custody.status}</td><td>{custody.itemsCount}</td><td>{qty(custody.remainingQty)}</td></tr>) : <tr><td colSpan={4}>لا توجد ذمم مفتوحة أو غير مصفاة لهذا الفني.</td></tr>}</tbody>
+          </table></div>
+          {currentPreview.custodies.length ? <>
+            <p style={{ color: '#fca5a5' }}>ستُحذف الذمم المعروضة وسجلات تصفيتها وإرجاعها المرتبطة. لا يتم إرجاع مواد إلى المخزن أو تعديل أرصدته، ولا تتأثر ذمم بقية الفنيين.</p>
+            <label>اكتب اسم الفني «{currentPreview.technician.fullName}» لتأكيد الحذف<input className="input" autoComplete="off" value={confirmationName} disabled={busy} onChange={(event) => setConfirmationName(event.target.value)} style={{ width: '100%' }} /></label>
+          </> : null}
+        </> : null}
+        <div className="form-actions form-actions-end" style={{ marginTop: 16 }}>
+          <button type="button" className="btn btn-soft" onClick={onClose} disabled={busy}>إلغاء</button>
+          <button type="button" className="btn btn-soft" onClick={() => setRevision((value) => value + 1)} disabled={busy || loading || !technicianId}>تحديث المعاينة</button>
+          <button type="button" className="btn btn-danger" onClick={submit} disabled={!canSubmit}>{busy ? 'جار التهيئة...' : 'حذف الذمم المفتوحة'}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function PermanentWarehouseDeleteModal({ state, saving, onClose, onChange, onSubmit }) {
+  const canSubmit = !saving && state.confirmText.trim() === state.warehouse.name.trim();
+  return (
+    <div className="modal-backdrop" onClick={() => { if (!saving) onClose(); }}>
       <div className="modal-panel warehouse-cart-modal" onClick={(event) => event.stopPropagation()}>
         <div className="modal-header">
-          <div>
-            <h3>حذف المخزن نهائياً</h3>
-            <p className="daily-plan-modal-subtitle">{isEmptyWarehouse ? `لا توجد كميات داخل ${state.warehouse.name}، يمكن حذفه نهائياً بعد التأكيد.` : `سيتم تحويل كل أرصدة ${state.warehouse.name} إلى المخزن الرئيسي ثم حذف المخزن نهائياً.`}</p>
-          </div>
-          <button type="button" className="modal-close" onClick={onClose}>&times;</button>
+          <div><h3>حذف المخزن ومواده نهائياً</h3><p className="daily-plan-modal-subtitle">{state.warehouse.name} — {state.warehouse.code}</p></div>
+          <button type="button" className="modal-close" onClick={onClose} disabled={saving}>&times;</button>
         </div>
-
-        <div style={{ padding: 12, borderRadius: 10, border: '1px solid rgba(239,68,68,.35)', background: 'rgba(239,68,68,.08)', color: '#fecaca', marginBottom: 12 }}>
-          {isEmptyWarehouse ? 'هذا الإجراء نهائي. المخزن لا يحتوي على مواد، وسيتم حذفه من النظام بعد التأكيد.' : 'هذا الإجراء نهائي. لا يمكن حذف مخزن يحتوي كميات محجوزة، ويجب تحويل كل الرصيد المتبقي بالكامل.'}
-        </div>
-
-        <div className="daily-plan-form-grid" style={{ marginBottom: 12 }}>
-          <label>المخزن الرئيسي / وجهة التحويل
-            <select className="select" value={state.targetWarehouseId} onChange={(event) => onChange((prev) => ({ ...prev, targetWarehouseId: event.target.value }))}>
-              <option value="">اختر المخزن الرئيسي</option>
-              {targetOptions.map((warehouse) => <option key={warehouse._id} value={warehouse._id}>{warehouse.name}{warehouse.code ? ` - ${warehouse.code}` : ''}</option>)}
-            </select>
-          </label>
-          <label>تأكيد الحذف
-            <input className="input" value={state.confirmText} onChange={(event) => onChange((prev) => ({ ...prev, confirmText: event.target.value }))} placeholder={`اكتب: ${expectedConfirmText}`} />
-          </label>
-          <div className="maintenance-info-box">
-            <span>إجمالي الكميات المحولة</span>
-            <strong>{qty(totalQty)}</strong>
-          </div>
-        </div>
-
+        <p style={{ color: '#fca5a5' }}>سيتم حذف المخزن وجميع أرصدته وحركاته والمواد الخاصة به نهائياً، بما فيها الكميات المحجوزة. تبقى المواد المشتركة وأرصدة المخازن الأخرى محفوظة.</p>
         <div className="warehouse-cart-table-wrap">
           <table className="table warehouse-cart-table">
-            <thead><tr><th>المادة</th><th>الكود</th><th>الرصيد المتبقي</th><th>محجوز</th><th>كمية التحويل</th></tr></thead>
-            <tbody>
-              {state.balances.length ? state.balances.map((item, index) => (
-                <tr key={item.materialId || index}>
-                  <td><strong>{item.materialName}</strong></td>
-                  <td dir="ltr">{item.materialCode || '-'}</td>
-                  <td>{qty(item.qtyOnHand)}</td>
-                  <td style={{ color: Number(item.qtyReserved || 0) > 0 ? '#fca5a5' : undefined }}>{qty(item.qtyReserved)}</td>
-                  <td>
-                    <input
-                      className="input"
-                      type="number"
-                      min="0"
-                      step="any"
-                      value={item.transferQty}
-                      disabled={Number(item.qtyReserved || 0) > 0}
-                      onChange={(event) => onUpdateItem(index, { transferQty: event.target.value })}
-                    />
-                  </td>
-                </tr>
-              )) : (
-                <tr><td colSpan={5} style={{ textAlign: 'center', color: 'var(--text-soft)' }}>لا توجد كميات متبقية في هذا المخزن، يمكن حذفه مباشرة بعد اختيار مخزن رئيسي للتأكيد.</td></tr>
-              )}
-            </tbody>
+            <thead><tr><th>المادة</th><th>الكود</th><th>الرصيد</th><th>محجوز</th></tr></thead>
+            <tbody>{state.balances.length ? state.balances.map((item, index) => <tr key={item.materialId || index}>
+              <td>{item.materialName}</td><td dir="ltr">{item.materialCode || '-'}</td><td>{qty(item.qtyOnHand)}</td><td>{qty(item.qtyReserved)}</td>
+            </tr>) : <tr><td colSpan={4}>لا توجد أرصدة داخل هذا المخزن.</td></tr>}</tbody>
           </table>
         </div>
-
-        {hasReserved ? <p style={{ color: '#fca5a5' }}>يوجد كميات محجوزة. يجب فك الحجز أو إنهاء الطلبات المرتبطة قبل الحذف النهائي.</p> : null}
-        {!targetOptions.length && !isEmptyWarehouse ? <p style={{ color: '#fca5a5' }}>لا يوجد مخزن آخر لتحويل الأرصدة إليه. أضف/فعّل المخزن الرئيسي أولاً.</p> : null}
-
+        <label style={{ display: 'block', marginTop: 12 }}>اكتب اسم المخزن «{state.warehouse.name}» لتأكيد الحذف
+          <input className="input" autoComplete="off" value={state.confirmText} disabled={saving} onChange={(event) => onChange((prev) => ({ ...prev, confirmText: event.target.value }))} placeholder={state.warehouse.name} style={{ width: '100%' }} />
+        </label>
         <div className="form-actions form-actions-end" style={{ marginTop: 16 }}>
           <button type="button" className="btn btn-soft" onClick={onClose} disabled={saving}>إلغاء</button>
-          <button type="button" className="btn btn-danger" onClick={onSubmit} disabled={!canSubmit || (!isEmptyWarehouse && !targetOptions.length)}>{saving ? 'جار التنفيذ...' : isEmptyWarehouse ? 'حذف نهائي' : 'تحويل وحذف نهائي'}</button>
+          <button type="button" className="btn btn-danger" onClick={onSubmit} disabled={!canSubmit}>{saving ? 'جار الحذف...' : 'حذف المخزن ومواده نهائياً'}</button>
         </div>
       </div>
     </div>
@@ -1691,14 +1601,14 @@ function WarehouseInventoryModal({ state, onClose }) {
   );
 }
 
-function WarehouseSettingsPanel({ warehouses, form, saving, canManageStock, editingWarehouse, onChange, onCreate, onCancelEdit, onEdit, onShowInventory, onDelete, onRestore, onPermanentDelete }) {
+function WarehouseSettingsPanel({ warehouses, form, saving, canManageStock, canDeleteWarehouse, editingWarehouse, onChange, onCreate, onCancelEdit, onEdit, onShowInventory, onRestore, onPermanentDelete }) {
   const setValue = (key, value) => onChange((prev) => ({ ...prev, [key]: value }));
   return (
     <section className="card section" style={{ marginTop: 16 }}>
       <div className="section-header">
         <div>
           <h2>إعدادات المخزن</h2>
-          <p style={{ margin: 0, color: 'var(--text-soft)' }}>إضافة المخازن وحذفها من قوائم الاستخدام.</p>
+          <p style={{ margin: 0, color: 'var(--text-soft)' }}>إدارة المخازن. حذف المخزن ومواده نهائياً متاح للمدير العام فقط.</p>
         </div>
       </div>
 
@@ -1709,6 +1619,7 @@ function WarehouseSettingsPanel({ warehouses, form, saving, canManageStock, edit
           </div>
           <label>اسم المخزن<input className="input" required value={form.name} onChange={(e) => setValue('name', e.target.value)} /></label>
           <label>كود المخزن<input className="input" required dir="ltr" value={form.code} onChange={(e) => setValue('code', e.target.value)} /></label>
+          <label>نوع المخزن<select className="select" value={form.type || 'REGULAR'} disabled={!!editingWarehouse} onChange={(event) => setValue('type', event.target.value)}><option value="REGULAR">مخزن مواد صالحة</option><option value="DAMAGED">مخزن تالف - غير صالح للصرف</option></select></label>
           <label>الموقع<input className="input" value={form.location} onChange={(e) => setValue('location', e.target.value)} /></label>
           <label className="grid-span-full">ملاحظات<textarea className="textarea" value={form.notes} onChange={(e) => setValue('notes', e.target.value)} /></label>
           <div className="form-actions form-actions-end grid-span-full">
@@ -1725,8 +1636,9 @@ function WarehouseSettingsPanel({ warehouses, form, saving, canManageStock, edit
               <div>
                 <strong>{warehouse.name}</strong>
                 <div className="daily-plan-card-subtitle">{warehouse.code}</div>
+                <small>{warehouse.type === 'DAMAGED' ? 'مخزن التالف - مستبعد من المواد المتاحة للصرف' : 'مخزن مواد صالحة'}</small>
               </div>
-              <Pill tone={warehouse.active === false ? 'neutral' : 'success'}>{warehouse.active === false ? 'محذوف' : 'فعال'}</Pill>
+              <Pill tone={warehouse.active === false ? 'neutral' : 'success'}>{warehouse.active === false ? 'غير فعال' : 'فعال'}</Pill>
             </div>
             <div className="daily-plan-mini-grid">
               <div><span>الموقع</span><strong>{warehouse.location || '-'}</strong></div>
@@ -1740,10 +1652,9 @@ function WarehouseSettingsPanel({ warehouses, form, saving, canManageStock, edit
                   <>
                     <button type="button" className="btn btn-primary btn-sm" onClick={() => onShowInventory?.(warehouse)} disabled={saving}>عرض المواد</button>
                     <button type="button" className="btn btn-soft btn-sm" onClick={() => onEdit?.(warehouse)} disabled={saving}>تعديل</button>
-                    <button type="button" className="btn btn-soft btn-sm" onClick={() => onDelete(warehouse)} disabled={saving}>حذف مخزن</button>
-                    <button type="button" className="btn btn-danger btn-sm" onClick={() => onPermanentDelete?.(warehouse)} disabled={saving}>حذف نهائي</button>
                   </>
                 )}
+                {canDeleteWarehouse ? <button type="button" className="btn btn-danger btn-sm" onClick={() => onPermanentDelete?.(warehouse)} disabled={saving}>حذف المخزن ومواده</button> : null}
               </div>
             ) : null}
           </article>
@@ -1913,447 +1824,89 @@ function CategoriesPanel({ categories, products, saving = false, canManage = fal
   );
 }
 
-function RequestsPanel({ requests, warehouses = [], employees = [], stockByMaterial = new Map(), saving = false, canReview = false, canPrepare = false, canDispatch = false, onReview, onPrepare, onDispatch }) {
-  const [selectedRequest, setSelectedRequest] = useState(null);
-  const [mode, setMode] = useState('prepare');
-  const [form, setForm] = useState({ warehouseId: '', recipientId: '', notes: '', items: [] });
+const custodyStateLabel = { OPEN: 'مفتوحة', PARTIAL: 'جزئية', PARTIALLY_RECONCILED: 'مصفاة جزئياً', PENDING_RECONCILIATION: 'بانتظار التصفية', OVERDUE: 'متأخرة', CLOSED: 'مغلقة', RECONCILED: 'مصفاة', FULLY_RECONCILED: 'مصفاة بالكامل', CANCELLED: 'ملغاة' };
+const custodyUnitLabel = { ...Object.fromEntries(unitOptions), TON: 'طن', SQM: 'م²', SET: 'طقم', BAG: 'كيس', PAIR: 'زوج' };
+const custodyRoleLabel = { WAREHOUSE_KEEPER: 'أمين المخزن', GENERAL_MANAGER: 'المدير العام', PROJECT_MANAGER: 'مدير المشاريع', FINANCIAL_MANAGER: 'المدير المالي', HR_MANAGER: 'مدير الموارد البشرية', ASSISTANT_PROJECT_MANAGER: 'مساعد مدير المشاريع', TEAM_LEAD: 'قائد فريق', TECHNICAL_STAFF: 'فني', SERVICE_STAFF: 'موظف خدمات' };
 
-  const requestGroups = [
-    ['material', 'إدارة المواد', ['PENDING_MANAGER_APPROVAL', 'NEW', 'UNDER_REVIEW']],
-    ['warehouse', 'المخزن والصرف', ['PENDING_SUPPLIER_APPROVAL', 'APPROVED', 'PREPARING', 'IN_PROGRESS', 'PREPARED', 'PENDING_RECEIPT']],
-    ['custody', 'الذمم والتصفية', ['PENDING_SETTLEMENT', 'RECEIVED', 'PENDING_RECONCILIATION']],
-    ['closed', 'المغلقة/المرفوضة', ['REJECTED']],
-  ];
-
-  const grouped = requestGroups.map(([key, label, statuses]) => ({
-    key,
-    label,
-    requests: requests.filter((request) => statuses.includes(request.status)),
-  }));
-
-  const availableInWarehouse = (materialId, warehouseId) => {
-    const stockEntry = stockByMaterial.get(String(materialId));
-    const balance = stockEntry?.warehouses?.find((item) => productId(item.warehouse) === String(warehouseId));
-    return Number(balance?.qtyAvailable ?? balance?.qtyOnHand ?? 0);
+function CustodyDocumentActions({ holder, custody = null, includeClosed = false, compact = false }) {
+  const [busy, setBusy] = useState('');
+  const [error, setError] = useState('');
+  const [document, setDocument] = useState(null);
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const urlRef = useRef(null);
+  useEffect(() => () => { if (urlRef.current) URL.revokeObjectURL(urlRef.current); }, []);
+  const filename = `كشف-ذمم-${holder.holderName || 'فني'}${custody ? `-${custody.custodyNo}` : ''}.pdf`.replace(/[\\/:*?"<>|]/g, '-');
+  const download = (file) => {
+    const anchor = window.document.createElement('a'); anchor.href = file.url; anchor.download = filename;
+    window.document.body.appendChild(anchor); anchor.click(); anchor.remove();
   };
-
-  const withSelectedWarehouseAvailability = (items, warehouseId) => items.map((item) => ({
-    ...item,
-    availableQty: warehouseId ? availableInWarehouse(item.materialId, warehouseId) : item.availableQty,
-  }));
-
-  const pickWarehouseForItems = (items) => {
-    if (!warehouses.length) return '';
-    const neededItems = items.filter((item) => Number(item.quantity || 0) > 0);
-    const fullMatch = warehouses.find((warehouse) => neededItems.every((item) => availableInWarehouse(item.materialId, warehouse._id) >= Number(item.quantity || 0)));
-    if (fullMatch?._id) return fullMatch._id;
-    const partialMatch = warehouses
-      .map((warehouse) => ({
-        warehouseId: warehouse._id,
-        availableLines: neededItems.filter((item) => availableInWarehouse(item.materialId, warehouse._id) > 0).length,
-        availableQty: neededItems.reduce((sum, item) => sum + Math.min(availableInWarehouse(item.materialId, warehouse._id), Number(item.quantity || 0)), 0),
-      }))
-      .sort((a, b) => b.availableLines - a.availableLines || b.availableQty - a.availableQty)[0];
-    return partialMatch?.availableLines > 0 ? partialMatch.warehouseId : warehouses[0]?._id || '';
+  const print = (file) => {
+    const frame = window.document.createElement('iframe');
+    const printUrl = URL.createObjectURL(file.blob);
+    frame.style.cssText = 'position:fixed;width:1px;height:1px;bottom:0;left:0;border:0;opacity:0;';
+    frame.title = 'طباعة كشف الذمة';
+    frame.onload = () => window.setTimeout(() => {
+      try { frame.contentWindow.focus(); frame.contentWindow.print(); }
+      catch { setPreviewOpen(true); setError('استخدم زر الطباعة داخل عارض PDF.'); }
+    }, 400);
+    frame.src = printUrl; window.document.body.appendChild(frame);
+    window.setTimeout(() => { frame.remove(); URL.revokeObjectURL(printUrl); }, 120000);
   };
-
-  const openAction = (request, nextMode) => {
-    const recipientId = productId(request.requestedFor) || productId(request.requestedBy) || employees[0]?._id || '';
-    const items = (request.items || []).map((line) => {
-      const materialId = productId(line.material);
-      const approvedQty = Number(line.approvedQty || line.requestedQty || 0);
-      const preparedQty = Number(line.preparedQty || 0);
-      const deliveredQty = Number(line.deliveredQty || 0);
-      const prepareRemaining = Math.max(0, approvedQty - preparedQty);
-      const dispatchRemaining = Math.max(0, preparedQty - deliveredQty);
-      const stockEntry = stockByMaterial.get(materialId);
-      return {
-        materialId,
-        materialName: line.materialName || line.material?.name || '-',
-        requestedQty: Number(line.requestedQty || 0),
-        approvedQty,
-        preparedQty,
-        deliveredQty,
-        availableQty: Number(stockEntry?.qtyAvailable ?? stockEntry?.qtyOnHand ?? 0),
-        quantity: nextMode === 'dispatch' ? dispatchRemaining : prepareRemaining || approvedQty,
-        notes: line.lineNotes || '',
-      };
-    });
-    const latestPreparationWarehouse = [...(request.preparations || [])].reverse().find((entry) => entry.warehouse)?.warehouse;
-    const defaultWarehouseId = nextMode === 'dispatch'
-      ? (productId(latestPreparationWarehouse) || pickWarehouseForItems(items))
-      : pickWarehouseForItems(items);
-    setMode(nextMode);
-    setSelectedRequest(request);
-    setForm({ warehouseId: defaultWarehouseId, recipientId, notes: '', items: withSelectedWarehouseAvailability(items, defaultWarehouseId) });
+  const action = async (kind) => {
+    if (kind === 'whatsapp') { whatsapp(); return; }
+    setBusy(kind); setError('');
+    try {
+      const holderId = holder.holderId === 'unknown' ? 'unassigned' : holder.holderId;
+      const path = custody ? `/materials/custodies/${custody.custodyId}/pdf` : `/materials/custodies/statement/pdf?holderId=${encodeURIComponent(holderId)}&includeClosed=${includeClosed}`;
+      const blob = await api.get(path);
+      if (!(blob instanceof Blob) || !blob.type.includes('pdf')) throw new Error('تعذر إنشاء ملف PDF');
+      if (urlRef.current) URL.revokeObjectURL(urlRef.current);
+      const file = { blob, url: URL.createObjectURL(blob) }; urlRef.current = file.url; setDocument(file);
+      if (kind === 'preview') setPreviewOpen(true);
+      if (kind === 'download') download(file);
+      if (kind === 'print') print(file);
+    } catch (err) { setError(err.message || 'تعذر تجهيز كشف الذمة'); }
+    finally { setBusy(''); }
   };
-
-  const updateItem = (index, patch) => {
-    setForm((prev) => ({
-      ...prev,
-      items: prev.items.map((item, itemIndex) => (itemIndex === index ? { ...item, ...patch } : item)),
-    }));
+  const whatsapp = () => {
+    const { url } = buildCustodyWhatsapp({ origin: window.location.origin, holder, custody, includeClosed });
+    window.open(url, '_blank', 'noopener,noreferrer');
   };
-
-  const submitAction = async () => {
-    if (!selectedRequest || !form.warehouseId) return;
-    const items = form.items
-      .filter((item) => Number(item.quantity || 0) > 0)
-      .map((item) => (mode === 'dispatch'
-        ? { materialId: item.materialId, deliveredQty: Number(item.quantity || 0), notes: item.notes }
-        : { materialId: item.materialId, preparedQty: Number(item.quantity || 0), notes: item.notes }));
-    if (!items.length) return;
-    if (mode === 'dispatch') {
-      await onDispatch?.(selectedRequest, { ...form, items });
-    } else {
-      await onPrepare?.(selectedRequest, { ...form, items });
-    }
-    setSelectedRequest(null);
-  };
-
-  const statusTone = (status) => {
-    if (status === 'REJECTED') return 'danger';
-    if (['PENDING_SETTLEMENT', 'PENDING_RECONCILIATION'].includes(status)) return 'warning';
-    if (['RECEIVED', 'RECONCILED', 'CLOSED'].includes(status)) return 'success';
-    return 'info';
-  };
-
-  const canApproveRequest = (request) => canReview && ['PENDING_MANAGER_APPROVAL', 'NEW', 'UNDER_REVIEW'].includes(request.status);
-  const canPrepareRequest = (request) => canPrepare && ['PENDING_SUPPLIER_APPROVAL', 'APPROVED', 'PREPARING', 'IN_PROGRESS'].includes(request.status);
-  const canDispatchRequest = (request) => canDispatch && ['IN_PROGRESS', 'PREPARED', 'PENDING_RECEIPT', 'RECEIVED'].includes(request.status)
-    && (request.items || []).some((line) => Number(line.preparedQty || 0) > Number(line.deliveredQty || 0));
-
-  return (
-    <section className="card section warehouse-requests-section" style={{ marginTop: 16 }}>
-      <div className="section-header">
-        <div>
-          <h2>إدارة المواد داخل المخازن</h2>
-          <p style={{ margin: 0, color: 'var(--text-soft)' }}>من طلب الفني إلى اعتماد إدارة المواد ثم تجهيز المخزن والصرف وإنشاء الذمة والتصفية.</p>
-        </div>
-        <Pill tone="info">{requests.length} طلب</Pill>
+  return <>
+    <div className="custody-doc-actions">
+      <button type="button" className={`btn btn-primary ${compact ? 'btn-sm' : ''}`} disabled={!!busy} onClick={() => action('preview')}>{busy === 'preview' ? 'جار التجهيز...' : compact ? 'عرض PDF' : 'معاينة كشف PDF'}</button>
+      <button type="button" className={`btn btn-soft ${compact ? 'btn-sm' : ''}`} disabled={!!busy} onClick={() => action('download')}>تنزيل PDF</button>
+      <button type="button" className={`btn btn-soft ${compact ? 'btn-sm' : ''}`} disabled={!!busy} onClick={() => action('print')}>طباعة مباشرة</button>
+      <button type="button" className={`btn btn-soft ${compact ? 'btn-sm' : ''}`} disabled={!!busy} onClick={() => action('whatsapp')}>واتساب</button>
+    </div>
+    {error ? <p role="alert" style={{ color: '#fca5a5' }}>{error}</p> : null}
+    {previewOpen && document ? <div className="modal-backdrop" style={{ zIndex: 150 }} onClick={() => setPreviewOpen(false)}>
+      <div className="modal-panel" style={{ width: 'min(1100px,96vw)', maxWidth: '96vw', height: '92vh', display: 'flex', flexDirection: 'column' }} onClick={(event) => event.stopPropagation()}>
+        <div className="modal-header"><div><h3>كشف ذمم {holder.holderName}</h3><small>{custody?.custodyNo || 'جميع الذمم ضمن النطاق المعروض'}</small></div><button type="button" className="modal-close" aria-label="إغلاق معاينة PDF" onClick={() => setPreviewOpen(false)}>&times;</button></div>
+        <div className="custody-doc-actions" style={{ marginBottom: 12 }}><button className="btn btn-soft" onClick={() => download(document)}>تنزيل PDF</button><button className="btn btn-primary" onClick={() => print(document)}>طباعة مباشرة</button><button className="btn btn-soft" onClick={whatsapp}>مشاركة عبر واتساب</button><a className="btn btn-soft" href={document.url} target="_blank" rel="noreferrer">فتح في نافذة مستقلة</a></div>
+        <iframe title={`معاينة كشف ذمم ${holder.holderName}`} src={`${document.url}#view=FitH`} style={{ flex: 1, minHeight: 300, border: '1px solid var(--border)', borderRadius: 8, background: '#fff', width: '100%' }} />
       </div>
-      <div className="warehouse-workflow-strip">
-        {['الفني يطلب', 'إدارة المواد تعتمد', 'المخزن يجهز', 'المخزن يصرف', 'ذمة الفني', 'التصفية والاعتماد'].map((step) => <span key={step}>{step}</span>)}
-      </div>
-      {grouped.map((group) => (
-        <div className="warehouse-request-stage" key={group.key}>
-          <h3>{group.label}</h3>
-          <div className="daily-plan-card-grid warehouse-request-grid">
-            {group.requests.map((request) => (
-              <article className="daily-plan-card warehouse-request-card" key={request._id}>
-                <div className="maintenance-card-header">
-                  <div>
-                    <strong>{request.requestNo}</strong>
-                    <div className="daily-plan-card-subtitle">{request.project?.name || request.projectName || request.manualProjectName || '-'}</div>
-                  </div>
-                  <Pill tone={statusTone(request.status)}>{requestStatusLabels[request.status] || request.status}</Pill>
-                </div>
-                <div className="daily-plan-mini-grid">
-                  <div><span>الفني</span><strong>{request.requestedFor?.fullName || request.requestedBy?.fullName || '-'}</strong></div>
-                  <div><span>عدد المواد</span><strong>{request.items?.length || 0}</strong></div>
-                  <div><span>التاريخ</span><strong>{fmtDate(request.requestDate || request.createdAt)}</strong></div>
-                </div>
-                <div className="warehouse-request-lines">
-                  {(request.items || []).slice(0, 4).map((line) => {
-                    const materialId = productId(line.material);
-                    const stockEntry = stockByMaterial.get(materialId);
-                    return (
-                      <div key={line._id || materialId} className="warehouse-request-line">
-                        <span>{line.materialName || line.material?.name || '-'}</span>
-                        <strong>{qty(line.requestedQty)} / {qty(line.approvedQty || 0)} / {qty(line.preparedQty || 0)}</strong>
-                        <small>متوفر: {qty(stockEntry?.qtyAvailable ?? stockEntry?.qtyOnHand ?? 0)}</small>
-                      </div>
-                    );
-                  })}
-                </div>
-                <div className="form-actions daily-plan-actions warehouse-request-actions">
-                  {canApproveRequest(request) ? <button className="btn btn-primary btn-sm" onClick={() => onReview?.(request, 'APPROVE_FULL')} disabled={saving}>اعتماد وتحويل</button> : null}
-                  {canApproveRequest(request) ? <button className="btn btn-soft btn-sm" onClick={() => onReview?.(request, 'REJECT')} disabled={saving}>رفض</button> : null}
-                  {canPrepareRequest(request) ? <button className="btn btn-primary btn-sm" onClick={() => openAction(request, 'prepare')} disabled={saving}>تجهيز</button> : null}
-                  {canDispatchRequest(request) ? <button className="btn btn-primary btn-sm" onClick={() => openAction(request, 'dispatch')} disabled={saving}>صرف وإنشاء ذمة</button> : null}
-                  <button className="btn btn-soft btn-sm" onClick={() => window.location.href = `/materials?requestId=${request._id}`}>تفاصيل</button>
-                </div>
-              </article>
-            ))}
-            {!group.requests.length ? <p className="maintenance-empty">لا توجد طلبات في هذه المرحلة.</p> : null}
-          </div>
-        </div>
-      ))}
-
-      {selectedRequest ? (
-        <div className="modal-backdrop" onClick={() => setSelectedRequest(null)}>
-          <div className="modal-panel warehouse-cart-modal" onClick={(event) => event.stopPropagation()}>
-            <div className="modal-header">
-              <div>
-                <h3>{mode === 'dispatch' ? 'صرف الطلب وإنشاء الذمة' : 'تجهيز الطلب من المخزن'} {selectedRequest.requestNo}</h3>
-                <p className="daily-plan-modal-subtitle">{selectedRequest.project?.name || selectedRequest.projectName || selectedRequest.manualProjectName || '-'}</p>
-              </div>
-              <button type="button" className="modal-close" onClick={() => setSelectedRequest(null)}>&times;</button>
-            </div>
-            <div className="daily-plan-form-grid">
-              <label>المخزن<select className="select" value={form.warehouseId} onChange={(e) => {
-                const warehouseId = e.target.value;
-                setForm((prev) => ({ ...prev, warehouseId, items: withSelectedWarehouseAvailability(prev.items, warehouseId) }));
-              }}><option value="">اختر المخزن</option>{warehouses.map((warehouse) => <option key={warehouse._id} value={warehouse._id}>{warehouse.name}</option>)}</select></label>
-              {mode === 'dispatch' ? <label>الفني المستلم<select className="select" value={form.recipientId} onChange={(e) => setForm((prev) => ({ ...prev, recipientId: e.target.value }))}><option value="">اختر الفني</option>{employees.map((employee) => <option key={employee._id} value={employee._id}>{employee.fullName}</option>)}</select></label> : null}
-              <label>ملاحظات<input className="input" value={form.notes} onChange={(e) => setForm((prev) => ({ ...prev, notes: e.target.value }))} /></label>
-            </div>
-            <div className="warehouse-cart-table-wrap" style={{ marginTop: 14 }}>
-              <table className="table warehouse-cart-table">
-                <thead><tr><th>المادة</th><th>المطلوب</th><th>المعتمد</th><th>المجهز</th><th>المصروف</th><th>المتوفر</th><th>{mode === 'dispatch' ? 'كمية الصرف' : 'كمية التجهيز'}</th><th>ملاحظات</th></tr></thead>
-                <tbody>
-                  {form.items.map((item, index) => (
-                    <tr key={item.materialId || index}>
-                      <td><strong>{item.materialName}</strong></td>
-                      <td>{qty(item.requestedQty)}</td>
-                      <td>{qty(item.approvedQty)}</td>
-                      <td>{qty(item.preparedQty)}</td>
-                      <td>{qty(item.deliveredQty)}</td>
-                      <td>{qty(item.availableQty)}</td>
-                      <td><input className="input" type="number" min="0" step="any" value={item.quantity} onChange={(e) => updateItem(index, { quantity: e.target.value })} /></td>
-                      <td><input className="input" value={item.notes} onChange={(e) => updateItem(index, { notes: e.target.value })} /></td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-            <div className="form-actions form-actions-end" style={{ marginTop: 14 }}>
-              <button className="btn btn-soft" onClick={() => setSelectedRequest(null)} disabled={saving}>إلغاء</button>
-              <button className="btn btn-primary" onClick={submitAction} disabled={saving || !form.warehouseId}>{saving ? 'جار الحفظ...' : mode === 'dispatch' ? 'صرف وإنشاء الذمة' : 'حفظ التجهيز'}</button>
-            </div>
-          </div>
-        </div>
-      ) : null}
-
-      <style jsx>{`
-        .warehouse-workflow-strip { display: grid; grid-template-columns: repeat(6, minmax(110px, 1fr)); gap: 8px; margin: 12px 0 18px; }
-        .warehouse-workflow-strip span { border: 1px solid var(--border); border-radius: 8px; padding: 10px; text-align: center; font-weight: 800; background: var(--surface-soft); }
-        .warehouse-request-stage { margin-top: 18px; }
-        .warehouse-request-stage h3 { margin: 0 0 10px; }
-        .warehouse-request-grid { grid-template-columns: repeat(auto-fit, minmax(330px, 1fr)); }
-        .warehouse-request-card { min-height: 290px; }
-        .warehouse-request-lines { display: grid; gap: 8px; margin-top: 12px; }
-        .warehouse-request-line { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 8px; padding: 8px; border: 1px solid var(--border); border-radius: 8px; align-items: center; }
-        .warehouse-request-line small { color: var(--text-soft); }
-        .warehouse-request-actions { display: grid; grid-template-columns: repeat(auto-fit, minmax(112px, 1fr)); gap: 8px; margin-top: 14px; }
-        .warehouse-request-actions .btn { width: 100%; min-height: 38px; }
-        @media (max-width: 900px) { .warehouse-workflow-strip { grid-template-columns: repeat(2, 1fr); } .warehouse-request-line { grid-template-columns: 1fr; } }
-      `}</style>
-    </section>
-  );
-  return (
-    <section className="card section" style={{ marginTop: 16 }}>
-      <div className="daily-plan-card-grid">
-        {requests.map((request) => <article className="daily-plan-card" key={request._id}><div className="maintenance-card-header"><div><strong>{request.requestNo}</strong><div className="daily-plan-card-subtitle">{request.project?.name || request.projectName || request.manualProjectName || '-'}</div></div><Pill tone="info">{requestStatusLabels[request.status] || request.status}</Pill></div><div className="daily-plan-mini-grid"><div><span>الفني</span><strong>{request.requestedFor?.fullName || request.requestedBy?.fullName || '-'}</strong></div><div><span>المواد</span><strong>{request.items?.length || 0}</strong></div><div><span>التاريخ</span><strong>{fmtDate(request.requestDate || request.createdAt)}</strong></div></div><div className="form-actions daily-plan-actions"><button className="btn btn-primary btn-sm" onClick={() => window.location.href = `/materials?requestId=${request._id}`}>فتح الطلب</button></div></article>)}
-        {!requests.length ? <p className="maintenance-empty">لا توجد طلبات محولة إلى المخزن.</p> : null}
-      </div>
-    </section>
-  );
-}
-
-function StockQuickPanel({ mode, products = [], warehouses, onSubmit, onSubmitBatch, saving = false }) {
-  const [form, setForm] = useState({ productName: '', barcode: '', materialId: '', warehouseId: '', quantity: 1, unitCost: 0, notes: '' });
-  const [selectedProduct, setSelectedProduct] = useState(null);
-  const [entries, setEntries] = useState([]);
-  const isReturn = mode === 'RETURN_IN';
-  const isIn = mode === 'IN' || isReturn;
-  const setValue = (key, value) => setForm((prev) => ({ ...prev, [key]: value }));
-  const query = form.productName.trim().toLowerCase();
-  const suggestions = query
-    ? products
-      .filter((product) => {
-        const haystack = [product.name, product.code, product.barcode, product.category, product.brand, product.model].join(' ').toLowerCase();
-        return haystack.includes(query);
-      })
-      .slice(0, 8)
-    : [];
-  const chooseProduct = (product) => {
-    setSelectedProduct(product);
-    setForm((prev) => ({
-      ...prev,
-      productName: product.name || '',
-      materialId: product._id || '',
-      barcode: product.barcode || '',
-      unitCost: product.estimatedUnitCost || 0,
-    }));
-  };
-  const canSave = Boolean(form.materialId && form.warehouseId && Number(form.quantity || 0) > 0);
-  const resetCurrent = () => {
-    setSelectedProduct(null);
-    setForm({ productName: '', barcode: '', materialId: '', warehouseId: form.warehouseId, quantity: 1, unitCost: 0, notes: '' });
-  };
-  const addEntry = () => {
-    if (!canSave || !selectedProduct) return;
-    setEntries((prev) => [
-      ...prev,
-      {
-        product: selectedProduct,
-        productName: selectedProduct.name || form.productName,
-        barcode: form.barcode,
-        materialId: form.materialId,
-        warehouseId: form.warehouseId,
-        quantity: form.quantity,
-        unitCost: form.unitCost,
-        notes: form.notes,
-      },
-    ]);
-    resetCurrent();
-  };
-  const updateEntry = (index, patch) => {
-    setEntries((prev) => prev.map((entry, entryIndex) => (entryIndex === index ? { ...entry, ...patch } : entry)));
-  };
-  const removeEntry = (index) => {
-    setEntries((prev) => prev.filter((_, entryIndex) => entryIndex !== index));
-  };
-  const submitSingle = () => {
-    if (!canSave) return;
-    onSubmit(form);
-  };
-  const submitList = async () => {
-    if (!entries.length) return;
-    const saved = await onSubmitBatch(entries, mode);
-    if (saved) {
-      setEntries([]);
-      resetCurrent();
-    }
-  };
-  return (
-    <section className="card section" style={{ marginTop: 16 }}>
-      <div className="section-header">
-        <div><h2>{isReturn ? 'إرجاع المواد' : 'إدخال مواد متنوعة للمخزن'}</h2><p style={{ margin: 0, color: 'var(--text-soft)' }}>اختر المنتج وأضفه للقائمة، ثم احفظ كل المواد دفعة واحدة.</p></div>
-      </div>
-      <div className="daily-plan-form-grid">
-        <label className="warehouse-autocomplete">اسم المنتج
-          <input
-            className="input"
-            autoFocus
-            value={form.productName}
-            onChange={(e) => {
-              setSelectedProduct(null);
-              setForm((prev) => ({ ...prev, productName: e.target.value, materialId: '', barcode: '', unitCost: 0 }));
-            }}
-            placeholder="اكتب أول حرف من اسم المنتج"
-          />
-          {suggestions.length > 0 && !selectedProduct ? (
-            <div className="warehouse-suggestions">
-              {suggestions.map((product) => (
-                <button type="button" key={product._id} onClick={() => chooseProduct(product)}>
-                  <ProductImage product={product} />
-                  <span>
-                    <strong>{product.name}</strong>
-                    <small>{[product.code, product.category, product.brand, product.model].filter(Boolean).join(' - ') || '-'}</small>
-                  </span>
-                </button>
-              ))}
-            </div>
-          ) : null}
-        </label>
-        <label>الباركود<input className="input" dir="ltr" value={form.barcode} onChange={(e) => setValue('barcode', e.target.value)} /></label>
-        <label>المخزن<select className="select" value={form.warehouseId} onChange={(e) => setValue('warehouseId', e.target.value)}><option value="">اختر المخزن</option>{warehouses.map((warehouse) => <option key={warehouse._id} value={warehouse._id}>{warehouse.name}</option>)}</select></label>
-        <label>الكمية<input className="input" type="number" min="0.0001" step="any" value={form.quantity} onChange={(e) => setValue('quantity', e.target.value)} /></label>
-        {isIn ? <label>الكلفة<input className="input" type="number" min="0" step="any" value={form.unitCost} onChange={(e) => setValue('unitCost', e.target.value)} /></label> : null}
-        <label className="grid-span-full">ملاحظات<textarea className="textarea" value={form.notes} onChange={(e) => setValue('notes', e.target.value)} /></label>
-      </div>
-      {selectedProduct ? (
-        <article className="daily-plan-card warehouse-selected-product">
-          <ProductImage product={selectedProduct} />
-          <div className="daily-plan-mini-grid">
-            <div><span>الاسم</span><strong>{selectedProduct.name}</strong></div>
-            <div><span>الكود</span><strong>{selectedProduct.code || '-'}</strong></div>
-            <div><span>الباركود</span><strong>{selectedProduct.barcode || '-'}</strong></div>
-            <div><span>التصنيف</span><strong>{selectedProduct.category || '-'}</strong></div>
-            <div><span>الماركة</span><strong>{selectedProduct.brand || '-'}</strong></div>
-            <div><span>الموديل</span><strong>{selectedProduct.model || '-'}</strong></div>
-            <div><span>الوحدة</span><strong>{selectedProduct.unit || '-'}</strong></div>
-            <div><span>الكلفة</span><strong>{qty(selectedProduct.estimatedUnitCost || 0)}</strong></div>
-          </div>
-        </article>
-      ) : null}
-      <div className="form-actions warehouse-stock-entry-actions">
-        <button className="btn btn-primary" disabled={!canSave || saving} onClick={addEntry}>إضافة للقائمة</button>
-        <button className="btn btn-soft" disabled={!canSave || saving} onClick={submitSingle}>{isReturn ? 'تسجيل هذا الإرجاع فقط' : 'حفظ هذا المنتج فقط'}</button>
-      </div>
-
-      {entries.length > 0 ? <div className="warehouse-entry-list">
-        <div className="section-header">
-          <div>
-            <h3>قائمة الإدخال</h3>
-            <p style={{ margin: 0, color: 'var(--text-soft)' }}>عدد المواد: {entries.length}</p>
-          </div>
-          <div className="action-row">
-            <button className="btn btn-soft" disabled={!entries.length || saving} onClick={() => setEntries([])}>تفريغ القائمة</button>
-            <button className="btn btn-primary" disabled={!entries.length || saving} onClick={submitList}>{saving ? 'جاري الحفظ...' : isReturn ? 'حفظ قائمة الإرجاع' : 'حفظ قائمة الإدخال'}</button>
-          </div>
-        </div>
-        <div className="table-responsive warehouse-entry-table-wrap">
-          <table className="table warehouse-entry-table">
-            <thead>
-              <tr>
-                <th>المنتج</th>
-                <th>المخزن</th>
-                <th>الكمية</th>
-                <th>الكلفة</th>
-                <th>ملاحظات</th>
-                <th>إجراء</th>
-              </tr>
-            </thead>
-            <tbody>
-              {entries.map((entry, index) => (
-                <tr key={`${entry.materialId}-${index}`}>
-                  <td>
-                    <div className="warehouse-cart-product">
-                      <ProductImage product={entry.product} />
-                      <div>
-                        <strong>{entry.productName}</strong>
-                        <div className="daily-plan-card-subtitle">{entry.barcode || entry.product?.code || '-'}</div>
-                      </div>
-                    </div>
-                  </td>
-                  <td>
-                    <select className="select" value={entry.warehouseId} onChange={(e) => updateEntry(index, { warehouseId: e.target.value })}>
-                      <option value="">اختر المخزن</option>
-                      {warehouses.map((warehouse) => <option key={warehouse._id} value={warehouse._id}>{warehouse.name}</option>)}
-                    </select>
-                  </td>
-                  <td><input className="input" type="number" min="0.0001" step="any" value={entry.quantity} onChange={(e) => updateEntry(index, { quantity: e.target.value })} /></td>
-                  <td><input className="input" type="number" min="0" step="any" value={entry.unitCost} onChange={(e) => updateEntry(index, { unitCost: e.target.value })} /></td>
-                  <td><input className="input" value={entry.notes || ''} onChange={(e) => updateEntry(index, { notes: e.target.value })} /></td>
-                  <td><button className="btn btn-soft btn-sm" onClick={() => removeEntry(index)}>حذف</button></td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div> : null}
-      <style jsx>{`
-        .warehouse-autocomplete { position: relative; }
-        .warehouse-suggestions { position: absolute; z-index: 20; top: calc(100% + 6px); right: 0; left: 0; max-height: 320px; overflow: auto; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); box-shadow: var(--shadow-lg); padding: 6px; }
-        .warehouse-suggestions button { width: 100%; display: flex; align-items: center; gap: 10px; border: 0; background: transparent; padding: 8px; border-radius: 8px; text-align: right; cursor: pointer; color: var(--text); }
-        .warehouse-suggestions button:hover { background: var(--surface-soft); }
-        .warehouse-suggestions .warehouse-product-img { width: 44px; height: 44px; }
-        .warehouse-suggestions small { display: block; color: var(--text-soft); margin-top: 3px; }
-        .warehouse-selected-product { display: flex; gap: 14px; align-items: flex-start; margin-top: 16px; }
-        .warehouse-selected-product .warehouse-product-img { flex: 0 0 auto; }
-        .warehouse-selected-product .daily-plan-mini-grid { flex: 1; }
-        .warehouse-stock-entry-actions { justify-content: flex-end; gap: 8px; margin-top: 14px; }
-        .warehouse-stock-entry-actions .btn { min-width: 150px; min-height: 40px; }
-        .warehouse-entry-list { margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--border); }
-        .warehouse-entry-table-wrap { overflow-x: auto; border: 1px solid var(--border); border-radius: 8px; }
-        .warehouse-entry-table { min-width: 900px; margin: 0; }
-        .warehouse-entry-table td,
-        .warehouse-entry-table th { vertical-align: middle; }
-        @media (max-width: 760px) { .warehouse-selected-product { flex-direction: column; } }
-      `}</style>
-    </section>
-  );
+    </div> : null}
+    <style jsx>{`.custody-doc-actions { display:flex; flex-wrap:wrap; gap:8px; align-items:center; }`}</style>
+  </>;
 }
 
 function CustodiesPanel({ custodies, employees, openCustodiesData, onRefresh }) {
+  const actorId = String(authStorage.getUser()?.id || authStorage.getUser()?._id || '');
+  const [showClosed, setShowClosed] = useState(false);
+  const linkedCustodyHandled = useRef('');
   const [selectedHolderId, setSelectedHolderId] = useState('');
   const [reconcileCustody, setReconcileCustody] = useState(null);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const holderId = params.get('holderId');
+    if (holderId) setSelectedHolderId(holderId === 'unassigned' ? 'unknown' : holderId);
+    if (params.get('includeClosed') === 'true') setShowClosed(true);
+  }, []);
 
   const employeeMap = useMemo(() => {
     const map = new Map();
@@ -2384,11 +1937,12 @@ function CustodiesPanel({ custodies, employees, openCustodiesData, onRefresh }) 
     };
 
     (custodies || []).forEach((custody) => {
+      if (!showClosed && ['CLOSED', 'FULLY_RECONCILED'].includes(custody.status)) return;
       const holderId = productId(custody.holder);
       const employee = employeeMap.get(holderId);
       const holder = addHolder({
         holderId,
-        holderName: custody.holder?.fullName || employee?.fullName || '-',
+        holderName: custody.holder?.fullName || employee?.fullName || 'ذمم بدون فني',
         employeeCode: custody.holder?.employeeCode || employee?.employeeCode || '',
         phone: custody.holder?.phone || employee?.phone || '',
         role: custody.holder?.role || employee?.role || '',
@@ -2437,7 +1991,7 @@ function CustodiesPanel({ custodies, employees, openCustodiesData, onRefresh }) 
       const employee = employeeMap.get(String(summaryHolder.holderId));
       const holder = addHolder({
         holderId: summaryHolder.holderId,
-        holderName: summaryHolder.holderName || employee?.fullName,
+        holderName: summaryHolder.holderName && summaryHolder.holderName !== '-' ? summaryHolder.holderName : (employee?.fullName || 'ذمم بدون فني'),
         employeeCode: summaryHolder.employeeCode || employee?.employeeCode,
         phone: employee?.phone,
         role: employee?.role,
@@ -2465,7 +2019,7 @@ function CustodiesPanel({ custodies, employees, openCustodiesData, onRefresh }) 
     });
 
     return Array.from(map.values()).sort((a, b) => b.totalRemaining - a.totalRemaining || a.holderName.localeCompare(b.holderName, 'ar'));
-  }, [custodies, employeeMap, openCustodiesData]);
+  }, [custodies, employeeMap, openCustodiesData, showClosed]);
 
   useEffect(() => {
     if (!selectedHolderId && holders[0]?.holderId) setSelectedHolderId(holders[0].holderId);
@@ -2479,7 +2033,8 @@ function CustodiesPanel({ custodies, employees, openCustodiesData, onRefresh }) 
   })));
 
   const openReconcileModal = (custody) => {
-    if (!custody.raw || !['OPEN', 'PARTIALLY_RECONCILED', 'PENDING_RECONCILIATION', 'OVERDUE'].includes(custody.raw.status)) {
+    if (productId(custody.raw?.holder) !== actorId) { setError('إرسال التصفية للفني صاحب الذمة حصراً.'); return; }
+    if (!custody.raw || !['OPEN', 'PARTIALLY_RECONCILED', 'OVERDUE'].includes(custody.raw.status)) {
       setError('هذه الذمة غير مفتوحة للتصفية.');
       return;
     }
@@ -2492,11 +2047,12 @@ function CustodiesPanel({ custodies, employees, openCustodiesData, onRefresh }) 
           materialId: productId(item.material),
           materialName: item.materialName || item.material?.name || '-',
           receivedQty: Number(item.receivedQty || 0),
-          consumedQty: remaining,
-          remainingQty: 0,
-          damagedQty: 0,
-          lostQty: 0,
-          toReturnQty: 0,
+          returnedQty: Number(item.returnedQty || 0),
+          consumedQty: Number(item.consumedQty || 0),
+          remainingQty: remaining,
+          damagedQty: Number(item.damagedQty || 0),
+          lostQty: Number(item.lostQty || 0),
+          toReturnQty: remaining,
           notes: 'تصفية كمادة مستهلكة/مصروفة على المشروع',
         };
       }),
@@ -2508,9 +2064,28 @@ function CustodiesPanel({ custodies, employees, openCustodiesData, onRefresh }) 
   const updateReconcileItem = (index, patch) => {
     setReconcileCustody((prev) => ({
       ...prev,
-      items: prev.items.map((item, itemIndex) => (itemIndex === index ? { ...item, ...patch } : item)),
+      items: prev.items.map((item, itemIndex) => {
+        if (itemIndex !== index) return item;
+        const next = { ...item, ...patch };
+        next.remainingQty = Math.max(0, Number(next.receivedQty) - Number(next.returnedQty || 0) - Number(next.consumedQty) - Number(next.damagedQty) - Number(next.lostQty));
+        if ('consumedQty' in patch || 'damagedQty' in patch || 'lostQty' in patch) next.toReturnQty = Number(item.toReturnQty) === Number(item.remainingQty) ? next.remainingQty : Math.min(Number(item.toReturnQty), next.remainingQty);
+        return next;
+      }),
     }));
   };
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const custodyId = params.get('custodyId');
+    if (!custodyId || linkedCustodyHandled.current === custodyId) return;
+    const holder = holders.find((item) => item.custodies.some((record) => record.custodyId === custodyId));
+    if (!holder) return;
+    const custody = holder.custodies.find((record) => record.custodyId === custodyId);
+    setSelectedHolderId(holder.holderId);
+    linkedCustodyHandled.current = custodyId;
+    if (params.get('action') === 'reconcile' && custody.raw && productId(custody.raw.holder) === actorId && ['OPEN', 'PARTIALLY_RECONCILED', 'OVERDUE'].includes(custody.status)) openReconcileModal(custody);
+    window.requestAnimationFrame(() => window.document.getElementById(`custody-${custodyId}`)?.scrollIntoView({ block: 'center', behavior: 'smooth' }));
+  }, [holders]);
 
   const submitReconcile = async () => {
     if (!reconcileCustody) return;
@@ -2545,10 +2120,11 @@ function CustodiesPanel({ custodies, employees, openCustodiesData, onRefresh }) 
       <div className="section-header">
         <div>
           <h2>ذمم الفنيين</h2>
-          <p style={{ margin: 0, color: 'var(--text-soft)' }}>ملف لكل موظف مع مواد الذمة والكميات والمشروع والتصفية.</p>
+          <p style={{ margin: 0, color: 'var(--text-soft)' }}>{showClosed ? 'ملفات الذمم المفتوحة والمغلقة والمصفاة.' : 'الذمم المفتوحة وغير المصفاة لكل فني.'}</p>
         </div>
         <Pill tone="info">{holders.length} موظف</Pill>
       </div>
+      <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}><input type="checkbox" checked={showClosed} onChange={(event) => setShowClosed(event.target.checked)} />عرض الذمم المغلقة والمصفاة بالكامل</label>
       {message ? <div className="card section" style={{ color: 'var(--accent)', marginBottom: 12 }}>{message}</div> : null}
       {error ? <div className="card section" style={{ color: 'var(--danger)', marginBottom: 12 }}>{error}</div> : null}
       {!holders.length ? <p className="maintenance-empty">لا توجد ذمم صرف مواد.</p> : null}
@@ -2558,8 +2134,8 @@ function CustodiesPanel({ custodies, employees, openCustodiesData, onRefresh }) 
             {holders.map((holder) => (
               <button key={holder.holderId} className={`warehouse-employee-file ${selectedHolder?.holderId === holder.holderId ? 'active' : ''}`} onClick={() => setSelectedHolderId(holder.holderId)}>
                 <span>{holder.holderName}</span>
-                <small>{holder.employeeCode || holder.role || '-'}</small>
-                <strong>{qty(holder.totalRemaining)} متبقي</strong>
+                <small>{holder.employeeCode || custodyRoleLabel[holder.role] || '-'}</small>
+                <strong>{holder.custodies.length} ذمة · {holder.totalItems} بند</strong>
               </button>
             ))}
           </aside>
@@ -2571,35 +2147,32 @@ function CustodiesPanel({ custodies, employees, openCustodiesData, onRefresh }) 
               </div>
               <div className="daily-plan-mini-grid">
                 <div><span>عدد الذمم</span><strong>{selectedHolder?.custodies?.length || 0}</strong></div>
-                <div><span>إجمالي المسحوب</span><strong>{qty(selectedHolder?.totalReceived || 0)}</strong></div>
-                <div><span>المتبقي</span><strong>{qty(selectedHolder?.totalRemaining || 0)}</strong></div>
+                <div><span>بنود المواد</span><strong>{selectedRows.length}</strong></div>
+                <div><span>بنود بكمية متبقية</span><strong>{selectedRows.filter((row) => Number(row.remainingQty) > 0).length}</strong></div>
                 <div><span>آخر صرف</span><strong>{fmtDate(selectedHolder?.lastReceivedAt)}</strong></div>
               </div>
+              {selectedHolder ? <div style={{ marginTop: 14 }}><CustodyDocumentActions key={`${selectedHolder.holderId}-${showClosed}`} holder={selectedHolder} includeClosed={showClosed} /></div> : null}
             </div>
-            <div className="warehouse-custody-table-wrap">
-              <table className="table warehouse-custody-table">
-                <thead>
-                  <tr><th>رقم الذمة</th><th>المادة</th><th>المشروع</th><th>المسحوب</th><th>المستهلك</th><th>الراجع</th><th>التالف/المفقود</th><th>المتبقي</th><th>الحالة</th><th>إجراء</th></tr>
-                </thead>
-                <tbody>
-                  {selectedRows.map((row) => (
-                    <tr key={row.rowKey}>
-                      <td>{row.custody.custodyNo}</td>
-                      <td><strong>{row.materialName}</strong><div className="daily-plan-card-subtitle">{row.materialCode || row.unit || '-'}</div></td>
-                      <td>{row.project || '-'}</td>
-                      <td>{qty(row.receivedQty)}</td>
-                      <td>{qty(row.consumedQty)}</td>
-                      <td>{qty(row.returnedQty)}</td>
-                      <td>{qty(Number(row.damagedQty || 0) + Number(row.lostQty || 0))}</td>
-                      <td>{qty(row.remainingQty)}</td>
-                      <td><Pill tone={Number(row.remainingQty || 0) > 0 ? 'warning' : 'neutral'}>{row.lineStatus || row.custody.status}</Pill></td>
-                      <td><button className="btn btn-primary btn-sm" onClick={() => openReconcileModal(row.custody)} disabled={!row.custody.raw || !['OPEN', 'PARTIALLY_RECONCILED', 'PENDING_RECONCILIATION', 'OVERDUE'].includes(row.custody.raw.status)}>تصفية</button></td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-              {!selectedRows.length ? <p className="maintenance-empty">لا توجد مواد مسحوبة على هذا الموظف.</p> : null}
+            <div className="custody-records">
+              {(selectedHolder?.custodies || []).map((custody) => <article className="custody-record" key={custody.custodyId} id={`custody-${custody.custodyId}`}>
+                <div className="custody-record-header">
+                  <div><div className="custody-record-title"><strong dir="ltr">{custody.custodyNo}</strong><Pill tone={['CLOSED', 'FULLY_RECONCILED'].includes(custody.status) ? 'success' : 'warning'}>{custodyStateLabel[custody.status] || custody.status}</Pill></div>
+                    <p>{custody.project || 'بدون مشروع'} <span>•</span> {fmtDate(custody.openedAt)} <span>•</span> طلب <bdi>{custody.requestNo}</bdi></p>
+                  </div>
+                  <button type="button" className="btn btn-primary btn-sm" onClick={() => openReconcileModal(custody)} disabled={!custody.raw || productId(custody.raw.holder) !== actorId || !['OPEN', 'PARTIALLY_RECONCILED', 'OVERDUE'].includes(custody.status)}>تصفية الذمة</button>
+                </div>
+                <div style={{ padding: '0 14px 12px' }}><CustodyDocumentActions holder={selectedHolder} custody={custody} compact /></div>
+                <div className="warehouse-custody-table-wrap">
+                  <table className="table warehouse-custody-table statement-table"><thead><tr><th>المادة</th><th>الوحدة</th><th>المسحوب</th><th>المستهلك</th><th>الراجع</th><th>تالف / مفقود</th><th>المتبقي</th></tr></thead>
+                    <tbody>{selectedRows.filter((row) => row.custody.custodyId === custody.custodyId).map((row) => <tr key={row.rowKey}>
+                      <td><strong>{row.materialName}</strong>{row.materialCode ? <div className="daily-plan-card-subtitle" dir="ltr">{row.materialCode}</div> : null}</td>
+                      <td>{custodyUnitLabel[row.unit] || row.unit}</td><td>{qty(row.receivedQty)}</td><td>{qty(row.consumedQty)}</td><td>{qty(row.returnedQty)}</td><td>{qty(Number(row.damagedQty || 0) + Number(row.lostQty || 0))}</td><td><strong style={{ color: Number(row.remainingQty) > 0 ? 'var(--accent)' : 'var(--text-soft)' }}>{qty(row.remainingQty)}</strong></td>
+                    </tr>)}</tbody>
+                  </table>
+                </div>
+              </article>)}
             </div>
+
           </div>
         </div>
       ) : null}
@@ -2609,8 +2182,8 @@ function CustodiesPanel({ custodies, employees, openCustodiesData, onRefresh }) 
           <div className="modal-panel warehouse-cart-modal" onClick={(event) => event.stopPropagation()}>
             <div className="modal-header">
               <div>
-                <h3>تصفية الذمة {reconcileCustody.custody.custodyNo}</h3>
-                <p className="daily-plan-modal-subtitle">سجل الكميات كمستهلكة/مصروفة على المشروع أو اترك كمية راجعة للتصفية اللاحقة.</p>
+              <h3>تصفية الذمة {reconcileCustody.custody.custodyNo}</h3>
+                <p className="daily-plan-modal-subtitle">سجل إجمالي الكميات المستهلكة والتالفة والمفقودة، وحدد الفائض الذي ستسلمه للمخزن. المتبقي يحتسب تلقائياً.</p>
               </div>
               <button type="button" className="modal-close" onClick={() => setReconcileCustody(null)}>&times;</button>
             </div>
@@ -2624,7 +2197,7 @@ function CustodiesPanel({ custodies, employees, openCustodiesData, onRefresh }) 
                       <td>{item.materialName}</td>
                       <td>{qty(item.receivedQty)}</td>
                       <td><input className="input" type="number" min="0" step="any" value={item.consumedQty} onChange={(event) => updateReconcileItem(index, { consumedQty: event.target.value })} /></td>
-                      <td><input className="input" type="number" min="0" step="any" value={item.remainingQty} onChange={(event) => updateReconcileItem(index, { remainingQty: event.target.value })} /></td>
+                      <td><input className="input" type="number" readOnly value={item.remainingQty} /></td>
                       <td><input className="input" type="number" min="0" step="any" value={item.damagedQty} onChange={(event) => updateReconcileItem(index, { damagedQty: event.target.value })} /></td>
                       <td><input className="input" type="number" min="0" step="any" value={item.lostQty} onChange={(event) => updateReconcileItem(index, { lostQty: event.target.value })} /></td>
                       <td><input className="input" type="number" min="0" step="any" value={item.toReturnQty} onChange={(event) => updateReconcileItem(index, { toReturnQty: event.target.value })} /></td>
@@ -2643,7 +2216,7 @@ function CustodiesPanel({ custodies, employees, openCustodiesData, onRefresh }) 
       ) : null}
 
       <style jsx>{`
-        .warehouse-employee-custody-layout { display: grid; grid-template-columns: minmax(230px, 300px) minmax(0, 1fr); gap: 14px; align-items: start; }
+        .warehouse-employee-custody-layout { display: grid; grid-template-columns: minmax(200px, 250px) minmax(0, 1fr); gap: 16px; align-items: start; direction: rtl; }
         .warehouse-employee-files { display: flex; flex-direction: column; gap: 8px; max-height: 680px; overflow: auto; }
         .warehouse-employee-file { border: 1px solid var(--border); border-radius: 8px; background: var(--surface); color: var(--text); padding: 12px; text-align: right; display: grid; gap: 4px; cursor: pointer; }
         .warehouse-employee-file.active { border-color: var(--primary); background: var(--surface-soft); }
@@ -2659,60 +2232,33 @@ function CustodiesPanel({ custodies, employees, openCustodiesData, onRefresh }) 
         .warehouse-custody-table th,
         .warehouse-custody-table td { vertical-align: middle; }
         .warehouse-custody-table .input { min-width: 92px; }
-        @media (max-width: 900px) {
+        .custody-records { display: grid; gap: 16px; }
+        .custody-record { border: 1px solid var(--border); border-radius: 12px; overflow: hidden; background: var(--surface); }
+        .custody-record:target { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+        .custody-record-header { display: flex; flex-wrap: wrap; gap: 12px; align-items: start; justify-content: space-between; padding: 14px; }
+        .custody-record-title { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
+        .custody-record-header p { margin: 8px 0 0; color: var(--text-soft); font-size: 13px; }
+        .custody-record-header p span { margin-inline: 6px; }
+        .statement-table { min-width: 650px; font-size: 13px; font-variant-numeric: tabular-nums; }
+        .statement-table td, .statement-table th { padding: 12px 8px; white-space: normal; }
+        .statement-table td:first-child { min-width: 160px; max-width: 250px; overflow-wrap: anywhere; }
+        .custody-record .warehouse-custody-table-wrap { border-radius: 0; border: 0; border-top: 1px solid var(--border); }
+        @media (max-width: 1100px) {
           .warehouse-employee-custody-layout { grid-template-columns: 1fr; }
-          .warehouse-employee-files { max-height: none; }
+          .warehouse-employee-files { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); max-height: 280px; }
         }
       `}</style>
     </section>
   );
 }
 
-function SettlementsPanel({ reconciliations, saving = false, onReview }) {
-  return (
-    <section className="card section" style={{ marginTop: 16 }}>
-      <div className="section-header">
-        <div>
-          <h2>طلبات التصفية والاعتماد</h2>
-          <p style={{ margin: 0, color: 'var(--text-soft)' }}>اعتماد أو رفض تصفية ذمم الفنيين مباشرة من قسم المخازن.</p>
-        </div>
-        <Pill tone="warning">{reconciliations.length} طلب</Pill>
-      </div>
-      <div className="daily-plan-card-grid">
-        {reconciliations.map((item) => (
-          <article className="daily-plan-card" key={item._id}>
-            <div className="maintenance-card-header">
-              <div>
-                <strong>{item.reconcileNo}</strong>
-                <div className="daily-plan-card-subtitle">{item.submittedBy?.fullName || '-'}</div>
-              </div>
-              <Pill tone="warning">{item.status}</Pill>
-            </div>
-            <div className="daily-plan-mini-grid">
-              <div><span>الذمة</span><strong>{item.custody?.custodyNo || '-'}</strong></div>
-              <div><span>المشروع</span><strong>{item.project?.name || '-'}</strong></div>
-              <div><span>تاريخ الطلب</span><strong>{fmtDate(item.submittedAt || item.createdAt)}</strong></div>
-              <div><span>المواد</span><strong>{item.items?.length || 0}</strong></div>
-            </div>
-            <div className="form-actions daily-plan-actions warehouse-request-actions">
-              <button className="btn btn-primary btn-sm" onClick={() => onReview?.(item, 'APPROVE')} disabled={saving}>اعتماد التصفية</button>
-              <button className="btn btn-soft btn-sm" onClick={() => onReview?.(item, 'REJECT')} disabled={saving}>رفض</button>
-              <button className="btn btn-soft btn-sm" onClick={() => window.location.href = `/materials?reconciliationId=${item._id}`}>تفاصيل</button>
-            </div>
-          </article>
-        ))}
-        {!reconciliations.length ? <p className="maintenance-empty">لا توجد طلبات تصفية بانتظار الاعتماد.</p> : null}
-      </div>
-    </section>
-  );
-}
-
-function DamagedPanel({ custodies }) {
+function DamagedPanel({ custodies, stock }) {
+  const damagedStock = stock.filter((balance) => balance.warehouse?.type === 'DAMAGED' && Number(balance.qtyOnHand) > 0);
   const rows = custodies.flatMap((custody) => (custody.items || []).flatMap((item) => [
     Number(item.damagedQty || 0) > 0 ? { type: 'تالف', qty: item.damagedQty, item, custody } : null,
     Number(item.lostQty || 0) > 0 ? { type: 'مفقود', qty: item.lostQty, item, custody } : null,
   ].filter(Boolean)));
-  return <CardsList items={rows} empty="لا توجد مواد تالفة أو مفقودة." render={(row) => ({ title: row.item.materialName, subtitle: row.type, pill: row.type, lines: [['الكمية', row.qty], ['الفني', row.custody.holder?.fullName || '-'], ['المشروع', row.custody.project?.name || row.custody.manualProjectName || '-'], ['التاريخ', fmtDate(row.custody.updatedAt)]], href: `/materials?custodyId=${row.custody._id}` })} />;
+  return <><section className="card section" style={{ marginTop: 16 }}><h2>رصيد مخزن التالف</h2><p>الكميات المستلمة فعلياً بعد اعتماد التصفية. هذا الرصيد غير متاح لطلبات الصرف.</p><div style={{ overflowX: 'auto' }}><table className="table"><thead><tr><th>المادة</th><th>المخزن</th><th>الكمية</th></tr></thead><tbody>{damagedStock.map((balance) => <tr key={balance._id}><td>{balance.material?.name || '-'}</td><td>{balance.warehouse?.name}</td><td>{qty(balance.qtyOnHand)}</td></tr>)}</tbody></table></div>{!damagedStock.length ? <p>لا يوجد رصيد تالف مستلم حالياً.</p> : null}</section><h3>التالف والمفقود في سجل الذمم</h3><CardsList items={rows} empty="لا توجد مواد تالفة أو مفقودة." render={(row) => ({ title: row.item.materialName, subtitle: row.type, pill: row.type, lines: [['الكمية', row.qty], ...(row.type === 'تالف' ? [['التالف المستلم بالمخزن', qty(row.item.damagedReturnedQty)], ['بانتظار الاستلام', qty(Math.max(0, Number(row.qty) - Number(row.item.damagedReturnedQty || 0)))]] : []), ['الفني', row.custody.holder?.fullName || '-'], ['المشروع', row.custody.project?.name || row.custody.manualProjectName || '-'], ['التاريخ', fmtDate(row.custody.updatedAt)]], href: `/materials?custodyId=${row.custody._id}` })} /></>;
 }
 
 function MovementPanel({ summary }) {

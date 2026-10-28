@@ -18,6 +18,7 @@ const roleOptions = [
   { value: 'PROJECT_MANAGER', label: 'مدير مشروع' },
   { value: 'ASSISTANT_PROJECT_MANAGER', label: 'مساعد مدير مشروع' },
   { value: 'TEAM_LEAD', label: 'قائد فريق' },
+  { value: 'WAREHOUSE_KEEPER', label: 'أمين المخزن' },
   { value: 'TECHNICAL_STAFF', label: 'موظف تقني' },
   { value: 'SERVICE_STAFF', label: 'موظف خدمات' },
 ];
