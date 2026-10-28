@@ -776,7 +776,7 @@ export default function MaterialsPage() {
       {/* KPI */}
       <section className="grid-4" style={{ marginBottom: 16 }}>
         <article className="card section"><p style={{ marginTop: 0, color: 'var(--text-soft)' }}>الطلبات النشطة</p><h2>{requests.length}</h2></article>
-        <article className="card section"><p style={{ marginTop: 0, color: 'var(--text-soft)' }}>الذمم المفتوحة</p><h2>{openCustodiesData.totalHolders || custodies.filter((c) => c.status !== 'CLOSED').length}</h2></article>
+        <article className="card section"><p style={{ marginTop: 0, color: 'var(--text-soft)' }}>الذمم المفتوحة</p><h2>{openCustodiesData.totalHolders ?? 0}</h2></article>
         <article className="card section"><p style={{ marginTop: 0, color: 'var(--text-soft)' }}>الأرشيف</p><h2>{archivedRequests.length}</h2></article>
         <article className="card section"><p style={{ marginTop: 0, color: 'var(--text-soft)' }}>المواد بالكتلوج</p><h2>{materials.length}</h2></article>
       </section>
