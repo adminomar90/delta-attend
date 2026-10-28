@@ -481,7 +481,7 @@ export const reviewMaterialRequest = asyncHandler(async (req, res) => {
 });
 
 export const deleteMaterialRequest = asyncHandler(async (req, res) => {
-  const result = await deleteInventoryRequest(req.params.id, req.user, req.body, { maxFailures: env.maxAuthFailures, lockMinutes: env.lockMinutes });
+  const result = await deleteInventoryRequest(req.params.id, req.user, req.body);
   if (!result.alreadyApplied) await auditService.log({ actorId: req.user.id, action: 'MATERIAL_REQUEST_DELETED', entityType: 'MATERIAL_REQUEST', entityId: req.params.id, after: result, req });
   res.json(result);
 });

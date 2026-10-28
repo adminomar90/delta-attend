@@ -14,7 +14,6 @@ import { sequenceService } from './sequenceService.js';
 import { Permission } from '../../shared/constants.js';
 import { hasPermission } from '../../shared/permissions.js';
 import { AppError } from '../../shared/errors.js';
-import { verifyPrimaryAdminPassword } from './primaryAdminPasswordService.js';
 
 const id = (value) => String(value?._id || value || '');
 const q = (value) => Number(Number(value || 0).toFixed(4));
@@ -392,11 +391,10 @@ export const cancelRemainingInventoryRequest = async (requestId, actor, body) =>
   return { request: await Request.findById(requestId), notice: { userId: recipientId(request), message: 'ألغي باقي الكميات غير المستلمة؛ تبقى المواد المستلمة على الذمة حتى تصفيتها' } };
 });
 
-export const deleteInventoryRequest = async (requestId, actor, body, passwordOptions = {}) => {
+export const deleteInventoryRequest = async (requestId, actor, body = {}) => {
   if (actor.role !== 'GENERAL_MANAGER') fail('حذف الطلبات متاح للمدير العام فقط', 403);
-  const authorization = await verifyPrimaryAdminPassword({ actor, password: body.adminPassword, ...passwordOptions });
   return locked(requestId, async (initial) => {
-    if (initial.deletedAt) return { deleted: true, alreadyApplied: true, requestId: id(initial), requestNo: initial.requestNo, ...authorization };
+    if (initial.deletedAt) return { deleted: true, alreadyApplied: true, requestId: id(initial), requestNo: initial.requestNo };
     // A receipt that already started debiting stock must finish before deletion.
     const batch = initial.pendingReceipt;
     if (batch?.state === 'ISSUING') fail('بدأ صرف الدفعة؛ أكمل قبول الاستلام أولاً ثم احذف الطلب');
@@ -413,7 +411,7 @@ export const deleteInventoryRequest = async (requestId, actor, body, passwordOpt
     // Preserve the source document for issued stock and custody reconciliation.
     // All request queues exclude deletedAt, while settlement can still use it.
     await Request.updateOne({ _id: requestId }, { $set: { items, status, pendingReceipt: null, deletedAt: new Date(), deletedBy: actor.id },
-      $push: { workflowEvents: event(actor, 'REQUEST_DELETED', { ...authorization, previousStatus: initial.status, notes: body.notes || '' }) } });
-    return { deleted: true, requestId: id(request), requestNo: request.requestNo, custodyPreserved: !!custody, ...authorization };
+      $push: { workflowEvents: event(actor, 'REQUEST_DELETED', { previousStatus: initial.status, notes: body.notes || '' }) } });
+    return { deleted: true, requestId: id(request), requestNo: request.requestNo, custodyPreserved: !!custody };
   });
 };

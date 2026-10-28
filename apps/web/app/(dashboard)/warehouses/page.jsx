@@ -375,6 +375,7 @@ export default function WarehousesPage() {
   const [projects, setProjects] = useState([]);
   const [employees, setEmployees] = useState([]);
   const [requests, setRequests] = useState([]);
+  const deletedRequestIds = useRef(new Set());
   const [custodies, setCustodies] = useState([]);
   const [openCustodiesData, setOpenCustodiesData] = useState({ holders: [], totalHolders: 0 });
   const [reconciliations, setReconciliations] = useState([]);
@@ -448,7 +449,7 @@ export default function WarehousesPage() {
       setMaterials(materialsRes.materials || []);
       setWarehouses(warehousesRes.warehouses || []);
       setStock(stockRes.balances || []);
-      setRequests(requestsRes.requests || []);
+      setRequests((requestsRes.requests || []).filter((request) => !request.deletedAt && !deletedRequestIds.current.has(productId(request))));
       setCustodies(custodiesRes.custodies || []);
       setOpenCustodiesData(openCustodiesRes || { holders: [], totalHolders: 0 });
       setReconciliations(reconciliationsRes.reconciliations || []);
@@ -909,7 +910,23 @@ export default function WarehousesPage() {
   const prepareWarehouseRequest = (request, payload) => runInventoryAction(`/materials/requests/${request._id}/prepare`, payload, 'تم تجهيز وحجز الدفعة؛ بانتظار قبول الفني. لم يخصم الرصيد الفعلي بعد.');
   const confirmWarehouseReceipt = (request, action, notes) => runInventoryAction(`/materials/requests/${request._id}/confirm-receipt`, { action, notes, receiptToken: request.pendingReceipt?.id }, action === 'REJECT' ? 'رفضت الدفعة وفك حجزها.' : 'تم تأكيد الاستلام وخصم الرصيد وتسجيل الذمة.');
   const cancelWarehouseRemainder = (request, notes) => runInventoryAction(`/materials/requests/${request._id}/cancel-remaining`, { notes }, 'ألغي غير المستلم وفك حجزه. المواد المستلمة تبقى على ذمة الفني.');
-  const deleteWarehouseRequest = (request, payload) => runInventoryAction(`/materials/requests/${request._id}`, payload, 'تم حذف الطلب من القوائم وفك حجز غير المستلم. الذمم والحركات المصروفة محفوظة.', 'delete');
+  const deleteWarehouseRequest = async (request, payload) => {
+    setSaving(true); setError(''); setInfo('');
+    try {
+      const result = await api.request(`/materials/requests/${request._id}`, {
+        method: 'DELETE', body: JSON.stringify(payload), signal: AbortSignal.timeout(30000),
+      });
+      deletedRequestIds.current.add(productId(request));
+      setRequests((prev) => prev.filter((item) => productId(item) !== productId(request)));
+      setInfo('تم حذف الطلب من القوائم وفك حجز غير المستلم. الذمم والحركات المصروفة محفوظة.');
+      // Refresh dependent stock data without keeping the confirmation dialog busy.
+      void load(true);
+      return result;
+    } catch (err) {
+      const message = ['TimeoutError', 'AbortError'].includes(err.name) ? 'انتهت مهلة الاتصال. حدّث القائمة للتحقق من حالة الطلب ثم أعد المحاولة عند الحاجة.' : err.message;
+      setError(message); throw new Error(message);
+    } finally { setSaving(false); }
+  };
   const reviewSettlement = (record, action) => {
     const reviewNotes = action === 'REJECT' ? window.prompt('ملاحظات رفض التصفية') : 'اعتماد أمين المخزن للكميات';
     if (action === 'REJECT' && !reviewNotes?.trim()) return Promise.reject(new Error('ملاحظات الرفض مطلوبة'));

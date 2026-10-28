@@ -31,19 +31,17 @@ test('request deletion releases only unreceived reservations and preserves poste
     const first = await create('DELETE-UNRECEIVED');
     await review(first._id, keeper, { action: 'APPROVE_FULL' });
     await prep(first, 5);
-    await assert.rejects(remove(first._id, keeper, { adminPassword: password }), { statusCode: 403 });
-    await assert.rejects(remove(first._id, actor, { adminPassword: 'wrong' }), { statusCode: 403 });
-    await assert.rejects(remove(first._id, actor, {}), { statusCode: 400 });
+    await assert.rejects(remove(first._id, keeper, {}), { statusCode: 403 });
     assert.equal((await Balance.findOne()).qtyReserved, 5);
     await Request.updateOne({ _id: first._id }, { $set: { 'pendingReceipt.state': 'ISSUING' } });
-    await assert.rejects(remove(first._id, actor, { adminPassword: password }), { statusCode: 409 });
+    await assert.rejects(remove(first._id, actor, {}), { statusCode: 409 });
     await Request.updateOne({ _id: first._id }, { $set: { 'pendingReceipt.state': 'READY' } });
-    await remove(first._id, actor, { adminPassword: password });
+    await remove(first._id, actor, {});
     assert.equal((await Balance.findOne()).qtyReserved, 0);
     assert.equal((await Balance.findOne()).qtyOnHand, 20);
     assert.ok((await Request.findById(first._id)).deletedAt);
     assert.equal((await new MaterialsRepository().listRequests()).length, 0);
-    assert.equal((await remove(first._id, actor, { adminPassword: password })).alreadyApplied, true);
+    assert.equal((await remove(first._id, actor, {})).alreadyApplied, true);
     await assert.rejects(prep(first, 1), { statusCode: 409 });
 
     const second = await create('DELETE-PARTIALLY-RECEIVED');
@@ -51,7 +49,7 @@ test('request deletion releases only unreceived reservations and preserves poste
     const batch = await prep(second, 2);
     const received = await accept(second._id, tech, { receiptToken: batch.request.pendingReceipt.id });
     await prep(second, 1);
-    const result = await remove(second._id, actor, { adminPassword: password });
+    const result = await remove(second._id, actor, {});
     assert.equal(result.custodyPreserved, true);
     assert.equal((await Custody.findById(received.custody._id)).items[0].receivedQty, 2);
     assert.equal((await Balance.findOne()).qtyOnHand, 18);

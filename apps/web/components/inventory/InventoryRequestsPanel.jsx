@@ -15,18 +15,18 @@ export default function InventoryRequestsPanel({ requests, warehouses, stockByMa
     const batch = request.pendingReceipt;
     const items = request.items.map((line) => ({ materialId: id(line.material), name: line.materialName || line.material?.name, requested: Number(line.requestedQty), approved: Number(line.approvedQty), prepared: Number(line.preparedQty), delivered: Number(line.deliveredQty),
       quantity: mode === 'review' ? Number(line.requestedQty) : mode === 'receipt' ? Number(batch?.items.find((entry) => id(entry.material) === id(line.material))?.quantity ?? (line.preparedQty - line.deliveredQty)) : Math.max(0, line.approvedQty - line.preparedQty) }));
-    setError(''); setModal({ request, mode, warehouseId: id(request.warehouse) || warehouses[0]?._id || '', items, notes: '', adminPassword: '' });
+    setError(''); setModal({ request, mode, warehouseId: id(request.warehouse) || warehouses[0]?._id || '', items, notes: '' });
   };
   const submit = async (event) => {
     event.preventDefault(); setBusy(true); setError('');
     try {
-      if (modal.mode === 'delete') await onDelete(modal.request, { adminPassword: modal.adminPassword, notes: modal.notes });
+      if (modal.mode === 'delete') await onDelete(modal.request, { notes: modal.notes });
       else if (modal.mode === 'review') await onReview(modal.request, 'APPROVE_PARTIAL', { items: modal.items.map((line) => ({ materialId: line.materialId, approvedQty: Number(line.quantity) })), notes: modal.notes });
       else if (modal.mode === 'prepare') await onPrepare(modal.request, { warehouseId: modal.warehouseId, notes: modal.notes, items: modal.items.filter((line) => line.quantity > 0).map((line) => ({ materialId: line.materialId, preparedQty: Number(line.quantity) })) });
       else await onConfirm(modal.request, 'ACCEPT', modal.notes);
       setModal(null);
     } catch (err) { setError(err.message); }
-    finally { setBusy(false); setModal((prev) => prev ? { ...prev, adminPassword: '' } : null); }
+    finally { setBusy(false); }
   };
   const visible = requests.filter((request) => filter === 'all' || (filter === 'mine' ? own(request) : !['CLOSED', 'RECONCILED', 'REJECTED', 'CANCELLED'].includes(request.status)));
   return <section className="card section" style={{ marginTop: 16 }} dir="rtl">
@@ -50,13 +50,13 @@ export default function InventoryRequestsPanel({ requests, warehouses, stockByMa
     {!visible.length ? <p>لا توجد طلبات ضمن الاختيار الحالي.</p> : null}
     {modal ? <div className="modal-backdrop" onClick={() => { if (!busy) setModal(null); }}><form className="modal-panel warehouse-cart-modal" onSubmit={submit} onClick={(event) => event.stopPropagation()}>
       <div className="modal-header"><h3>{modal.mode === 'delete' ? 'حذف الطلب' : modal.mode === 'review' ? 'اعتماد كميات الطلب' : modal.mode === 'prepare' ? 'تجهيز وحجز دفعة' : 'إقرار استلام المواد'} <bdi>{modal.request.requestNo}</bdi></h3><button type="button" className="modal-close" disabled={busy} onClick={() => setModal(null)}>&times;</button></div>
-      {modal.mode === 'delete' ? <><p>سيحذف الطلب من قوائم الطلبات، وتلغى الكميات غير المستلمة مع فك حجزها. الذمم والمواد المصروفة وحركات المخزون المثبتة تبقى محفوظة وتستمر تصفيتها من ذمم الفنيين.</p><label>كلمة مرور الأدمن الرئيسي لتأكيد الحذف<input className="input" type="password" autoComplete="current-password" name="primaryAdminPassword" dir="ltr" required disabled={busy} value={modal.adminPassword} onChange={(event) => setModal((prev) => ({ ...prev, adminPassword: event.target.value }))} /></label></> : null}
+      {modal.mode === 'delete' ? <p>هل تريد حذف هذا الطلب من القوائم؟ تلغى الكميات غير المستلمة مع فك حجزها. الذمم والمواد المصروفة وحركات المخزون المثبتة تبقى محفوظة وتستمر تصفيتها من ذمم الفنيين.</p> : null}
       {modal.mode === 'receipt' ? <p>بتأكيد الاستلام تقر باستلام الكميات الموضحة فعلياً. سيُخصم رصيدها من المخزن وتُسجل على ذمتك.</p> : null}
       {modal.mode === 'prepare' ? <label>المخزن الصالح *<select className="select" required value={modal.warehouseId} onChange={(event) => setModal((prev) => ({ ...prev, warehouseId: event.target.value }))}><option value="">اختر المخزن</option>{warehouses.filter((warehouse) => warehouse.type !== 'DAMAGED').map((warehouse) => <option value={warehouse._id} key={warehouse._id}>{warehouse.name}</option>)}</select></label> : null}
       {modal.mode !== 'delete' ? <div style={{ overflowX: 'auto' }}><table className="table"><thead><tr><th>المادة</th><th>المطلوب</th><th>المعتمد</th><th>{modal.mode === 'receipt' ? 'كمية الدفعة المستلمة' : modal.mode === 'review' ? 'الكمية المعتمدة' : 'كمية التجهيز'}</th></tr></thead><tbody>{modal.items.map((line, index) => <tr key={line.materialId}><td>{line.name}</td><td>{qty(line.requested)}</td><td>{qty(line.approved)}</td><td><input className="input" type="number" step="any" min="0" max={modal.mode === 'review' ? line.requested : modal.mode === 'prepare' ? Math.max(0, line.approved - line.prepared) : undefined} readOnly={modal.mode === 'receipt'} value={line.quantity} onChange={(event) => setModal((prev) => ({ ...prev, items: prev.items.map((item, i) => i === index ? { ...item, quantity: event.target.value } : item) }))} /></td></tr>)}</tbody></table></div> : null}
       <label>ملاحظات<textarea className="textarea" value={modal.notes} onChange={(event) => setModal((prev) => ({ ...prev, notes: event.target.value }))} /></label>
       {error ? <p role="alert" style={{ color: '#fca5a5' }}>{error}</p> : null}
-      <div className="form-actions"><button type="button" className="btn btn-soft" disabled={busy} onClick={() => setModal(null)}>إلغاء</button><button className={`btn ${modal.mode === 'delete' ? 'btn-danger' : 'btn-primary'}`} disabled={busy || saving || (modal.mode === 'delete' && !modal.adminPassword)}>{busy ? 'جار التسجيل...' : modal.mode === 'delete' ? 'تأكيد حذف الطلب' : modal.mode === 'receipt' ? 'أؤكد الاستلام وتسجيل الذمة' : modal.mode === 'review' ? 'اعتماد الكميات' : 'حجز وتجهيز الدفعة'}</button></div>
+      <div className="form-actions"><button type="button" className="btn btn-soft" disabled={busy} onClick={() => setModal(null)}>إلغاء</button><button className={`btn ${modal.mode === 'delete' ? 'btn-danger' : 'btn-primary'}`} disabled={busy || saving}>{busy ? 'جار التسجيل...' : modal.mode === 'delete' ? 'تأكيد حذف الطلب' : modal.mode === 'receipt' ? 'أؤكد الاستلام وتسجيل الذمة' : modal.mode === 'review' ? 'اعتماد الكميات' : 'حجز وتجهيز الدفعة'}</button></div>
     </form></div> : null}
     <style jsx>{`.workflow-steps{display:grid;grid-template-columns:repeat(6,minmax(100px,1fr));gap:8px;margin:16px 0}.workflow-steps span{display:grid;gap:5px;text-align:center;padding:12px 8px;border:1px solid var(--border);border-radius:10px;background:var(--surface-soft);font-size:13px}.workflow-steps b{color:var(--accent)}.workflow-state{font-size:12px;color:var(--accent)}.request-lines{display:grid;gap:8px;margin:14px 0}.request-lines div{display:grid;gap:5px;border-bottom:1px solid var(--border);padding-bottom:8px}.request-lines small{color:var(--text-soft)}@media(max-width:1000px){.workflow-steps{grid-template-columns:repeat(3,1fr)}}@media(max-width:600px){.workflow-steps{grid-template-columns:repeat(2,1fr)}}`}</style>
   </section>;

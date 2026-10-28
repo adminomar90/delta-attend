@@ -63,10 +63,9 @@ test('authenticated inventory endpoints enforce catalog selection, roles, recipi
     const cart = await call(1, 'POST', '/stock/cart-issue', { employeeId: users[0]._id, referenceId: randomUUID(), items: [{ materialId: material._id, warehouseId: warehouse._id, quantity: 2 }] }, 201);
     assert.equal(cart.request.status, 'PENDING_MANAGER_APPROVAL');
     assert.equal((await StockBalanceModel.findOne({ material: material._id, warehouse: warehouse._id })).qtyOnHand, 7);
-    await call(1, 'DELETE', `/requests/${cart.request._id}`, { adminPassword: 'Isolated-Admin-Password' }, 403);
-    await call(3, 'DELETE', `/requests/${cart.request._id}`, {}, 400);
-    await call(3, 'DELETE', `/requests/${cart.request._id}`, { adminPassword: 'wrong' }, 403);
-    await call(3, 'DELETE', `/requests/${cart.request._id}`, { adminPassword: 'Isolated-Admin-Password' });
+    await call(1, 'DELETE', `/requests/${cart.request._id}`, {}, 403);
+    await call(0, 'DELETE', `/requests/${cart.request._id}`, {}, 403);
+    await call(3, 'DELETE', `/requests/${cart.request._id}`, {});
     const listed = await call(3, 'GET', '/requests?archived=all');
     assert.equal(listed.requests.some((request) => request._id === cart.request._id), false);
     assert.equal((await StockBalanceModel.findOne({ material: material._id, warehouse: warehouse._id })).qtyOnHand, 7);
