@@ -3,6 +3,7 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import { api, API_URL } from './api';
 import { authStorage } from './auth';
+import { registerAppServiceWorker } from './registerServiceWorker.mjs';
 
 const NotificationContext = createContext({
   unreadCount: 0,
@@ -88,16 +89,16 @@ export function NotificationProvider({ children }) {
 
   /* ── Register Service Worker ── */
   useEffect(() => {
-    if (typeof window === 'undefined' || !('serviceWorker' in navigator)) {
+    if (typeof window === 'undefined' || !window.isSecureContext || !('serviceWorker' in navigator)) {
       updateDebug({ swState: 'unsupported' });
       return;
     }
     updateDebug({ swState: 'registering' });
     addLog('info', 'جارٍ تسجيل Service Worker...');
 
-    navigator.serviceWorker
-      .register('/sw-notifications.js')
+    registerAppServiceWorker()
       .then((reg) => {
+        if (!reg) return;
         swRegRef.current = reg;
         updateDebug({ swState: 'ready', swScope: reg.scope });
         addLog('ok', `Service Worker جاهز — scope: ${reg.scope}`);

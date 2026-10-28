@@ -2,6 +2,8 @@
 .env
 .env.*
 .next
+.next-pwa-check
+.pwa-check
 dist
 coverage
 npm-debug.log*

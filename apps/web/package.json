@@ -6,6 +6,8 @@
     "dev": "next dev",
     "dev:clean": "node -e \"require('fs').rmSync('.next',{recursive:true,force:true})\" && next dev",
     "build": "next build",
+    "icons:generate": "node scripts/generate-pwa-icons.cjs",
+    "check:pwa": "node scripts/check-pwa.cjs",
     "start": "next start"
   },
   "dependencies": {
