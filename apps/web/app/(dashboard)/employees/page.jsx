@@ -84,6 +84,13 @@ const permissionCategoryDefinitions = [
     ].includes(permission),
   },
   {
+    key: 'customer-quotes',
+    title: 'عروض الأسعار',
+    description: 'عرض عروض أسعار الزبائن وملفات PDF، أو إنشاؤها وتعديلها ومشاركتها عبر واتساب.',
+    icon: '💼',
+    match: (permission) => [Permission.VIEW_CUSTOMER_QUOTES, Permission.MANAGE_CUSTOMER_QUOTES].includes(permission),
+  },
+  {
     key: 'purchases',
     title: 'المشتريات والموردون',
     description: 'طلبات الشراء، التسعير، الاعتماد، الاستلام والموردون.',
