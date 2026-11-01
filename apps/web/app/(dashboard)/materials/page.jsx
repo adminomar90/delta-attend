@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState, useCallback, useId, useRef } from 'react';
 import DeleteMaterialRequestModal from '../../../components/inventory/DeleteMaterialRequestModal';
+import TicketContext from '../../../components/tickets/TicketContext';
 import { api } from '../../../lib/api';
 import { authStorage } from '../../../lib/auth';
 import { Permission, hasAnyPermission, hasPermission } from '../../../lib/permissions';
@@ -558,7 +559,8 @@ export default function MaterialsPage() {
           return { materialId: material._id, materialName: material.name, unit: material.unit, requestedQty: toNum(it.requestedQty), notes: it.notes };
         });
       if (!items.length) throw new Error('يرجى إضافة مادة واحدة على الأقل مع كمية أكبر من صفر.');
-      await api.post('/materials/requests', { ...requestForm, items });
+      const ticket = new URLSearchParams(window.location.search).get('ticket') || undefined;
+      await api.post('/materials/requests', { ...requestForm, items, ticket });
       setRequestForm({ requestTarget: 'PROJECT', customerId: '', projectId: '', manualProjectName: '', priority: 'NORMAL', clientName: '', requestedForId: '', assignedPreparerId: '', warehouseId: activeWarehouses[0]?._id || '', generalNotes: '', items: [makeItem()] });
       setInfo('تم إنشاء الطلب بنجاح'); await load();
     } catch (err) { setError(err.message || 'فشل إنشاء الطلب'); }
@@ -800,6 +802,7 @@ export default function MaterialsPage() {
           {/* new request form */}
           <section className="card section" style={{ marginBottom: 16 }}>
             <h2 style={{ marginTop: 0 }}>طلب مواد جديد</h2>
+              <TicketContext onLoad={(task) => setRequestForm((f) => ({ ...f, projectId: task.project?._id || '', customerId: task.customer?._id || '', requestTarget: task.customer ? 'CUSTOMER' : 'PROJECT', clientName: task.customerName || '', manualProjectName: task.project ? '' : task.title }))} />
             <form onSubmit={createRequest}>
               <RequestTargetFields form={requestForm} setForm={setRequestForm} projects={projects} customers={customers} customerError={customerError} />
               <div className="grid-3" style={{ marginBottom: 12 }}>

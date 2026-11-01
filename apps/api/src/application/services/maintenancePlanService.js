@@ -415,6 +415,7 @@ export const summarizeMaintenancePlan = (plan, { now = new Date() } = {}) => {
   const computedStatus = resolveComputedPlanStatus(plan, now);
   const scheduledVisits = [...(plan?.scheduledVisits || [])]
     .map((item, index) => {
+      item = typeof item.toObject === 'function' ? item.toObject() : item;
       const scheduledDate = normalizeDateOnly(item.scheduledDate);
       const completedAt = normalizeDateOnly(item.completedAt);
       const state = resolveScheduledVisitState(
@@ -530,11 +531,10 @@ export const attachVisitToSchedule = ({
   scheduledVisitId,
 }) => {
   const normalizedVisitDate = normalizeDateOnly(visitDate) || normalizeDateOnly(new Date());
-  const nextSchedule = [...scheduledVisits].map((item) => ({
-    ...item,
-    scheduledDate: normalizeDateOnly(item.scheduledDate),
-    completedAt: normalizeDateOnly(item.completedAt),
-  }));
+  const nextSchedule = [...scheduledVisits].map((value) => {
+    const item = typeof value.toObject === 'function' ? value.toObject() : value;
+    return { ...item, scheduledDate: normalizeDateOnly(item.scheduledDate), completedAt: normalizeDateOnly(item.completedAt) };
+  });
 
   let targetIndex = -1;
 

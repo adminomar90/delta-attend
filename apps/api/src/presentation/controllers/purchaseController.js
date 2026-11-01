@@ -172,6 +172,8 @@ export const purchaseSummary = asyncHandler(async (_req, res) => {
 });
 
 export const createPurchase = asyncHandler(async (req, res) => {
+  const { resolveTicketLink } = await import('../../application/services/ticketLinkService.js');
+  const ticket = await resolveTicketLink(req.user, req.body.ticket);
   const items = [];
   for (const input of Array.isArray(req.body.items) ? req.body.items : []) {
     const material = await materialsRepository.findMaterialById(input.materialId || input.material);
@@ -219,6 +221,7 @@ export const createPurchase = asyncHandler(async (req, res) => {
   let created;
   try {
     created = await purchaseRepository.create({
+      ticket,
       requestNo,
       createdBy: req.user.id,
       createdByName: req.user.fullName || '',
@@ -417,7 +420,7 @@ export const submitPublicQuote = asyncHandler(async (req, res) => {
     messageAr: `أرسل المورد ${supplierDisplayName(quote)} عرضه للطلب ${purchase.requestNo}.`,
     metadata: { purchaseId: purchase._id, requestNo: purchase.requestNo },
   });
-  await auditService.log({ action: 'PURCHASE_QUOTE_SUBMITTED', entityType: 'PURCHASE_REQUEST', entityId: purchase._id, after: { supplier: supplierDisplayName(quote) }, req });
+  await auditService.log({ actorType: 'SUPPLIER', externalActor: { supplier: quote.supplier?._id || quote.supplier || null, name: supplierDisplayName(quote) }, action: 'PURCHASE_QUOTE_SUBMITTED', entityType: 'PURCHASE_REQUEST', entityId: purchase._id, after: { supplier: supplierDisplayName(quote) }, req });
   res.json({ ok: true });
 });
 

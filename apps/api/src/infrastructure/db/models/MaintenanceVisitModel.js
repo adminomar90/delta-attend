@@ -33,6 +33,8 @@ const maintenanceVisitImageSchema = new mongoose.Schema(
 
 const maintenanceVisitSchema = new mongoose.Schema(
   {
+    ticket: { type: mongoose.Schema.Types.ObjectId, ref: 'Task', default: null },
+    ticketApprovedAt: { type: Date, default: null },
     maintenancePlan: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'MaintenancePlan',

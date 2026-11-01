@@ -163,6 +163,7 @@ const receiptSchema = new mongoose.Schema(
 
 const purchaseRequestSchema = new mongoose.Schema(
   {
+    ticket: { type: mongoose.Schema.Types.ObjectId, ref: 'Task', default: null, index: true },
     requestNo: { type: String, required: true, unique: true, trim: true, index: true },
     requestDate: { type: Date, default: Date.now, index: true },
     createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },

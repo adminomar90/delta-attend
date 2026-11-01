@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import { api } from '../../lib/api';
 import {
   MaintenancePlanType,
   MaintenanceRecurrenceType,
@@ -30,6 +31,9 @@ export default function MaintenancePlanModal({
 }) {
   const [form, setForm] = useState(initialForm);
   const [expectedManual, setExpectedManual] = useState(false);
+  const [customers, setCustomers] = useState([]);
+  useEffect(() => { if (open) api.get('/customers').then((result) => setCustomers(result.customers || [])).catch(() => setCustomers([])); }, [open]);
+  const linkedCustomer = customers.find((customer) => String(customer._id || customer.id) === form?.customerId);
 
   useEffect(() => {
     if (!open) {
@@ -230,6 +234,11 @@ export default function MaintenancePlanModal({
               <label>تاريخ نهاية الخطة
                 <input className="input" type="date" value={toDateInputValue(computedEndDate) || form.endDate} disabled={form.maintenanceType === MaintenancePlanType.FREE} />
               </label>
+              <label>ربط الزبون من السجلات (اختياري)<select className="select" value={form.customerId || ''} onChange={(e) => { const customer = customers.find((item) => String(item._id || item.id) === e.target.value); setForm((current) => ({ ...current, customerId: e.target.value, customerName: customer?.name || current.customerName, phone: customer?.phone || current.phone, location: customer?.address || current.location, branch: '' })); }}><option value="">إدخال يدوي / بدون ربط</option>{customers.map((customer) => <option key={customer._id || customer.id} value={customer._id || customer.id}>{customer.name}</option>)}</select></label>
+              {linkedCustomer?.sites?.length ? <label>الفرع<select className="select" value={form.branch || ''} onChange={(e) => { const site = linkedCustomer.sites.find((item) => item.name === e.target.value); setForm((current) => ({ ...current, branch: e.target.value, location: site?.address || current.location, phone: site?.managerPhone || current.phone })); }}><option value="">اختر الفرع</option>{form.branch && !linkedCustomer.sites.some((site) => site.name === form.branch) && <option value={form.branch}>{form.branch} (سابق)</option>}{linkedCustomer.sites.map((site) => <option key={site._id || site.name} value={site.name}>{site.name}</option>)}</select></label> : <label>الفرع<input className="input" value={form.branch || ''} onChange={(e) => setForm((c) => ({ ...c, branch: e.target.value }))} /></label>}
+              <label>مرجع العقد إن وجد<input className="input" value={form.contractReference || ''} onChange={(e) => setForm((c) => ({ ...c, contractReference: e.target.value }))} /></label>
+              <label>الأجهزة المشمولة<input className="input" value={form.deviceDetails || ''} onChange={(e) => setForm((c) => ({ ...c, deviceDetails: e.target.value }))} /></label>
+              <label className="grid-span-full">قائمة فحص الصيانة — خطوة في كل سطر<textarea className="textarea" value={form.checklistText || ''} onChange={(e) => setForm((c) => ({ ...c, checklistText: e.target.value }))} /></label>
               <label className="grid-span-full">ملاحظات
                 <textarea className="textarea" rows={4} value={form.notes} onChange={(e) => setForm((c) => ({ ...c, notes: e.target.value }))} />
               </label>

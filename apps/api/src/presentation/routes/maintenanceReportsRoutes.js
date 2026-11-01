@@ -1,4 +1,7 @@
 import { Router } from 'express';
+import { asyncHandler, AppError } from '../../shared/errors.js';
+import { MaintenanceReportModel } from '../../infrastructure/db/models/MaintenanceReportModel.js';
+import { ensureTask } from '../../application/services/ticketService.js';
 import { requireAuth } from '../middlewares/authMiddleware.js';
 import {
   canCreateMaintenanceReportRequests,
@@ -45,6 +48,15 @@ maintenanceReportsRoutes.get('/summary', maintenanceReportsSummary);
 maintenanceReportsRoutes.get('/assignees', canCreateMaintenanceReportRequests, listMaintenanceAssignees);
 maintenanceReportsRoutes.get('/', listMaintenanceReports);
 maintenanceReportsRoutes.post('/', canCreateMaintenanceReportRequests, createMaintenanceReportRequest);
+maintenanceReportsRoutes.use('/:id', asyncHandler(async (req, res, next) => {
+  if (!/^[a-f0-9]{24}$/i.test(req.params.id)) return next();
+  const report = await MaintenanceReportModel.findById(req.params.id).select('ticket');
+  if (report?.ticket) {
+    await ensureTask(req.user, report.ticket);
+    if (req.method !== 'GET' && !req.path.endsWith('/whatsapp-link')) throw new AppError('تقرير مرتبط بتذكرة؛ حدّث التنفيذ والمراجعة من التذكرة الأصلية', 409);
+  }
+  next();
+}));
 maintenanceReportsRoutes.get('/:id/pdf', exportMaintenanceReportPdf);
 maintenanceReportsRoutes.post('/:id/whatsapp-link', maintenanceReportWhatsappLink);
 maintenanceReportsRoutes.get('/:id', getMaintenanceReport);

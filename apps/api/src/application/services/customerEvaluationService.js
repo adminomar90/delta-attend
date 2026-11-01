@@ -1,6 +1,7 @@
 import crypto from 'crypto';
 
 export const CustomerEvaluationSourceType = {
+  TASK: 'TASK',
   WORK_REPORT: 'WORK_REPORT',
   DAILY_WORK_PLAN: 'DAILY_WORK_PLAN',
 };

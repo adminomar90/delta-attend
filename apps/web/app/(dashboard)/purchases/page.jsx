@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { api, assetUrl } from '../../../lib/api';
+import TicketContext from '../../../components/tickets/TicketContext';
 import { authStorage } from '../../../lib/auth';
 import { Permission, hasAnyPermission, hasPermission } from '../../../lib/permissions';
 
@@ -172,6 +173,7 @@ export default function PurchasesPage() {
         supplierIds: form.supplierIds,
         items: form.items.map((item) => ({ materialId: item.materialId, quantity: Number(item.quantity || 0), notes: item.notes })),
       };
+      payload.ticket = new URLSearchParams(window.location.search).get('ticket') || undefined;
       const response = await api.post('/purchases', payload);
       setInfo(`تم إنشاء طلب الشراء ${response.purchase.requestNo}.`);
       setForm(emptyForm);
@@ -630,6 +632,7 @@ function CreatePanel({ form, setForm, materials, suppliers, warehouses, projects
   return (
     <section className="card section" style={{ marginTop: 16 }}>
       <form onSubmit={createPurchase}>
+        <TicketContext onLoad={(task) => setForm((f) => ({ ...f, projectId: task.project?._id || '', reason: `متطلبات التذكرة ${task.ticketNumber || task.title}` }))} />
         <div className="daily-plan-form-grid">
           <label>سبب الطلب<input className="input" required value={form.reason} onChange={(e) => setForm((p) => ({ ...p, reason: e.target.value }))} /></label>
           <label>المشروع<select className="select" value={form.projectId} onChange={(e) => setForm((p) => ({ ...p, projectId: e.target.value }))}><option value="">بدون مشروع</option>{projects.map((project) => <option key={project._id} value={project._id}>{project.name}</option>)}</select></label>

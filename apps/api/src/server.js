@@ -3,7 +3,9 @@ import { app } from './app.js';
 import { connectDatabase } from './config/db.js';
 import { env } from './config/env.js';
 import { UserModel } from './infrastructure/db/models/UserModel.js';
+import { TaskModel } from './infrastructure/db/models/TaskModel.js';
 import { Roles } from './shared/constants.js';
+import { startTicketScheduler } from './application/services/ticketScheduler.js';
 
 const ensureSuperAdmin = async () => {
   try {
@@ -34,6 +36,8 @@ const start = async () => {
       await connectDatabase(env.mongoUri);
       console.log('\u2713 Connected to MongoDB');
       await ensureSuperAdmin();
+      await TaskModel.init();
+      startTicketScheduler();
     } catch (dbError) {
       console.warn('\u26a0 MongoDB connection failed. Running in development mode without database.');
       console.warn('  Install MongoDB or set MONGO_URI environment variable.');

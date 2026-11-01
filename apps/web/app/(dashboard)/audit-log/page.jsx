@@ -40,7 +40,7 @@ export default function AuditLogPage() {
             {logs.map((log) => (
               <tr key={log._id}>
                 <td>{new Date(log.createdAt).toLocaleString('ar-IQ')}</td>
-                <td>{log.actor?.fullName || '-'}</td>
+                <td>{log.actorType === 'SUPPLIER' ? `${log.externalActor?.name || 'مورد'} (مورد)` : log.actor?.fullName || '-'}</td>
                 <td>{log.action}</td>
                 <td>{log.entityType}</td>
                 <td>{log.entityId}</td>

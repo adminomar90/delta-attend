@@ -720,7 +720,10 @@ export const updateMaintenanceReportRequest = asyncHandler(async (req, res) => {
 
 export const listMaintenanceReports = asyncHandler(async (req, res) => {
   const reports = await maintenanceReportRepository.list({});
-  const visible = reports.filter((report) => resolveMaintenanceVisibility(req.user, report));
+  const { accessFilter } = await import('../../application/services/ticketService.js');
+  const { TaskModel } = await import('../../infrastructure/db/models/TaskModel.js');
+  const allowedTickets = new Set((await TaskModel.find(await accessFilter(req.user)).select('_id')).map((task) => String(task._id)));
+  const visible = reports.filter((report) => (!report.ticket || allowedTickets.has(String(report.ticket))) && resolveMaintenanceVisibility(req.user, report));
   const filtered = filterMaintenanceReports(visible, req.query);
 
   res.json({
@@ -730,7 +733,10 @@ export const listMaintenanceReports = asyncHandler(async (req, res) => {
 
 export const maintenanceReportsSummary = asyncHandler(async (req, res) => {
   const reports = await maintenanceReportRepository.list({});
-  const visible = reports.filter((report) => resolveMaintenanceVisibility(req.user, report));
+  const { accessFilter } = await import('../../application/services/ticketService.js');
+  const { TaskModel } = await import('../../infrastructure/db/models/TaskModel.js');
+  const allowedTickets = new Set((await TaskModel.find(await accessFilter(req.user)).select('_id')).map((task) => String(task._id)));
+  const visible = reports.filter((report) => (!report.ticket || allowedTickets.has(String(report.ticket))) && resolveMaintenanceVisibility(req.user, report));
   const filtered = filterMaintenanceReports(visible, req.query);
 
   res.json({
@@ -853,18 +859,19 @@ const createStoredMaintenanceReportPdf = async ({ report, req }) => {
     publicBaseUrl: resolvePublicBaseUrl(req),
   });
 
-  if (!fs.existsSync(storedMaintenanceReportsDir)) {
-    fs.mkdirSync(storedMaintenanceReportsDir, { recursive: true });
+  const targetDir = report.ticket ? path.resolve(env.privateUploadsDir, 'ticket-reports') : storedMaintenanceReportsDir;
+  if (!fs.existsSync(targetDir)) {
+    fs.mkdirSync(targetDir, { recursive: true });
   }
 
-  const filename = `maintenance-report-${String(report._id)}-${Date.now()}-${randomUUID().slice(0, 8)}.pdf`;
-  const absolutePath = path.resolve(storedMaintenanceReportsDir, filename);
+  const filename = report.ticket ? `maintenance-report-${String(report._id)}.pdf` : `maintenance-report-${String(report._id)}-${Date.now()}-${randomUUID().slice(0, 8)}.pdf`;
+  const absolutePath = path.resolve(targetDir, filename);
   fs.writeFileSync(absolutePath, buffer);
 
   return {
     filename,
     absolutePath,
-    pdfUrl: `/uploads/maintenance-reports/${filename}`,
+    pdfUrl: report.ticket ? `/api/maintenance-reports/${report._id}/pdf` : `/uploads/maintenance-reports/${filename}`,
   };
 };
 
@@ -1422,6 +1429,7 @@ export const exportMaintenanceReportPdf = asyncHandler(async (req, res) => {
   }
 
   assertMaintenanceReportVisible(req, report);
+  if (report.ticket) res.setHeader('Cache-Control', 'private, no-store');
 
   const stored = await ensureStoredMaintenanceReportPdf({
     report,

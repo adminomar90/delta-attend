@@ -364,6 +364,7 @@ export const buildDirectPlanDefaults = () => ({
 });
 
 export const buildPlanDefaultsFromExisting = (plan) => ({
+  branch: plan?.branch || '', contractReference: plan?.contractReference || '', deviceDetails: plan?.deviceDetails || '', checklistText: (plan?.checklist || []).join('\n'),
   workReportId: plan?.workReportId || '',
   customerId: plan?.customerId || '',
   customerName: plan?.customerName || '',
@@ -392,6 +393,7 @@ export const buildPlanDefaultsFromExisting = (plan) => ({
 
 export const buildPlanPayload = (form) => {
   const payload = {
+    branch: form.branch || '', contractReference: form.contractReference || '', deviceDetails: form.deviceDetails || '', checklist: (form.checklistText || '').split('\n').filter((s) => s.trim()),
     customerId: form.customerId,
     customerName: form.customerName,
     location: form.location,

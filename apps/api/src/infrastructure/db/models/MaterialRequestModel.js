@@ -169,6 +169,7 @@ const preparationRecordSchema = new mongoose.Schema(
 
 const materialRequestSchema = new mongoose.Schema(
   {
+    ticket: { type: mongoose.Schema.Types.ObjectId, ref: 'Task', default: null, index: true },
     requestNo: {
       type: String,
       required: true,

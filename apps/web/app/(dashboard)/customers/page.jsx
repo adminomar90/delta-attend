@@ -1,4 +1,5 @@
 'use client';
+import LinkedTickets from '../../../components/tickets/LinkedTickets';
 
 import { useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
@@ -72,6 +73,7 @@ export default function CustomersPage() {
   const [reviewForm, setReviewForm] = useState(null);
   const [editingCustomer, setEditingCustomer] = useState(null);
   const [detailsCustomer, setDetailsCustomer] = useState(null);
+  useEffect(() => { const requested = searchParams.get('customer'); if (requested) { const match = customers.find((c) => String(c._id || c.id) === requested); if (match) setDetailsCustomer(match); } }, [customers, searchParams]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [locatingRequest, setLocatingRequest] = useState(false);
@@ -514,6 +516,7 @@ export default function CustomersPage() {
               <button type="button" className="modal-close" onClick={() => setDetailsCustomer(null)}>&times;</button>
             </div>
             <div className="customer-detail-stack">
+              <LinkedTickets customer={String(detailsCustomer._id || detailsCustomer.id)} />
               <ContactActionBar
                 phone={detailsCustomer.phone}
                 whatsapp={detailsCustomer.whatsapp || detailsCustomer.phone}

@@ -6,6 +6,7 @@ import { createContext, useCallback, useContext, useEffect, useRef, useState } f
 import { usePathname, useRouter } from 'next/navigation';
 import { api, AUTH_EXPIRED_EVENT } from './api';
 import { authStorage } from './auth';
+import { isPublicRoute } from './publicRoutes.mjs';
 
 const AuthContext = createContext(null);
 
@@ -15,11 +16,7 @@ export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
   const didCheck = useRef(false);
-  const isPublicPage =
-    pathname === '/login'
-    || pathname?.startsWith('/customer-form/')
-    || pathname?.startsWith('/customer-evaluation/')
-    || pathname?.startsWith('/maintenance-feedback/');
+  const isPublicPage = isPublicRoute(pathname);
 
   // Keep authStorage in-memory cache in sync with context
   const syncStorage = useCallback((userData, token) => {

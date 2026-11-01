@@ -114,7 +114,13 @@ const buildSnapshotFromWorkReport = (report, departmentOverride = '') => {
   };
 };
 
-const resolveSourceSnapshot = async (sourceType, sourceId, departmentOverride = '') => {
+const resolveSourceSnapshot = async (sourceType, sourceId, departmentOverride = '', actor = null) => {
+  if (sourceType === CustomerEvaluationSourceType.TASK) {
+    const { ensureTask } = await import('../../application/services/ticketService.js');
+    const task = await ensureTask(actor, sourceId);
+    if (task.status !== 'APPROVED' || !task.technicalRequired) throw new AppError('تقييم الزبون متاح بعد اعتماد تذكرة الصيانة', 409);
+    return { source: { sourceType, sourceId: task._id, sourceNumber: task.ticketNumber || sourceNumber('TK', task._id), reportUrl: `/tasks?ticket=${task._id}` }, customer: { customerName: task.customerName || '', phone: task.execution?.contactPhone || '', companyOrSiteName: task.branch || '', siteAddress: task.execution?.location || '' }, work: { serviceType: task.title, executionDate: task.approvedAt, department: 'MAINTENANCE', departmentName: departmentLabelMap.MAINTENANCE, projectOrTaskName: task.title } };
+  }
   if (sourceType === CustomerEvaluationSourceType.DAILY_WORK_PLAN) {
     const plan = await dailyWorkPlanRepository.findById(sourceId);
     if (!plan) throw new AppError('Daily work plan not found', 404);
@@ -132,7 +138,7 @@ export const createCustomerEvaluationLink = asyncHandler(async (req, res) => {
   const sourceType = toCleanString(req.body.sourceType);
   const sourceId = toCleanString(req.body.sourceId);
   if (!sourceType || !sourceId) throw new AppError('sourceType and sourceId are required', 400);
-  const snapshot = await resolveSourceSnapshot(sourceType, sourceId, req.body.department);
+  const snapshot = await resolveSourceSnapshot(sourceType, sourceId, req.body.department, req.user);
   const days = Math.max(1, Math.min(90, Number(req.body.expiresInDays || 30)));
   const existing = await evaluationRepository.findLatestBySource(sourceType, sourceId);
   if (existing && existing.status === CustomerEvaluationStatus.PENDING) {

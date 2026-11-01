@@ -2,10 +2,15 @@
 
 const auditLogSchema = new mongoose.Schema(
   {
+    actorType: { type: String, enum: ['USER', 'SUPPLIER'], default: 'USER' },
+    externalActor: {
+      supplier: { type: mongoose.Schema.Types.ObjectId, ref: 'Supplier', default: null },
+      name: { type: String, default: '' },
+    },
     actor: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'User',
-      required: true,
+      required: function () { return this.actorType !== 'SUPPLIER'; },
       index: true,
     },
     action: {

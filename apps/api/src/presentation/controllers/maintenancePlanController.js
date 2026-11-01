@@ -353,6 +353,7 @@ const serializePlan = (plan, user) => {
     statusLabel: maintenanceStatusLabelMap[summary.status] || summary.status,
     assignedEmployee: serializeEmployee(plan.assignedEmployee),
     notes: plan.notes || '',
+    branch: plan.branch || '', contractReference: plan.contractReference || '', deviceDetails: plan.deviceDetails || '', checklist: plan.checklist || [],
     reminderBefore: plan.reminderBefore || MaintenanceReminderBefore.NONE,
     reminderBeforeLabel: reminderBeforeLabelMap[plan.reminderBefore] || plan.reminderBefore,
     dueTodayCount: summary.dueTodayCount,
@@ -676,6 +677,7 @@ const buildPlanUpsertPayload = async ({
     status: summary.status,
     assignedEmployee: assignedEmployee?._id || null,
     notes: toCleanString(body.notes || existingPlan?.notes),
+    branch: toCleanString(body.branch ?? existingPlan?.branch), contractReference: toCleanString(body.contractReference ?? existingPlan?.contractReference), deviceDetails: toCleanString(body.deviceDetails ?? existingPlan?.deviceDetails), checklist: (Array.isArray(body.checklist) ? body.checklist : existingPlan?.checklist || []).slice(0, 100).map((text) => String(text).slice(0, 500)),
     reminderBefore,
     scheduledVisits: summary.scheduledVisits.map((item, index) => ({
       ...item,
@@ -782,6 +784,11 @@ const ensureVisitAccessible = async (req, visitId) => {
     throw new AppError('زيارة الصيانة غير موجودة', 404);
   }
 
+  if (visit.ticket) {
+    const { ensureTask } = await import('../../application/services/ticketService.js');
+    await ensureTask(req.user, visit.ticket);
+    return visit;
+  }
   if (!canAccessPlan(req.user, visit.maintenancePlan)) {
     throw new AppError('ليست لديك صلاحية الوصول إلى هذه الزيارة', 403);
   }
@@ -791,7 +798,8 @@ const ensureVisitAccessible = async (req, visitId) => {
 
 const ensureStoredMaintenanceVisitPdf = async ({ visit, req }) => {
   const filename = `maintenance-visit-${String(visit._id || visit.id)}.pdf`;
-  const absolutePath = path.resolve(storedMaintenanceVisitsDir, filename);
+  const targetDir = visit.ticket ? path.resolve(env.privateUploadsDir, 'ticket-visits') : storedMaintenanceVisitsDir;
+  const absolutePath = path.resolve(targetDir, filename);
   const buffer = await buildMaintenanceVisitPdfBuffer({
     visit: serializeVisit(visit, req.user),
     generatedAt: new Date(),
@@ -799,8 +807,8 @@ const ensureStoredMaintenanceVisitPdf = async ({ visit, req }) => {
     publicBaseUrl: resolvePublicBaseUrl(req),
   });
 
-  if (!fs.existsSync(storedMaintenanceVisitsDir)) {
-    fs.mkdirSync(storedMaintenanceVisitsDir, { recursive: true });
+  if (!fs.existsSync(targetDir)) {
+    fs.mkdirSync(targetDir, { recursive: true });
   }
 
   fs.writeFileSync(absolutePath, buffer);
@@ -808,7 +816,7 @@ const ensureStoredMaintenanceVisitPdf = async ({ visit, req }) => {
   return {
     filename,
     absolutePath,
-    publicUrl: `/uploads/maintenance-visits/${filename}`,
+    publicUrl: visit.ticket ? `/api/maintenance-plans/visits/${visit._id}/pdf` : `/uploads/maintenance-visits/${filename}`,
   };
 };
 
@@ -863,6 +871,14 @@ export const listMaintenancePlans = asyncHandler(async (req, res) => {
   });
 });
 
+const filterTicketVisits = async (actor, visits) => {
+  const linkedIds = visits.filter((visit) => visit.ticket).map((visit) => visit.ticket);
+  if (!linkedIds.length) return visits;
+  const { TaskModel } = await import('../../infrastructure/db/models/TaskModel.js');
+  const { accessFilter } = await import('../../application/services/ticketService.js');
+  const allowed = new Set((await TaskModel.find({ $and: [{ _id: { $in: linkedIds } }, await accessFilter(actor)] }).select('_id')).map((task) => String(task._id)));
+  return visits.filter((visit) => !visit.ticket || allowed.has(String(visit.ticket)));
+};
 export const listMaintenanceVisits = asyncHandler(async (req, res) => {
   if (!canViewMaintenancePlans(req.user)) {
     throw new AppError('ليس لديك صلاحية عرض زيارات الصيانة', 403);
@@ -880,7 +896,7 @@ export const listMaintenanceVisits = asyncHandler(async (req, res) => {
   });
 
   res.json({
-    visits: visits.map((visit) => serializeVisit(visit, req.user)),
+    visits: (await filterTicketVisits(req.user, visits)).map((visit) => serializeVisit(visit, req.user)),
   });
 });
 
@@ -892,7 +908,7 @@ export const getMaintenancePlan = asyncHandler(async (req, res) => {
 
   res.json({
     plan: serializePlan(plan, req.user),
-    visits: visits.map((visit) => serializeVisit(visit, req.user)),
+    visits: (await filterTicketVisits(req.user, visits)).map((visit) => serializeVisit(visit, req.user)),
   });
 });
 
@@ -1034,6 +1050,14 @@ export const registerMaintenanceVisit = asyncHandler(async (req, res) => {
   if (!visitDate) {
     throw new AppError('تاريخ الزيارة غير صالح', 400);
   }
+  const requestedVisit = plan.scheduledVisits?.find((visit) => visit.id === req.body.scheduledVisitId);
+  if (requestedVisit?.completedAt) throw new AppError('هذا الاستحقاق منفذ مسبقًا؛ لا يمكن تسجيله مرة أخرى', 409);
+  const probe = attachVisitToSchedule({ scheduledVisits: plan.scheduledVisits || [], visitDate, visitId: '__ticket_guard__', scheduledVisitId: req.body.scheduledVisitId });
+  const occurrence = probe.find((visit) => visit.visitReport === '__ticket_guard__');
+  if (occurrence) {
+    const { TaskModel } = await import('../../infrastructure/db/models/TaskModel.js');
+    if (await TaskModel.exists({ maintenanceKey: `${plan._id}:${occurrence.id}`, status: { $ne: 'CANCELLED' } })) throw new AppError('هذا الاستحقاق مرتبط بتذكرة؛ سلّم التنفيذ واعتمده من التذكرة لتحديث زيارة الصيانة', 409);
+  }
 
   const technician = await validateAssignedEmployee(
     req.body.technicianId || req.body.technician || plan.assignedEmployee?._id || plan.assignedEmployee,
@@ -1154,6 +1178,7 @@ export const registerMaintenanceVisit = asyncHandler(async (req, res) => {
 
 export const exportMaintenanceVisitPdf = asyncHandler(async (req, res) => {
   const visit = await ensureVisitAccessible(req, req.params.visitId);
+  if (visit.ticket) res.setHeader('Cache-Control', 'private, no-store');
   const stored = await ensureStoredMaintenanceVisitPdf({
     visit,
     req,

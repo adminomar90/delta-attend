@@ -42,6 +42,10 @@ const scheduledVisitSchema = new mongoose.Schema(
 
 const maintenancePlanSchema = new mongoose.Schema(
   {
+    branch: { type: String, default: '' },
+    contractReference: { type: String, default: '' },
+    deviceDetails: { type: String, default: '' },
+    checklist: { type: [String], default: [] },
     customerId: {
       type: String,
       default: '',

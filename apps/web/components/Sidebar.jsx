@@ -41,7 +41,7 @@ const menuIcons = {
 const menu = [
   { href: '/dashboard', label: 'لوحة التحكم' },
   { href: '/attendance', label: 'الحضور والانصراف' },
-  { href: '/tasks', label: 'المهام' },
+  { href: '/tasks', label: 'التذاكر والمهام' },
   {
     href: '/materials',
     label: 'إدارة المواد',

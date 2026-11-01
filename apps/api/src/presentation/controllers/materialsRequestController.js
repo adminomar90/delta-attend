@@ -81,6 +81,8 @@ export const listMaterialEmployees = asyncHandler(async (_req, res) => {
 });
 
 export const createMaterialRequest = asyncHandler(async (req, res) => {
+  const { resolveTicketLink } = await import('../../application/services/ticketLinkService.js');
+  const ticket = await resolveTicketLink(req.user, req.body.ticket);
   if (req.body.operationKey) {
     const previous = await materialsRepository.findRequestByOperationKey(req.body.operationKey);
     if (previous) { await assertRequestReadable(req, previous); if (previous.deletedAt) throw new AppError('الطلب السابق محذوف؛ أنشئ طلباً جديداً', 409); return res.json({ request: previous, alreadyApplied: true }); }
@@ -141,6 +143,7 @@ export const createMaterialRequest = asyncHandler(async (req, res) => {
   const requestNo = await sequenceService.next('MATERIAL_REQUEST', { prefix: 'MR', digits: 5 });
 
   const created = await materialsRepository.createRequest({
+    ticket,
     requestNo,
     operationKey: req.body.operationKey || '',
     warehouse: warehouse._id,

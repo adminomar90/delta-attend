@@ -197,6 +197,8 @@ export default function MaintenanceReportsPage() {
     }
   };
 
+  useEffect(() => { const requested = new URLSearchParams(window.location.search).get('report'); if (requested) openReport(requested); }, []);
+
   const submitRequest = async () => {
     setSaving(true);
     setError('');

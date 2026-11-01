@@ -4,6 +4,8 @@
 .next
 .next-pwa-check
 .pwa-check
+.ticket-check
+private-uploads/
 dist
 coverage
 npm-debug.log*

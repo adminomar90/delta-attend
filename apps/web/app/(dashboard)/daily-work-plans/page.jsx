@@ -24,6 +24,7 @@ import {
 } from '../../../lib/dailyWorkPlanWhatsapp';
 import { buildWhatsAppSendUrl } from '../../../lib/whatsapp';
 import DailyWorkPlanCalendar from '../../../components/daily-work-plans/DailyWorkPlanCalendar';
+import LinkedTickets from '../../../components/tickets/LinkedTickets';
 import DailyWorkPlanModal from '../../../components/daily-work-plans/DailyWorkPlanModal';
 import DailyWorkPlanActionModal from '../../../components/daily-work-plans/DailyWorkPlanActionModal';
 import DailyWorkPlanDetailsModal from '../../../components/daily-work-plans/DailyWorkPlanDetailsModal';
@@ -460,6 +461,7 @@ export default function DailyWorkPlansPage() {
         </div>
       </section>
 
+      {!isArchiveTab ? <LinkedTickets day={filters.planDate || calendarSelectedDate} team={canManage} /> : null}
       {!isArchiveTab && canViewCalendar ? (
         <div ref={calendarSectionRef}>
           <DailyWorkPlanCalendar
