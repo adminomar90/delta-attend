@@ -3,6 +3,11 @@ import {
   createWorkReport,
   listWorkReports,
   listCompletedWorkReports,
+  listWorkPhotoLibrary,
+  createWorkPhotoFolder,
+  deleteWorkPhotoFolder,
+  organizeWorkPhotos,
+  downloadWorkPhotos,
   listWorkReportEmployees,
   getWorkReport,
   exportWorkReportPdf,
@@ -38,6 +43,11 @@ workReportsRoutes.get(
   listWorkReports,
 );
 workReportsRoutes.get('/completed', canViewCompletedWorkReports, listCompletedWorkReports);
+workReportsRoutes.get('/photo-library', listWorkPhotoLibrary);
+workReportsRoutes.post('/photo-library/folders', createWorkPhotoFolder);
+workReportsRoutes.post('/photo-library/folders/delete', deleteWorkPhotoFolder);
+workReportsRoutes.post('/photo-library/organize', organizeWorkPhotos);
+workReportsRoutes.post('/photo-library/download', downloadWorkPhotos);
 workReportsRoutes.get(
   '/employees',
   requireAnyPermission(

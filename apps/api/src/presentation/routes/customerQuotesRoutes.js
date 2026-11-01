@@ -1,0 +1,17 @@
+import { Router } from 'express';
+import { requireAuth } from '../middlewares/authMiddleware.js';
+import { requireAnyPermission, requirePermission } from '../middlewares/authorizationMiddleware.js';
+import { Permission } from '../../shared/constants.js';
+import { quoteMetadata, listCustomerQuotes, getCustomerQuote, createCustomerQuote, updateCustomerQuote, customerQuotePdf, shareCustomerQuote, publicCustomerQuote, publicCustomerQuotePdf } from '../controllers/customerQuoteController.js';
+const router = Router();
+router.get('/public/:token', publicCustomerQuote);
+router.get('/public/:token/pdf', publicCustomerQuotePdf);
+router.use(requireAuth, requireAnyPermission(Permission.VIEW_CUSTOMER_QUOTES, Permission.MANAGE_CUSTOMER_QUOTES));
+router.get('/metadata', requirePermission(Permission.MANAGE_CUSTOMER_QUOTES), quoteMetadata);
+router.get('/', listCustomerQuotes);
+router.post('/', requirePermission(Permission.MANAGE_CUSTOMER_QUOTES), createCustomerQuote);
+router.get('/:id', getCustomerQuote);
+router.get('/:id/pdf', customerQuotePdf);
+router.patch('/:id', requirePermission(Permission.MANAGE_CUSTOMER_QUOTES), updateCustomerQuote);
+router.post('/:id/whatsapp-link', requirePermission(Permission.MANAGE_CUSTOMER_QUOTES), shareCustomerQuote);
+export default router;

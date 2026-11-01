@@ -14,6 +14,7 @@ const menuIcons = {
   '/warehouses': '🏬',
   '/project-custodies': '🧰',
   '/purchases': '🧾',
+  '/customer-quotes': '💼',
   '/financial-disbursements': '💸',
   '/maintenance-reports': '🛠️',
   '/maintenance-plans': '🗓️',
@@ -26,6 +27,7 @@ const menuIcons = {
   '/approvals': '✅',
   '/work-reports': '📝',
   '/completed-work-reports': '📚',
+  '/work-photo-library': '🖼️',
   '/approval-history': '🗂️',
   '/projects': '📁',
   '/employees': '👥',
@@ -89,6 +91,11 @@ const menu = [
       Permission.DISBURSE_FINANCIAL_FUNDS,
       Permission.VIEW_FINANCIAL_REPORTS,
     ],
+  },
+  {
+    href: '/customer-quotes',
+    label: 'عروض الأسعار',
+    anyPermissions: [Permission.VIEW_CUSTOMER_QUOTES, Permission.MANAGE_CUSTOMER_QUOTES],
   },
   {
     href: '/maintenance-reports',
@@ -206,6 +213,11 @@ const menu = [
       Permission.VIEW_TEAM_WORK_REPORTS,
       Permission.APPROVE_TASKS,
     ],
+  },
+  {
+    href: '/work-photo-library',
+    label: 'مكتبة صور الأعمال',
+    anyPermissions: [Permission.VIEW_OWN_WORK_REPORTS, Permission.VIEW_TEAM_WORK_REPORTS, Permission.APPROVE_TASKS, Permission.VIEW_COMPLETED_WORK_REPORTS],
   },
   {
     href: '/completed-work-reports',

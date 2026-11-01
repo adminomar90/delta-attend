@@ -12,6 +12,8 @@ import { Permission, hasAnyPermission } from '../lib/permissions';
 import { custodyLoginUrl } from '../lib/custodyWhatsapp.mjs';
 
 const titleByPath = {
+  '/customer-quotes': { title: 'عروض الأسعار', subtitle: 'عروض منتجات المخزن وخدمات التركيب والبرمجة للزبائن' },
+  '/work-photo-library': { title: 'مكتبة صور الأعمال', subtitle: 'صور المشاريع من تقارير العمل في مكان واحد' },
   '/dashboard': {
     title: 'لوحة الأداء',
     subtitle: 'مؤشرات فورية للمهام والنقاط والمستويات',
@@ -87,6 +89,8 @@ const titleByPath = {
 };
 
 const routePermissionRules = {
+  '/customer-quotes': [Permission.VIEW_CUSTOMER_QUOTES, Permission.MANAGE_CUSTOMER_QUOTES],
+  '/work-photo-library': [Permission.VIEW_OWN_WORK_REPORTS, Permission.VIEW_TEAM_WORK_REPORTS, Permission.APPROVE_TASKS, Permission.VIEW_COMPLETED_WORK_REPORTS],
   '/materials': [
     Permission.CREATE_MATERIAL_REQUESTS,
     Permission.REVIEW_MATERIAL_REQUESTS,

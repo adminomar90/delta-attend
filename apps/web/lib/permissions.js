@@ -2,6 +2,8 @@
 
 export const Permission = {
   MANAGE_USERS: 'MANAGE_USERS',
+  VIEW_CUSTOMER_QUOTES: 'VIEW_CUSTOMER_QUOTES',
+  MANAGE_CUSTOMER_QUOTES: 'MANAGE_CUSTOMER_QUOTES',
   MANAGE_USER_STATUS: 'MANAGE_USER_STATUS',
   RESET_USER_PASSWORDS: 'RESET_USER_PASSWORDS',
   MANAGE_PERMISSIONS: 'MANAGE_PERMISSIONS',
@@ -69,6 +71,7 @@ export const Permission = {
   VIEW_LEADERBOARD: 'VIEW_LEADERBOARD',
   SEND_REPORTS_WHATSAPP: 'SEND_REPORTS_WHATSAPP',
   VIEW_COMPLETED_WORK_REPORTS: 'VIEW_COMPLETED_WORK_REPORTS',
+  MANAGE_WORK_PHOTO_LIBRARY: 'MANAGE_WORK_PHOTO_LIBRARY',
   VIEW_APPROVAL_HISTORY: 'VIEW_APPROVAL_HISTORY',
   EXPORT_APPROVAL_HISTORY: 'EXPORT_APPROVAL_HISTORY',
   VIEW_DAILY_WORK_PLANS: 'VIEW_DAILY_WORK_PLANS',
@@ -389,6 +392,8 @@ const RolePermissions = {
 
 export const permissionLabelMap = {
   [Permission.MANAGE_USERS]: 'إدارة الموظفين',
+  [Permission.VIEW_CUSTOMER_QUOTES]: 'عرض عروض أسعار الزبائن',
+  [Permission.MANAGE_CUSTOMER_QUOTES]: 'إنشاء وتعديل وإرسال عروض أسعار الزبائن',
   [Permission.MANAGE_USER_STATUS]: 'تفعيل/تعطيل الموظفين',
   [Permission.RESET_USER_PASSWORDS]: 'إعادة تعيين كلمات المرور',
   [Permission.MANAGE_PERMISSIONS]: 'إدارة الصلاحيات',
@@ -456,6 +461,7 @@ export const permissionLabelMap = {
   [Permission.VIEW_LEADERBOARD]: 'عرض لوحة الصدارة',
   [Permission.SEND_REPORTS_WHATSAPP]: 'إرسال التقارير عبر واتساب',
   [Permission.VIEW_COMPLETED_WORK_REPORTS]: 'عرض التقارير المنجزة',
+  [Permission.MANAGE_WORK_PHOTO_LIBRARY]: 'إدارة مجلدات مكتبة الأعمال وحذف ونقل صورها',
   [Permission.VIEW_APPROVAL_HISTORY]: 'عرض سجل الاعتمادات',
   [Permission.EXPORT_APPROVAL_HISTORY]: 'تصدير سجل الاعتمادات',
   [Permission.VIEW_DAILY_WORK_PLANS]: 'عرض بلان العمل اليومي',

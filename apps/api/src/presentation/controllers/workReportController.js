@@ -26,6 +26,11 @@ import { AppError, asyncHandler } from '../../shared/errors.js';
 import fs from 'fs';
 import path from 'path';
 import { randomUUID } from 'crypto';
+import { WorkReportModel } from '../../infrastructure/db/models/WorkReportModel.js';
+import { buildWorkPhotoLibrary, applyPhotoFolders, normalizePhotoFolderName, selectLibraryPhotos } from '../../application/services/workPhotoLibrary.js';
+import { WorkPhotoFolderModel } from '../../infrastructure/db/models/WorkPhotoFolderModel.js';
+import { WorkPhotoPlacementModel } from '../../infrastructure/db/models/WorkPhotoPlacementModel.js';
+import archiver from 'archiver';
 
 const workReportRepository = new WorkReportRepository();
 const userRepository = new UserRepository();
@@ -847,6 +852,124 @@ export const listWorkReports = asyncHandler(async (req, res) => {
 
   const reports = await workReportRepository.list(filter);
   res.json({ reports });
+});
+
+const loadWorkPhotoLibrary = async (req) => {
+  if (!hasOwnWorkReportAccess(req.user)) throw new AppError('ليس لديك صلاحية عرض صور الأعمال', 403);
+  const managedUserIds = hasTeamWorkReportAccess(req.user)
+    ? await resolveManagedUserIds({ userRepository, actorId: req.user.id, actorRole: req.user.role })
+    : [req.user.id];
+  const scope = {};
+  applyManagedScopeOnFilter({ filter: scope, managedUserIds, field: 'user' });
+  const access = hasWorkReportArchiveAccess(req.user) ? { $or: [scope, { status: 'APPROVED' }] } : scope;
+  const reports = await WorkReportModel.find({ ...access, 'images.0': { $exists: true } })
+    .select('project projectName images workDate createdAt updatedAt')
+    .populate('project', 'name').sort({ createdAt: -1 }).lean();
+  const baseAlbums = buildWorkPhotoLibrary(reports);
+  const ids = baseAlbums.flatMap((album) => album.photos.map((photo) => photo.id));
+  const placements = await WorkPhotoPlacementModel.find({ photoId: { $in: ids } }).lean();
+  const keys = [...baseAlbums.map((album) => album.key), ...placements.map((item) => item.folderKey)];
+  const folders = await WorkPhotoFolderModel.find(hasPermission(req.user, Permission.MANAGE_WORK_PHOTO_LIBRARY) ? {} : {
+    $or: [{ key: { $in: keys } }, { normalizedName: { $in: baseAlbums.map((album) => normalizePhotoFolderName(album.name)) } }, { createdBy: req.user.id }],
+  }).lean();
+  return applyPhotoFolders(baseAlbums, placements, folders);
+};
+
+export const createWorkPhotoFolder = asyncHandler(async (req, res) => {
+  if (!hasPermission(req.user, Permission.MANAGE_WORK_PHOTO_LIBRARY)) throw new AppError('ليس لديك صلاحية إدارة مجلدات المكتبة', 403);
+  const name = typeof req.body.name === 'string' ? req.body.name.normalize('NFKC').trim().replace(/\s+/g, ' ') : '';
+  if (!name || name.length > 120 || /^[. ]+$/.test(name) || /[\\/<>:"|?*\x00-\x1f]/.test(name)) throw new AppError('أدخل اسم مجلد صالحًا من 1 إلى 120 حرفًا دون رموز المسارات', 400);
+  const normalizedName = normalizePhotoFolderName(name);
+  const albums = await loadWorkPhotoLibrary(req);
+  if (albums.some((album) => normalizePhotoFolderName(album.name) === normalizedName)) throw new AppError('يوجد مجلد بهذا الاسم بالفعل', 409);
+  const previous = await WorkPhotoFolderModel.findOne({ normalizedName, deleted: true });
+  let folder;
+  try {
+    folder = previous ? await WorkPhotoFolderModel.findOneAndUpdate({ _id: previous._id, deleted: true }, { $set: { deleted: false, name } }, { new: true })
+      : await WorkPhotoFolderModel.create({ key: `name:${normalizedName}`, name, normalizedName, createdBy: req.user.id });
+  } catch (error) { if (error.code === 11000) throw new AppError('يوجد مجلد بهذا الاسم بالفعل', 409); throw error; }
+  if (!folder) throw new AppError('تغير المجلد. حدّث المكتبة وحاول مجددًا', 409);
+  await auditService.log({ actorId: req.user.id, action: 'WORK_PHOTO_FOLDER_CREATED', entityType: 'WORK_PHOTO_LIBRARY', entityId: folder.key, after: { name }, req });
+  res.status(201).json({ folder: { key: folder.key, name: folder.name } });
+});
+
+export const deleteWorkPhotoFolder = asyncHandler(async (req, res) => {
+  if (!hasPermission(req.user, Permission.MANAGE_WORK_PHOTO_LIBRARY)) throw new AppError('ليس لديك صلاحية إدارة مجلدات المكتبة', 403);
+  const albums = await loadWorkPhotoLibrary(req);
+  const album = albums.find((item) => item.key === req.body.folder);
+  if (!album) throw new AppError('المجلد غير موجود أو غير متاح', 404);
+  // Tombstones prevent automatic report imports from recreating a deleted folder on refresh.
+  if (album.photos.length) await WorkPhotoPlacementModel.bulkWrite(album.photos.map((photo) => ({ updateOne: {
+    filter: { photoId: photo.id }, update: { $set: { deleted: true, updatedBy: req.user.id } }, upsert: true,
+  } })));
+  await WorkPhotoFolderModel.findOneAndUpdate({ key: album.key }, { $set: { deleted: true }, $setOnInsert: { name: album.name, normalizedName: normalizePhotoFolderName(album.name), custom: !album.key.startsWith('project:'), createdBy: req.user.id } }, { upsert: true });
+  await auditService.log({ actorId: req.user.id, action: 'WORK_PHOTO_FOLDER_DELETED', entityType: 'WORK_PHOTO_LIBRARY', entityId: album.key, after: { name: album.name, count: album.photos.length }, req });
+  res.json({ count: album.photos.length });
+});
+
+export const listWorkPhotoLibrary = asyncHandler(async (req, res) => {
+  const albums = await loadWorkPhotoLibrary(req);
+  const folders = albums.map(({ photos, ...folder }) => folder);
+  const selected = req.query.folder ? albums.find((album) => album.key === req.query.folder) : null;
+  if (req.query.folder && !selected) throw new AppError('مجلد المشروع غير موجود أو غير متاح', 404);
+  const page = Math.max(1, Number.parseInt(req.query.page, 10) || 1);
+  const pageSize = 60;
+  res.set('Cache-Control', 'private, no-store');
+  res.json({ folders, album: selected ? { ...folders.find((folder) => folder.key === selected.key), photos: selected.photos.slice((page - 1) * pageSize, page * pageSize), page, pages: Math.ceil(selected.photoCount / pageSize) } : null });
+});
+
+const resolvePhotoSelection = async (req) => {
+  const albums = await loadWorkPhotoLibrary(req);
+  const album = albums.find((item) => item.key === req.body.folder);
+  if (!album) throw new AppError('مجلد المشروع غير موجود أو غير متاح', 404);
+  let photos;
+  try { photos = selectLibraryPhotos(album, req.body); }
+  catch { throw new AppError('تغيرت الصور المحددة. حدّث المكتبة وحدد الصور مجددًا', 409); }
+  if (!photos.length) throw new AppError('حدد صورة واحدة على الأقل', 400);
+  return { albums, album, photos };
+};
+
+export const organizeWorkPhotos = asyncHandler(async (req, res) => {
+  if (!hasPermission(req.user, Permission.MANAGE_WORK_PHOTO_LIBRARY)) throw new AppError('ليس لديك صلاحية حذف ونقل صور المكتبة', 403);
+  const { albums, album, photos } = await resolvePhotoSelection(req);
+  const action = req.body.action;
+  if (!['DELETE', 'MOVE'].includes(action)) throw new AppError('إجراء غير صالح', 400);
+  const target = action === 'MOVE' ? albums.find((item) => item.key === req.body.targetFolder) : null;
+  if (action === 'MOVE' && (!target || target.key === album.key)) throw new AppError('اختر مجلد مشروع آخر متاح', 400);
+  await WorkPhotoPlacementModel.bulkWrite(photos.map((photo) => ({ updateOne: {
+    filter: { photoId: photo.id },
+    update: { $set: { updatedBy: req.user.id, ...(target ? { folderKey: target.key, folderName: target.name, deleted: false } : { deleted: true }) } },
+    upsert: true,
+  } })));
+  await auditService.log({ actorId: req.user.id, action: `WORK_PHOTOS_${action === 'MOVE' ? 'MOVED' : 'DELETED'}`, entityType: 'WORK_PHOTO_LIBRARY', entityId: album.key,
+    after: { count: photos.length, photoIds: photos.map((photo) => photo.id), targetFolder: target?.key || null }, req });
+  res.json({ count: photos.length });
+});
+
+const safePhotoFilename = (value) => String(value || 'صور المشروع').normalize('NFKC').replace(/[\\/<>:"|?*\x00-\x1f]/g, '_').replace(/^[. ]+|[. ]+$/g, '').slice(0, 140) || 'photos';
+
+export const downloadWorkPhotos = asyncHandler(async (req, res) => {
+  const { album, photos } = await resolvePhotoSelection(req);
+  const root = await fs.promises.realpath(uploadRootDir);
+  const files = [];
+  for (const photo of photos) {
+    const candidate = path.resolve(uploadRootDir, photo.publicUrl.slice('/uploads/'.length));
+    let real;
+    try { real = await fs.promises.realpath(candidate); } catch { throw new AppError('بعض الصور غير موجودة على الخادم. راجع ملفات المشروع قبل التحميل', 409); }
+    if (!real.startsWith(root + path.sep) || !(await fs.promises.stat(real)).isFile()) throw new AppError('مسار صورة غير صالح', 400);
+    const extension = path.extname(real);
+    const name = safePhotoFilename(photo.originalName || path.basename(real));
+    files.push({ path: real, name: `${String(files.length + 1).padStart(4, '0')}-${name}${path.extname(name) ? '' : extension}` });
+  }
+  const folder = safePhotoFilename(album.name);
+  res.set({ 'Content-Type': 'application/zip', 'Cache-Control': 'private, no-store', 'Content-Disposition': `attachment; filename="project-photos.zip"; filename*=UTF-8''${encodeURIComponent(folder + '.zip')}` });
+  const archive = archiver('zip', { store: true });
+  archive.on('error', (error) => res.destroy(error));
+  archive.on('warning', (error) => res.destroy(error));
+  res.on('close', () => { if (!res.writableFinished) archive.abort(); });
+  archive.pipe(res);
+  for (const file of files) archive.file(file.path, { name: `${folder}/${file.name}` });
+  await archive.finalize();
 });
 
 export const listCompletedWorkReports = asyncHandler(async (_req, res) => {
