@@ -86,6 +86,7 @@ const menu = [
     label: 'الصرف المالي',
     anyPermissions: [
       Permission.CREATE_FINANCIAL_DISBURSEMENTS,
+      Permission.VIEW_FINANCIAL_ANALYSIS,
       Permission.REVIEW_FINANCIAL_DISBURSEMENTS,
       Permission.VIEW_ALL_FINANCIAL_DISBURSEMENTS,
       Permission.DISBURSE_FINANCIAL_FUNDS,

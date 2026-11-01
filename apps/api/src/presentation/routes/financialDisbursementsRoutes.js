@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { requireAuth } from '../middlewares/authMiddleware.js';
 import {
   requireAnyPermission,
+  requirePermission,
   canCreateFinancialDisbursements,
   canReviewFinancialDisbursements,
   canDisburseFinancialFunds,
@@ -15,6 +16,7 @@ import {
   deleteFinancialDisbursement,
   deliverFinancialDisbursement,
   financialDisbursementReports,
+  financialDisbursementAnalysis,
   financialDisbursementSummary,
   financialDisbursementWhatsappLink,
   getFinancialDisbursement,
@@ -37,6 +39,7 @@ const canAccessFinancialDisbursementsModule = requireAnyPermission(
   Permission.VIEW_ALL_FINANCIAL_DISBURSEMENTS,
   Permission.DISBURSE_FINANCIAL_FUNDS,
   Permission.VIEW_FINANCIAL_REPORTS,
+  Permission.VIEW_FINANCIAL_ANALYSIS,
 );
 
 const canMutateFinancialDisbursements = requireAnyPermission(
@@ -46,6 +49,7 @@ const canMutateFinancialDisbursements = requireAnyPermission(
 );
 
 financialDisbursementsRoutes.use(requireAuth, canAccessFinancialDisbursementsModule);
+financialDisbursementsRoutes.get('/analysis', requirePermission(Permission.VIEW_FINANCIAL_ANALYSIS), financialDisbursementAnalysis);
 
 financialDisbursementsRoutes.get('/summary', financialDisbursementSummary);
 financialDisbursementsRoutes.get('/reports', financialDisbursementReports);

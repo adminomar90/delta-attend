@@ -74,6 +74,7 @@ const permissionCategoryDefinitions = [
     icon: '💰',
     match: (permission) => [
       Permission.VIEW_FINANCIAL_REPORTS,
+      Permission.VIEW_FINANCIAL_ANALYSIS,
       Permission.VIEW_ALL_FINANCIAL_DISBURSEMENTS,
       Permission.CREATE_FINANCIAL_DISBURSEMENTS,
       Permission.REVIEW_FINANCIAL_DISBURSEMENTS,

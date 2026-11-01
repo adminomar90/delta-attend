@@ -1,4 +1,6 @@
 import path from 'path';
+import { buildFinancialAnalysis, parseFinancialAnalysisFilters } from '../../application/services/financialAnalysisService.js';
+import { FinancialDisbursementModel } from '../../infrastructure/db/models/FinancialDisbursementModel.js';
 import mongoose from 'mongoose';
 import { sequenceService } from '../../application/services/sequenceService.js';
 import { auditService } from '../../application/services/auditService.js';
@@ -728,6 +730,15 @@ export const listFinancialDisbursements = asyncHandler(async (req, res) => {
   res.json({
     requests: requests.map((request) => serializeRequest(request, req.user)),
   });
+});
+
+export const financialDisbursementAnalysis = asyncHandler(async (req, res) => {
+  const filters = parseFinancialAnalysisFilters(req.query);
+  const records = await FinancialDisbursementModel.find(buildAccessibleFilter(req))
+    .select('requestNo transactionNo transactionDate createdAt employee project amount approvedAmount currency requestType status description notes archived attachments.url attachments.originalName')
+    .populate('employee', 'fullName').populate('project', 'name').lean();
+  res.setHeader('Cache-Control', 'no-store');
+  res.json({ ...buildFinancialAnalysis(records, filters), scope: [Roles.GENERAL_MANAGER, Roles.FINANCIAL_MANAGER].includes(req.user.role) || canViewAllFinancialDisbursements(req.user) ? 'all' : 'assigned' });
 });
 
 export const exportFinancialDisbursementsExcel = asyncHandler(async (req, res) => {

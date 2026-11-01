@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
+import Link from 'next/link';
 import { api, assetUrl } from '../../../lib/api';
 import { authStorage } from '../../../lib/auth';
 import FinancialDisbursementCalendar from '../../../components/financial-disbursements/FinancialDisbursementCalendar';
@@ -1503,6 +1504,7 @@ export default function FinancialDisbursementsPage() {
             </p>
           </div>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            {hasPermission(currentUser, Permission.VIEW_FINANCIAL_ANALYSIS) ? <Link className="btn btn-primary" href="/financial-disbursements/analysis">التحليل المالي</Link> : null}
             {canCreate ? (
               <button className="btn btn-primary" type="button" onClick={openCreateForm}>
                 طلب صرف مالي
