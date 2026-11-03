@@ -34,10 +34,19 @@ const findQuote = async (req, { token = false } = {}) => {
 };
 const loadStock = async (warehouseId) => {
   const warehouses = await WarehouseModel.find({ active: true, type: { $ne: 'DAMAGED' }, ...(warehouseId ? { _id: oid(warehouseId) } : {}) }).select('_id name code').lean();
-  const balances = await StockBalanceModel.find({ warehouse: { $in: warehouses.map((w) => w._id) }, qtyOnHand: { $gt: 0 } })
-    .select('warehouse material qtyOnHand qtyReserved').populate('material', 'name code unit brand model description imageUrl active productStatus').lean();
-  const materials = balances.filter((b) => b.material && b.material.active !== false && !['ARCHIVED', 'DAMAGED'].includes(b.material.productStatus) && b.qtyOnHand - Number(b.qtyReserved || 0) > 0)
-    .map((b) => ({ ...b.material, imageUrl: quoteImageUrl(b.material.imageUrl), warehouseId: String(b.warehouse), available: Math.round((b.qtyOnHand - Number(b.qtyReserved || 0)) * 1000) / 1000 }));
+  const [catalog, balances] = await Promise.all([
+    MaterialModel.find({ active: { $ne: false }, productStatus: { $nin: ['ARCHIVED', 'DAMAGED'] } })
+      .select('name code unit brand model description imageUrl active productStatus').sort({ name: 1 }).lean(),
+    StockBalanceModel.find({ warehouse: { $in: warehouses.map((w) => w._id) } })
+      .select('warehouse material qtyOnHand qtyReserved').lean(),
+  ]);
+  const availability = new Map();
+  for (const balance of balances) {
+    const id = String(balance.material);
+    if (!availability.has(id)) availability.set(id, {});
+    availability.get(id)[String(balance.warehouse)] = Math.max(0, Math.round((balance.qtyOnHand - Number(balance.qtyReserved || 0)) * 1000) / 1000);
+  }
+  const materials = catalog.map((material) => ({ ...material, imageUrl: quoteImageUrl(material.imageUrl), availableByWarehouse: availability.get(String(material._id)) || {} }));
   return { warehouses, materials };
 };
 export const quoteMetadata = asyncHandler(async (req, res) => {
@@ -67,7 +76,7 @@ const payload = async (req) => {
   const items = body.items.map((line) => {
     const id = oid(line.materialId);
     const material = materials.find((m) => String(m._id) === id);
-    if (!material) throw new AppError('إحدى المواد غير متوفرة في المخزن المحدد. حدّث قائمة المواد', 400);
+    if (!material) throw new AppError('إحدى المواد غير موجودة أو غير فعّالة. حدّث قائمة المنتجات', 400);
     if (seen.has(id)) throw new AppError('المادة مكررة. عدّل الكمية في بندها', 400);
     seen.add(id);
     const quantity = quoteNumber(line.quantity, { min: 0.001, max: 100000 });

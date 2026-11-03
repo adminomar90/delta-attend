@@ -5,7 +5,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
-test('customer quotations validate stock and customer modes, preserve stock and share safe public PDF links', { skip: process.env.RUN_CUSTOMER_QUOTE_DB_TESTS !== '1', timeout: 120000 }, async () => {
+test('customer quotations include out-of-stock catalog products, preserve stock and share safe public PDF links', { skip: process.env.RUN_CUSTOMER_QUOTE_DB_TESTS !== '1', timeout: 120000 }, async () => {
   const database = `delta_customer_quote_test_${randomUUID().replaceAll('-', '')}`;
   process.env.MONGO_URI = `mongodb://127.0.0.1:27017/${database}`; process.env.JWT_SECRET = randomUUID(); process.env.VAPID_PUBLIC_KEY = ''; process.env.VAPID_PRIVATE_KEY = ''; process.env.SMTP_HOST = '';
   const uploads = await fs.mkdtemp(path.join(os.tmpdir(), 'delta-quote-uploads-')); process.env.UPLOADS_DIR = uploads;
@@ -30,8 +30,18 @@ test('customer quotations validate stock and customer modes, preserve stock and 
     const damaged = await WarehouseModel.create({ name: 'التالف', code: 'CQ-DAMAGED', type: 'DAMAGED' });
     const material = await MaterialModel.create({ name: 'كاميرا مراقبة', code: 'CQ-CAMERA', imageUrl: '/uploads/camera.png', brand: 'Dahua', model: 'IPC-HFW', estimatedUnitCost: 1200 });
     const unavailable = await MaterialModel.create({ name: 'بلا رصيد', code: 'CQ-NO-STOCK' });
+    const noBalance = await MaterialModel.create({ name: 'New product', code: 'CQ-NEW', productStatus: 'OUT_OF_STOCK' });
+    const zeroStock = await MaterialModel.create({ name: 'Zero stock', code: 'CQ-ZERO' });
+    const reserved = await MaterialModel.create({ name: 'Fully reserved', code: 'CQ-RESERVED' });
+    const excluded = await MaterialModel.create([
+      { name: 'Inactive', code: 'CQ-INACTIVE', active: false },
+      { name: 'Archived', code: 'CQ-ARCHIVED', productStatus: 'ARCHIVED' },
+      { name: 'Damaged', code: 'CQ-DAMAGED-PRODUCT', productStatus: 'DAMAGED' },
+    ]);
     const balance = await StockBalanceModel.create({ material: material._id, warehouse: warehouse._id, qtyOnHand: 10, qtyReserved: 2, avgCost: 1200 });
     await StockBalanceModel.create({ material: unavailable._id, warehouse: damaged._id, qtyOnHand: 3 });
+    await StockBalanceModel.create({ material: zeroStock._id, warehouse: warehouse._id, qtyOnHand: 0 });
+    await StockBalanceModel.create({ material: reserved._id, warehouse: warehouse._id, qtyOnHand: 5, qtyReserved: 5 });
     const app = express(); app.use(express.json()); app.use('/uploads', express.static(uploads)); app.use('/api', routes); app.use(errorHandler);
     server = app.listen(0, '127.0.0.1'); await new Promise((r) => server.once('listening', r));
     const origin = `http://127.0.0.1:${server.address().port}`;
@@ -39,14 +49,35 @@ test('customer quotations validate stock and customer modes, preserve stock and 
     const call = (url, method = 'GET', body, u = manager) => fetch(origin + '/api/customer-quotes' + url, { method, headers: { ...(u ? { Authorization: `Bearer ${token(u)}` } : {}), 'Content-Type': 'application/json' }, ...(body ? { body: JSON.stringify(body) } : {}) });
     assert.equal((await call('', 'GET', null, null)).status, 401);
     assert.equal((await call('', 'GET', null, staff)).status, 403);
-    const meta = await (await call('/metadata')).json(); assert.equal(meta.materials.length, 1); assert.equal(meta.materials[0].available, 8); assert.equal(meta.materials[0].estimatedUnitCost, undefined); assert.equal(meta.warehouses.length, 1); assert.equal(meta.customers[0].name, customer.name);
+    const meta = await (await call('/metadata')).json();
+    assert.equal(meta.materials.length, 5);
+    const catalogItem = meta.materials.find((item) => item._id === String(material._id));
+    assert.equal(catalogItem.availableByWarehouse[String(warehouse._id)], 8);
+    for (const product of [unavailable, noBalance, zeroStock, reserved]) {
+      const item = meta.materials.find((item) => item._id === String(product._id));
+      assert.ok(item);
+      assert.equal(item.availableByWarehouse[String(warehouse._id)] ?? 0, 0);
+    }
+    assert.ok(meta.materials.every((item) => item.estimatedUnitCost === undefined));
+    assert.equal(meta.warehouses.length, 1); assert.equal(meta.customers[0].name, customer.name);
     const form = { customerMode: 'EXISTING', customerId: String(customer._id), warehouseId: String(warehouse._id), currency: 'IQD', validUntil: '2030-12-31', items: [{ materialId: String(material._id), quantity: 2, unitPrice: 15000 }], installationFee: 10000, programmingFee: 5000, notes: 'كفالة سنة', total: 1 };
     let response = await call('', 'POST', form); assert.equal(response.status, 201, response.status === 201 ? '' : await response.text());
     let quote = (await response.json()).quote;
     assert.equal(quote.items[0].imageUrl, '/uploads/camera.png'); assert.equal(quote.items[0].brand, 'Dahua');
     assert.equal(quote.total, 45000); assert.equal(quote.customerName, customer.name); assert.match(quote.quoteNo, /^CQ-\d{4}-\d{5}$/);
     assert.equal((await StockBalanceModel.findById(balance._id)).qtyOnHand, 10); assert.equal((await StockBalanceModel.findById(balance._id)).qtyReserved, 2);
-    assert.equal((await call('', 'POST', { ...form, items: [{ materialId: String(unavailable._id), quantity: 1, unitPrice: 1 }] })).status, 400);
+    for (const product of [unavailable, noBalance, zeroStock, reserved]) {
+      const response = await call('', 'POST', { ...form, items: [{ materialId: String(product._id), quantity: 2, unitPrice: 100 }] });
+      assert.equal(response.status, 201);
+      const saved = (await response.json()).quote;
+      assert.equal(saved.items[0].material, String(product._id));
+      assert.equal((await call(`/${saved._id}`, 'PATCH', { ...form, revision: 0, items: [{ materialId: String(product._id), quantity: 3, unitPrice: 100 }] })).status, 200);
+    }
+    assert.equal(await StockBalanceModel.countDocuments({ material: noBalance._id }), 0);
+    const reservedBalance = await StockBalanceModel.findOne({ material: reserved._id, warehouse: warehouse._id });
+    assert.equal(reservedBalance.qtyOnHand, 5); assert.equal(reservedBalance.qtyReserved, 5);
+    for (const product of excluded) assert.equal((await call('', 'POST', { ...form, items: [{ materialId: String(product._id), quantity: 1, unitPrice: 1 }] })).status, 400);
+    assert.equal((await call('', 'POST', { ...form, items: [{ materialId: String(new mongoose.Types.ObjectId()), quantity: 1, unitPrice: 1 }] })).status, 400);
     assert.equal((await call('', 'POST', { ...form, warehouseId: String(damaged._id) })).status, 400);
     assert.equal((await call('', 'POST', { ...form, items: [form.items[0], form.items[0]] })).status, 400);
     assert.equal((await call('', 'POST', { ...form, items: [{ ...form.items[0], unitPrice: -1 }] })).status, 400);
