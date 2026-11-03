@@ -4,6 +4,7 @@ import './quotes.css';
 import { useState } from 'react';
 import { assetUrl } from '../../lib/api';
 import { companyContact } from '../../../../shared/companyContact.mjs';
+import { quoteQr, quoteQrPath } from '../../../../shared/customerQuoteQr.mjs';
 export const quoteMoney = (value) => Number(value || 0).toLocaleString('en-US', { maximumFractionDigits: 2 });
 export const quoteDate = (value) => value ? new Date(value).toLocaleDateString('en-GB', { timeZone: 'Asia/Baghdad' }) : '-';
 export const unitLabel = (value) => ({ PIECE: 'قطعة', METER: 'متر', BOX: 'علبة', ROLL: 'لفة', SET: 'طقم', KG: 'كغم', UNIT: 'وحدة' }[value] || value);

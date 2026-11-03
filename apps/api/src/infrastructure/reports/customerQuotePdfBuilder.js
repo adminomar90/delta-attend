@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { createDoc } from './pdfTemplate.js';
 import { loadQuoteImage } from '../../application/services/customerQuoteImages.js';
 import { companyContact } from '../../../../../shared/companyContact.mjs';
+import { quoteQr, quoteQrPath } from '../../../../../shared/customerQuoteQr.mjs';
 
 const C = { navy: '#13457f', dark: '#1d3264', lime: '#d7e024', soft: '#f7f9fc', border: '#c4d2e2', text: '#1e272e' };
 const money = (v) => Number(v || 0).toLocaleString('en-US', { maximumFractionDigits: 2 });
@@ -21,7 +22,7 @@ export const buildCustomerQuotePdf = async (quote, { uploadRootDir = path.resolv
   const { doc, F, FB, PW } = createDoc({ title: `${quote.quoteNo} - عرض أسعار`, englishDigits: true });
   const ML = 24, CW = PW - ML * 2;
   const artwork = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../../../apps/web/public/brand');
-  const headerImage = path.join(artwork, 'quote-template-header.png'), watermark = path.join(artwork, 'quote-template-watermark.png'), qrPanel = path.join(artwork, 'delta-plus-qr.png');
+  const headerImage = path.join(artwork, 'quote-template-header.png'), watermark = path.join(artwork, 'quote-template-watermark.png'), qrPanel = path.join(artwork, 'quote-template-qr-panel.png');
   const brandHeight = PW * 478 / 3000, continuationY = brandHeight + 42;
   const widths = [.17, .16, .09, .09, .31, .13, .05].map((w) => w * CW);
   const headers = ['الإجمالي', 'سعر البيع', 'الكمية', 'الوحدة', 'المنتج', 'الصورة', '#'];
@@ -227,8 +228,12 @@ export const buildCustomerQuotePdf = async (quote, { uploadRootDir = path.resolv
       doc.switchToPage(i); const bottomMargin = doc.page.margins.bottom; doc.page.margins.bottom = 0; doc.save();
       const footerHeight = PW * 422 / 3000, fy = doc.page.height - footerHeight;
       doc.rect(0, fy, PW, footerHeight).fill(doc.linearGradient(0, fy, PW, fy).stop(0, '#13457f').stop(.7733, '#1d2655').stop(1, '#1d1c4e'));
-      const qrSize = footerHeight - 12;
-      doc.image(qrPanel, PW - ML - qrSize, fy + 6, { width: qrSize, height: qrSize });
+      const qrX = PW * 2320 / 3000, qrScale = PW / 3000;
+      doc.image(qrPanel, qrX, fy, { width: PW * 680 / 3000 });
+      doc.save().translate(qrX, fy).scale(qrScale);
+      doc.rect(quoteQr.cover.x, quoteQr.cover.y, quoteQr.cover.width, quoteQr.cover.height).fill(quoteQr.background);
+      doc.path(quoteQrPath).fill(quoteQr.color);
+      doc.restore();
       const leftWidth = PW * .36, socialX = PW * .44, socialWidth = PW * .30;
       doc.moveTo(PW * .42, fy + 10).lineTo(PW * .42, doc.page.height - 14).strokeColor('#9bb1cb').lineWidth(.6).stroke();
       const contact = (value, x, y, width, link, size = p.footerFont) => doc.font(F).fontSize(size).fillColor('#fff').text(value, x, y, { width, align: 'left', link, lineBreak: false, features: [] });
