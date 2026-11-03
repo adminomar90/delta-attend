@@ -8,6 +8,15 @@ import { quoteQr, quoteQrPath } from '../../../../shared/customerQuoteQr.mjs';
 export const quoteMoney = (value) => Number(value || 0).toLocaleString('en-US', { maximumFractionDigits: 2 });
 export const quoteDate = (value) => value ? new Date(value).toLocaleDateString('en-GB', { timeZone: 'Asia/Baghdad' }) : '-';
 export const unitLabel = (value) => ({ PIECE: 'قطعة', METER: 'متر', BOX: 'علبة', ROLL: 'لفة', SET: 'طقم', KG: 'كغم', UNIT: 'وحدة' }[value] || value);
+function QuoteQrPanel() {
+  return <span className="cq-template-qr">
+    <img src="/brand/quote-template-qr-panel.png" alt="" />
+    <svg viewBox={`0 0 ${quoteQr.width} ${quoteQr.height}`} role="img" aria-label="رمز QR للتواصل" shapeRendering="crispEdges">
+      <rect {...quoteQr.cover} fill={quoteQr.background} />
+      <path d={quoteQrPath} fill={quoteQr.color} />
+    </svg>
+  </span>;
+}
 export function QuoteProductImage({ url, name }) {
   const [failed, setFailed] = useState('');
   return <div className="cq-product-image">{url && failed !== url ? <img src={assetUrl(url)} alt={`صورة ${name}`} loading="lazy" decoding="async" onError={() => setFailed(url)} /> : <span>لا توجد صورة</span>}</div>;
@@ -24,6 +33,6 @@ export default function QuoteDocument({ quote }) {
       {quote.notes ? <section className="cq-document-notes"><h3>ملاحظات العرض</h3><p>{quote.notes}</p></section> : null}
       {quote.terms ? <section className="cq-document-notes"><h3>الشروط والأحكام</h3><p>{quote.terms}</p></section> : null}
     </div>
-    <footer className="cq-template-footer cq-company-contact"><div className="cq-template-contact"><a href={`mailto:${companyContact.email}`}>{companyContact.email}</a><a href={companyContact.websiteUrl} target="_blank" rel="noreferrer">{companyContact.website}</a><div className="cq-contact-phones">{companyContact.phones.map((phone) => <a href={`tel:${phone}`} key={phone}>{phone}</a>)}</div></div><div className="cq-template-social"><strong>التواصل الاجتماعي</strong><a href={companyContact.facebookUrl} target="_blank" rel="noreferrer">Facebook: {companyContact.socialHandle}</a><a href={companyContact.instagramUrl} target="_blank" rel="noreferrer">Instagram: {companyContact.socialHandle}</a></div><img className="cq-template-qr" src="/brand/delta-plus-qr.png" alt="رمز QR للتواصل" /></footer>
+    <footer className="cq-template-footer cq-company-contact"><div className="cq-template-contact"><a href={`mailto:${companyContact.email}`}>{companyContact.email}</a><a href={companyContact.websiteUrl} target="_blank" rel="noreferrer">{companyContact.website}</a><div className="cq-contact-phones">{companyContact.phones.map((phone) => <a href={`tel:${phone}`} key={phone}>{phone}</a>)}</div></div><div className="cq-template-social"><strong>التواصل الاجتماعي</strong><a href={companyContact.facebookUrl} target="_blank" rel="noreferrer">Facebook: {companyContact.socialHandle}</a><a href={companyContact.instagramUrl} target="_blank" rel="noreferrer">Instagram: {companyContact.socialHandle}</a></div><QuoteQrPanel /></footer>
   </article>;
 }
