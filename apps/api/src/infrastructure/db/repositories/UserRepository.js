@@ -80,6 +80,19 @@ export class UserRepository {
       .lean();
   }
 
+  async listBadgeEmployees() {
+    return UserModel.find(buildManagementFilter())
+      .select('fullName employeeCode jobTitle department')
+      .sort({ fullName: 1, _id: 1 })
+      .lean();
+  }
+
+  async findBadgeEmployee(id, { includeInactive = false } = {}) {
+    return UserModel.findOne({ ...buildManagementFilter({ includeInactive }), _id: id })
+      .select('fullName employeeCode jobTitle department')
+      .lean();
+  }
+
   async create(payload) {
     return UserModel.create(payload);
   }

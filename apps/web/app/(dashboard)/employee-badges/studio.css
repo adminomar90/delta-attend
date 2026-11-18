@@ -1,0 +1,86 @@
+.badge-studio {
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
+  align-items: start;
+  gap: 18px;
+}
+
+.badge-editor, .badge-preview { min-width: 0; padding: clamp(14px, 2vw, 24px); }
+.badge-editor fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
+.badge-editor fieldset + fieldset { border-top: 1px solid var(--border); margin-top: 22px; }
+.badge-editor legend { font-weight: 800; padding: 0 0 8px 10px; }
+.badge-templates, .badge-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.badge-template.btn { display: flex; justify-content: flex-start; gap: 10px; text-align: start; white-space: normal; font-size: .9rem; }
+.badge-template small { display: block; color: var(--text-soft); overflow-wrap: anywhere; }
+.badge-template-thumb {
+  width: 44px;
+  aspect-ratio: 638 / 1011;
+  height: auto;
+  border-radius: 4px;
+  flex: 0 0 auto;
+}
+.badge-template[aria-pressed="true"], .badge-face-switch [aria-pressed="true"] { border-color: var(--accent); color: var(--accent); background: #1e345b; }
+.badge-field { display: grid; min-width: 0; gap: 5px; margin-bottom: 10px; font-size: .9rem; }
+.badge-field .input { min-width: 0; width: 100%; }
+.badge-field input[type="range"] { width: 100%; accent-color: var(--accent); }
+.badge-record { display: grid; gap: 7px; margin: 0 0 14px; border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; }
+.badge-record div { display: grid; grid-template-columns: minmax(90px, .35fr) minmax(0, 1fr); gap: 10px; }
+.badge-record dt { color: var(--text-soft); }
+.badge-record dd { margin: 0; overflow-wrap: anywhere; text-align: right; }
+.badge-preview-heading { display: flex; justify-content: space-between; align-items: baseline; flex-wrap: wrap; gap: 6px; }
+.badge-preview-heading h2 { margin: 0; font-size: 1.1rem; }
+.badge-preview-heading span { font-size: .82rem; color: var(--text-soft); }
+.badge-face-switch { display: flex; gap: 8px; margin: 12px 0; }
+.badge-face-switch .btn { flex: 1; }
+.badge-preview-board {
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 15px;
+  background: radial-gradient(ellipse at top, #213b65, #0b1427);
+}
+.badge-preview-board canvas {
+  width: min(100%, 272px);
+  aspect-ratio: 638 / 1011;
+  height: auto;
+  border-radius: 4%;
+  box-shadow: 0 12px 28px #060d1c99;
+}
+.badge-draggable { cursor: grab; touch-action: none; }
+.badge-draggable:active { cursor: grabbing; }
+.badge-error { margin: 8px 0; color: var(--danger); }
+.badge-success { margin: 8px 0; color: var(--accent); }
+.badge-help { color: var(--text-soft); font-size: .85rem; }
+.badge-export { display: grid; gap: 10px; margin-top: 14px; }
+.badge-export .badge-field { margin: 0; }
+
+.badge-navigation { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 12px; }
+.badge-navigation [aria-pressed="true"] { border-color: var(--accent); color: var(--accent); }
+.badge-history { min-width: 0; padding: clamp(14px, 2vw, 24px); }
+.badge-history h2 { margin-top: 0; font-size: 1.12rem; }
+.badge-history-table { overflow-x: auto; }
+.badge-history table { width: 100%; border-collapse: collapse; }
+.badge-history th, .badge-history td { padding: 10px; text-align: start; border-bottom: 1px solid var(--border); }
+.badge-history small { display: block; color: var(--text-soft); }
+.badge-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.badge-actions .btn { white-space: nowrap; }
+.badge-page-controls { margin-top: 12px; }
+.badge-record-status { white-space: nowrap; color: var(--text-soft); }
+.badge-record-status.active { color: var(--accent); }
+.badge-record-status.stopped, .badge-record-status.employeeInactive { color: var(--danger); }
+
+@media (min-width: 1101px) {
+  .main-area:has(> .badge-studio) .header-left { max-width: 37%; }
+  .main-area:has(> .badge-studio) .user-chip-info > :is(span, small) { max-width: 100%; }
+}
+@media (max-width: 800px) {
+  .badge-studio { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 400px) {
+  .badge-template.btn { gap: 5px; padding-inline: 7px; }
+  .badge-fields .btn { padding-inline: 7px; }
+}
+@media print {
+  .badge-studio { display: none !important; }
+}

@@ -14,6 +14,7 @@ import { custodyLoginUrl } from '../lib/custodyWhatsapp.mjs';
 const titleByPath = {
   '/financial-disbursements/analysis': { title: 'التحليل المالي', subtitle: 'تحليل الفواتير والصرفيات ومؤشرات الإنفاق' },
   '/customer-quotes': { title: 'عروض الأسعار', subtitle: 'عروض منتجات المخزن وخدمات التركيب والبرمجة للزبائن' },
+  '/employee-badges': { title: 'هويات الموظفين', subtitle: 'إصدار وطباعة بطاقات التعريف للموظفين المسجّلين' },
   '/work-photo-library': { title: 'مكتبة صور الأعمال', subtitle: 'صور المشاريع من تقارير العمل في مكان واحد' },
   '/dashboard': {
     title: 'لوحة الأداء',
@@ -92,6 +93,7 @@ const titleByPath = {
 const routePermissionRules = {
   '/financial-disbursements/analysis': [Permission.VIEW_FINANCIAL_ANALYSIS],
   '/customer-quotes': [Permission.VIEW_CUSTOMER_QUOTES, Permission.MANAGE_CUSTOMER_QUOTES],
+  '/employee-badges': [Permission.USE_EMPLOYEE_BADGES],
   '/work-photo-library': [Permission.VIEW_OWN_WORK_REPORTS, Permission.VIEW_TEAM_WORK_REPORTS, Permission.APPROVE_TASKS, Permission.VIEW_COMPLETED_WORK_REPORTS],
   '/materials': [
     Permission.CREATE_MATERIAL_REQUESTS,

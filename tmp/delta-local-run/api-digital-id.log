@@ -1,0 +1,10 @@
+✓ Connected to MongoDB
+✓ API running on port 4000
+[0mGET /api/notifications/vapid-public-key [36m304[0m 5.011 ms - -[0m
+[0mPOST /api/notifications/push-subscribe [32m200[0m 18.038 ms - 72[0m
+[0mGET /api/employee-badges/69ef66c4bae6a9f6e7c63325 [32m200[0m 67.917 ms - 252191[0m
+[0mGET /api/employee-badges/employees [32m200[0m 32.328 ms - 954[0m
+[0mGET /api/employee-badges/employees [32m200[0m 45.140 ms - 954[0m
+[0mGET /api/health [32m200[0m 0.460 ms - 42[0m
+[0mGET /api/health [32m200[0m 0.362 ms - 42[0m
+[0mPOST /api/employee-badges/verify [32m200[0m 65.172 ms - 67824[0m

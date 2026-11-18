@@ -7,6 +7,7 @@ export const Permission = {
   MANAGE_USER_STATUS: 'MANAGE_USER_STATUS',
   RESET_USER_PASSWORDS: 'RESET_USER_PASSWORDS',
   MANAGE_PERMISSIONS: 'MANAGE_PERMISSIONS',
+  USE_EMPLOYEE_BADGES: 'USE_EMPLOYEE_BADGES',
   MANAGE_PROJECTS: 'MANAGE_PROJECTS',
   APPROVE_PROJECTS: 'APPROVE_PROJECTS',
   VIEW_PROJECT_DASHBOARD: 'VIEW_PROJECT_DASHBOARD',
@@ -125,7 +126,7 @@ export const Permission = {
 
 const RolePermissions = {
   WAREHOUSE_KEEPER: [Permission.MANAGE_MATERIAL_CATALOG, Permission.MANAGE_MATERIAL_INVENTORY, Permission.CREATE_MATERIAL_REQUESTS, Permission.REVIEW_MATERIAL_REQUESTS, Permission.PREPARE_MATERIAL_REQUESTS, Permission.DISPATCH_MATERIAL_REQUESTS, Permission.RECONCILE_MATERIAL_CUSTODY, Permission.CLOSE_MATERIAL_CUSTODY, Permission.VIEW_MATERIAL_REPORTS, Permission.VIEW_PROJECT_CUSTODIES, Permission.EXPORT_PROJECT_CUSTODIES],
-  GENERAL_MANAGER: Object.values(Permission),
+  GENERAL_MANAGER: Object.values(Permission).filter((permission) => permission !== Permission.USE_EMPLOYEE_BADGES),
   HR_MANAGER: [
     Permission.MANAGE_USERS,
     Permission.MANAGE_USER_STATUS,
@@ -398,6 +399,7 @@ export const permissionLabelMap = {
   [Permission.MANAGE_USER_STATUS]: 'تفعيل/تعطيل الموظفين',
   [Permission.RESET_USER_PASSWORDS]: 'إعادة تعيين كلمات المرور',
   [Permission.MANAGE_PERMISSIONS]: 'إدارة الصلاحيات',
+  [Permission.USE_EMPLOYEE_BADGES]: 'استخدام هويات الموظفين',
   [Permission.MANAGE_PROJECTS]: 'إدارة المشاريع',
   [Permission.APPROVE_PROJECTS]: 'اعتماد المشاريع',
   [Permission.VIEW_PROJECT_DASHBOARD]: 'مشاهدة لوحة تحكم المشروع',

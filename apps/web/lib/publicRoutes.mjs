@@ -1,4 +1,4 @@
-// Public token forms validate their own link through the API, not an employee session.
-const tokenFormPrefixes = ['/customer-form/', '/customer-evaluation/', '/maintenance-feedback/', '/purchase-quote/', '/customer-quote/'];
+// Public token pages validate their links through the API.
+const tokenPagePrefixes = ['/customer-form/', '/customer-evaluation/', '/maintenance-feedback/', '/purchase-quote/', '/customer-quote/', '/verify-employee/'];
 export const isPublicRoute = (pathname) => pathname === '/login'
-  || (typeof pathname === 'string' && tokenFormPrefixes.some((prefix) => pathname.startsWith(prefix)));
+  || (typeof pathname === 'string' && tokenPagePrefixes.some((prefix) => pathname.startsWith(prefix)));

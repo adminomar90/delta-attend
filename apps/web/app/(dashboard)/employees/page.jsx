@@ -50,6 +50,7 @@ const permissionCategoryDefinitions = [
       Permission.MANAGE_USER_STATUS,
       Permission.RESET_USER_PASSWORDS,
       Permission.MANAGE_PERMISSIONS,
+      Permission.USE_EMPLOYEE_BADGES,
       Permission.VIEW_EMPLOYEES_HIERARCHY,
     ].includes(permission),
   },

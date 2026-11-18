@@ -15,7 +15,7 @@ const buildReqUser = (user) => ({
   customPermissions: user.customPermissions || [],
 });
 
-export const requireAuth = async (req, res, next) => {
+const authenticate = async (req, res, next, { allowTokenFallback }) => {
   const authHeader = req.headers.authorization;
   let token;
 
@@ -31,6 +31,9 @@ export const requireAuth = async (req, res, next) => {
   if (token) {
     try {
       const payload = authTokenService.verify(token);
+      if (!allowTokenFallback && payload.type === 'otp') {
+        return next(new AppError('Authentication required', 401));
+      }
 
       try {
         const user = await userRepository.findById(payload.sub || payload.id);
@@ -49,6 +52,7 @@ export const requireAuth = async (req, res, next) => {
         req.user = buildReqUser(user);
         return next();
       } catch (dbError) {
+        if (!allowTokenFallback) return next(dbError);
         // Fallback mode if DB is unavailable but JWT is valid.
         req.user = {
           id: payload.sub || payload.id,
@@ -94,3 +98,6 @@ export const requireAuth = async (req, res, next) => {
 
   return next(new AppError('Authentication required', 401));
 };
+
+export const requireAuth = (req, res, next) => authenticate(req, res, next, { allowTokenFallback: true });
+export const requireCurrentAuth = (req, res, next) => authenticate(req, res, next, { allowTokenFallback: false });

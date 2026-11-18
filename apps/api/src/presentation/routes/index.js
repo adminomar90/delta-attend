@@ -25,6 +25,7 @@ import fieldInspectionsRoutes from './fieldInspectionsRoutes.js';
 import suppliersRoutes from './suppliersRoutes.js';
 import purchasesRoutes from './purchasesRoutes.js';
 import customerQuotesRoutes from './customerQuotesRoutes.js';
+import employeeBadgesRoutes from './employeeBadgesRoutes.js';
 
 const router = Router();
 
@@ -53,6 +54,7 @@ router.use('/field-inspections', fieldInspectionsRoutes);
 router.use('/suppliers', suppliersRoutes);
 router.use('/purchases', purchasesRoutes);
 router.use('/customer-quotes', customerQuotesRoutes);
+router.use('/employee-badges', employeeBadgesRoutes);
 router.use('/network-docs', networkDocsRoutes);
 
 export default router;
