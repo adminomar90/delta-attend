@@ -297,7 +297,6 @@ const issueAccessToken = (user) =>
     name: user.fullName,
     email: user.email,
     workMinutesTotal: Number(user.workMinutesTotal || 0),
-    customPermissions: user.customPermissions || [],
     sv: user.sessionVersion || 1,
   });
 

@@ -1,0 +1,5 @@
+✓ Connected to MongoDB
+✓ API running on port 4000
+[0mGET /api/notifications/vapid-public-key [36m304[0m 3.118 ms - -[0m
+[0mPOST /api/notifications/push-subscribe [32m200[0m 20.312 ms - 72[0m
+[0mGET /api/health [32m200[0m 0.742 ms - 42[0m
