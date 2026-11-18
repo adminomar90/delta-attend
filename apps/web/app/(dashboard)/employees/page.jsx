@@ -1,6 +1,6 @@
 ﻿'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { api } from '../../../lib/api';
 import { authStorage } from '../../../lib/auth';
 import UserAvatar from '../../../components/UserAvatar';
@@ -282,6 +282,45 @@ const defaultEditForm = {
   forcePasswordChange: false,
 };
 
+function EmployeeEditorDialog({ title, error, busy, onClose, actions, children }) {
+  const dialog = useRef(null);
+  const titleId = useId();
+
+  useEffect(() => {
+    const panel = dialog.current;
+    const trigger = document.activeElement;
+    panel.showModal();
+    return () => {
+      if (panel.open) panel.close();
+      if (trigger instanceof HTMLElement && trigger.isConnected) trigger.focus({ preventScroll: true });
+    };
+  }, []);
+
+  return (
+    <dialog
+      ref={dialog}
+      className="employee-editor-dialog"
+      aria-labelledby={titleId}
+      onCancel={(event) => {
+        event.preventDefault();
+        if (!busy) onClose();
+      }}
+    >
+      <header className="employee-editor-header">
+        <h2 id={titleId}>{title}</h2>
+        <button className="btn btn-soft btn-sm" type="button" autoFocus onClick={onClose} disabled={busy}>إغلاق</button>
+      </header>
+      <div className="employee-editor-body">
+        {children}
+      </div>
+      <footer className="employee-editor-footer">
+        {error && <p className="employee-editor-error" role="alert">{error}</p>}
+        <div className="form-actions">{actions}</div>
+      </footer>
+    </dialog>
+  );
+}
+
 export default function EmployeesPage() {
   const [users, setUsers] = useState([]);
   const [permissions, setPermissions] = useState([]);
@@ -428,6 +467,7 @@ export default function EmployeesPage() {
   };
 
   const beginEdit = (user) => {
+    setError('');
     setEditForm({
       id: user._id || user.id,
       fullName: user.fullName || '',
@@ -446,6 +486,11 @@ export default function EmployeesPage() {
     });
   };
 
+  const closeEdit = () => {
+    setEditForm(defaultEditForm);
+    setError('');
+  };
+
   const submitEdit = async (event) => {
     event.preventDefault();
     if (!editForm.id) return;
@@ -459,7 +504,7 @@ export default function EmployeesPage() {
         managerId: editForm.managerId || null,
         employeeCode: editForm.employeeCode || null,
       });
-      setEditForm(defaultEditForm);
+      closeEdit();
       await load();
     } catch (err) {
       setError(err.message || 'فشل تحديث الموظف');
@@ -514,6 +559,7 @@ export default function EmployeesPage() {
   };
 
   const openPermissionEditor = (user) => {
+    setError('');
     setPermissionTarget(user);
     setSelectedPermissions(Array.isArray(user.customPermissions) ? user.customPermissions : []);
   };
@@ -521,6 +567,7 @@ export default function EmployeesPage() {
   const closePermissionEditor = () => {
     setPermissionTarget(null);
     setSelectedPermissions([]);
+    setError('');
   };
 
   const togglePermissionSelection = (permission) => {
@@ -672,7 +719,7 @@ export default function EmployeesPage() {
 
   return (
     <>
-      {error ? <section className="card section" style={{ color: 'var(--danger)' }}>{error}</section> : null}
+      {error && !editForm.id && !permissionTarget ? <section className="card section" style={{ color: 'var(--danger)' }}>{error}</section> : null}
       {!canViewUsers ? (
         <section className="card section" style={{ color: 'var(--text-soft)' }}>
           لا تملك صلاحية عرض صفحة الموظفين.
@@ -761,14 +808,24 @@ export default function EmployeesPage() {
       ) : null}
 
       {permissionTarget && canManagePermissions ? (
-        <section className="card section permission-editor-section" style={{ marginBottom: 16 }}>
+        <EmployeeEditorDialog
+          title={`تحديث صلاحيات العرض: ${permissionTarget.fullName}`}
+          onClose={closePermissionEditor}
+          error={error}
+          busy={updatingPermissions}
+          actions={
+            <>
+              <button className="btn btn-primary" type="button" onClick={savePermissions} disabled={updatingPermissions}>
+                {updatingPermissions ? 'جارٍ الحفظ...' : 'حفظ الصلاحيات'}
+              </button>
+              <button className="btn btn-soft" type="button" onClick={closePermissionEditor} disabled={updatingPermissions}>إلغاء</button>
+            </>
+          }
+        >
           <div className="section-header">
-            <div>
-              <h2>تحديث صلاحيات العرض: {permissionTarget.fullName}</h2>
-              <p style={{ color: 'var(--text-soft)', marginTop: 0 }}>
-                هذه الصلاحيات إضافية فوق صلاحيات الدور الحالي، وتم ترتيبها حسب الفئات لتسهيل الإدارة.
-              </p>
-            </div>
+            <p style={{ color: 'var(--text-soft)', margin: 0 }}>
+              هذه الصلاحيات إضافية فوق صلاحيات الدور الحالي.
+            </p>
             <span className="badge">{selectedPermissions.length} محددة</span>
           </div>
 
@@ -816,21 +873,25 @@ export default function EmployeesPage() {
             })}
           </div>
 
-          <div className="form-actions" style={{ marginTop: 12 }}>
-            <button className="btn btn-primary" type="button" onClick={savePermissions} disabled={updatingPermissions}>
-              {updatingPermissions ? 'جارٍ الحفظ...' : 'حفظ الصلاحيات'}
-            </button>
-            <button className="btn btn-soft" type="button" onClick={closePermissionEditor} disabled={updatingPermissions}>
-              إلغاء
-            </button>
-          </div>
-        </section>
+        </EmployeeEditorDialog>
       ) : null}
 
       {editForm.id ? (
-        <section className="card section" style={{ marginBottom: 16 }}>
-          <h2>تعديل بيانات الموظف</h2>
-          <form className="grid-3" onSubmit={submitEdit}>
+        <EmployeeEditorDialog
+          title={editedUser ? `تعديل بيانات الموظف: ${editedUser.fullName}` : 'تعديل بيانات الموظف'}
+          onClose={closeEdit}
+          error={error}
+          busy={saving}
+          actions={
+            <>
+              <button className="btn btn-primary" form="edit-employee-form" type="submit" disabled={saving}>
+                {saving ? 'جارٍ الحفظ...' : 'حفظ التعديلات'}
+              </button>
+              <button className="btn btn-soft" type="button" onClick={closeEdit} disabled={saving}>إلغاء</button>
+            </>
+          }
+        >
+          <form id="edit-employee-form" className="grid-3" onSubmit={submitEdit}>
             <label>
               الاسم الكامل
               <input className="input" value={editForm.fullName} onChange={(e) => setEditForm((prev) => ({ ...prev, fullName: e.target.value }))} />
@@ -900,12 +961,8 @@ export default function EmployeesPage() {
               <input type="checkbox" checked={editForm.forcePasswordChange} onChange={(e) => setEditForm((prev) => ({ ...prev, forcePasswordChange: e.target.checked }))} />
               إجبار تغيير كلمة المرور
             </label>
-            <div className="form-actions">
-              <button className="btn btn-primary" type="submit" disabled={saving}>{saving ? 'جارٍ الحفظ...' : 'حفظ التعديلات'}</button>
-              <button className="btn btn-soft" type="button" onClick={() => setEditForm(defaultEditForm)}>إلغاء</button>
-            </div>
           </form>
-        </section>
+        </EmployeeEditorDialog>
       ) : null}
 
       {canViewUsers ? (
@@ -980,11 +1037,11 @@ export default function EmployeesPage() {
 
                     {canManageUsers || canManageStatus || canResetPasswords || canManagePermissions ? (
                       <div className="employee-card-actions">
-                        {canManageUsers ? <button className="btn btn-primary btn-sm" onClick={() => beginEdit(user)} type="button">تعديل</button> : null}
-                        {canManageUsers ? <button className="btn btn-soft btn-sm" onClick={() => beginEdit(user)} type="button">المدير المباشر</button> : null}
+                        {canManageUsers ? <button className="btn btn-primary btn-sm" onClick={() => beginEdit(user)} type="button" aria-haspopup="dialog">تعديل</button> : null}
+                        {canManageUsers ? <button className="btn btn-soft btn-sm" onClick={() => beginEdit(user)} type="button" aria-haspopup="dialog">المدير المباشر</button> : null}
                         {canManageStatus ? <button className="btn btn-soft btn-sm" onClick={() => toggleStatus(user)} type="button">{user.active ? 'تعطيل' : 'إعادة التفعيل'}</button> : null}
                         {canResetPasswords ? <button className="btn btn-soft btn-sm" onClick={() => resetPassword(user)} type="button">إعادة كلمة المرور</button> : null}
-                        {canManagePermissions ? <button className="btn btn-soft btn-sm" onClick={() => openPermissionEditor(user)} type="button">صلاحيات العرض</button> : null}
+                        {canManagePermissions ? <button className="btn btn-soft btn-sm" onClick={() => openPermissionEditor(user)} type="button" aria-haspopup="dialog">صلاحيات العرض</button> : null}
                         {canManageUsers ? (
                           <label className="btn btn-soft btn-sm employee-file-btn">
                             رفع مستند

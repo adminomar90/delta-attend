@@ -478,3 +478,8 @@ Creating turbopack project {
  GET /verify-employee/test-links 200 in 279ms (compile: 37ms, render: 243ms)
 ✓ Compiled in 666ms
  GET /verify-employee/link-check 200 in 2.1s (compile: 614ms, render: 1518ms)
+ GET /login 200 in 1419ms (compile: 433ms, render: 986ms)
+ GET /employees 200 in 881ms (compile: 343ms, render: 538ms)
+✓ Compiled in 3.1s
+✓ Compiled in 123ms
+ GET /employees 200 in 1498ms (compile: 787ms, render: 711ms)
